@@ -20,4 +20,4 @@ The system is engineered to act as an elite endurance coach enforcing Joe Frielâ
 To operate this system, the following external credentials are required:
 
 1. **Intervals.icu API Access:** An Athlete ID and Developer API Key (requires HTTP Basic Authentication).
-2. **DeepSeek API Key:** For LLM inference and JSON schema generation.
+2. **DeepSeek API Key:** For LLM inference and JSON schema generation. The LLM layer is provider-agnostic: DeepSeek V4 Pro (thinking mode) is the default, and models/providers are switched via configuration, not code.
