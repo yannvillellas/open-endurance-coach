@@ -22,6 +22,9 @@ dev = [
     "mypy>=1.11",
 ]
 
+[project.scripts]
+record-fixtures = "open_endurance_coach.fixtures.record:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
