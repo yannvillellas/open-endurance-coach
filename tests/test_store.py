@@ -229,3 +229,90 @@ def test_store_creates_parent_directories(tmp_path: Path) -> None:
     store = CoachStore(path)
     assert path.exists()
     store.close()
+
+
+def approve_decision(store: CoachStore) -> int:
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    return store.approve_draft(draft_id).id
+
+
+def test_decisions_have_no_applied_at_initially(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    decision_id = approve_decision(store)
+    decision = store.list_decisions()[0]
+    assert decision.id == decision_id
+    assert decision.applied_at is None
+
+
+def test_mark_decision_applied_sets_timestamp(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    decision_id = approve_decision(store)
+    store.mark_decision_applied(decision_id)
+    decision = store.list_decisions()[0]
+    assert decision.applied_at == NOW
+    assert store.list_unapplied_decisions() == []
+
+
+def test_mark_decision_applied_twice_raises(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    decision_id = approve_decision(store)
+    store.mark_decision_applied(decision_id)
+    with pytest.raises(ValueError, match="already applied"):
+        store.mark_decision_applied(decision_id)
+
+
+def test_mark_decision_applied_missing_raises(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    with pytest.raises(ValueError, match="not found"):
+        store.mark_decision_applied(404)
+
+
+def test_list_unapplied_decisions_only_unapplied(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    first = approve_decision(store)
+    second = approve_decision(store)
+    store.mark_decision_applied(first)
+    unapplied = store.list_unapplied_decisions()
+    assert [decision.id for decision in unapplied] == [second]
+
+
+def test_applied_at_persists_across_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    store = CoachStore(path)
+    decision_id = approve_decision(store)
+    store.mark_decision_applied(decision_id)
+    store.close()
+    reopened = CoachStore(path)
+    decision = reopened.list_decisions()[0]
+    assert decision.applied_at is not None
+    assert reopened.list_unapplied_decisions() == []
+
+
+def test_store_migrates_old_schema_without_applied_at(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "coach.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draft_id INTEGER NOT NULL,
+            decided_at TEXT NOT NULL,
+            report_json TEXT NOT NULL
+        );
+        """
+    )
+    connection.execute(
+        "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
+        (7, "2024-02-01T12:00:00+00:00", '{"summary": "ok"}'),
+    )
+    connection.commit()
+    connection.close()
+    store = CoachStore(path)
+    decisions = store.list_decisions()
+    assert len(decisions) == 1
+    assert decisions[0].draft_id == 7
+    assert decisions[0].applied_at is None
+    store.mark_decision_applied(decisions[0].id)
+    assert store.list_unapplied_decisions() == []

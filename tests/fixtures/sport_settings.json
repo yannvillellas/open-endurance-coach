@@ -1,7 +1,7 @@
 [
   {
-    "id": 10002,
-    "athlete_id": "fx000003",
+    "id": 10006,
+    "athlete_id": "fx000002",
     "types": [
       "Ride",
       "VirtualRide",
@@ -87,8 +87,8 @@
     "ignore_velocity": false,
     "default_workout_time": null,
     "update_activity_name_from_workout": false,
-    "created": "2024-01-29T23:00:49",
-    "updated": "2024-01-29T23:00:49",
+    "created": "2024-01-28T23:00:49",
+    "updated": "2024-01-28T23:00:49",
     "mmp_model": null,
     "display": {
       "colorScheme": "SOLID",
@@ -140,8 +140,8 @@
     "use_distance_for_intervals": false
   },
   {
-    "id": 10003,
-    "athlete_id": "fx000003",
+    "id": 10007,
+    "athlete_id": "fx000002",
     "types": [
       "Run",
       "VirtualRun",
@@ -218,8 +218,8 @@
     "ignore_velocity": false,
     "default_workout_time": null,
     "update_activity_name_from_workout": false,
-    "created": "2024-01-29T23:00:49",
-    "updated": "2024-01-29T23:00:49",
+    "created": "2024-01-28T23:00:49",
+    "updated": "2024-01-28T23:00:49",
     "mmp_model": null,
     "display": {
       "colorScheme": "SOLID",
@@ -271,8 +271,8 @@
     "use_distance_for_intervals": false
   },
   {
-    "id": 10004,
-    "athlete_id": "fx000003",
+    "id": 10008,
+    "athlete_id": "fx000002",
     "types": [
       "Swim",
       "OpenWaterSwim"
@@ -348,8 +348,8 @@
     "ignore_velocity": false,
     "default_workout_time": null,
     "update_activity_name_from_workout": false,
-    "created": "2024-01-29T23:00:49",
-    "updated": "2024-01-29T23:00:49",
+    "created": "2024-01-28T23:00:49",
+    "updated": "2024-01-28T23:00:49",
     "mmp_model": null,
     "display": {
       "colorScheme": "SOLID",
@@ -401,8 +401,8 @@
     "use_distance_for_intervals": true
   },
   {
-    "id": 10005,
-    "athlete_id": "fx000003",
+    "id": 10009,
+    "athlete_id": "fx000002",
     "types": [
       "Other"
     ],
@@ -477,8 +477,8 @@
     "ignore_velocity": false,
     "default_workout_time": null,
     "update_activity_name_from_workout": false,
-    "created": "2024-01-29T23:00:49",
-    "updated": "2024-01-29T23:00:49",
+    "created": "2024-01-28T23:00:49",
+    "updated": "2024-01-28T23:00:49",
     "mmp_model": null,
     "display": {
       "colorScheme": "SOLID",

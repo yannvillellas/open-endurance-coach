@@ -12,6 +12,8 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import Decision, Draft, DraftStatus
+from open_endurance_coach.writer.calendar import CalendarWriter
+from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
 
 @dataclass(frozen=True)
@@ -27,11 +29,13 @@ class CoachEngine:
         store: CoachStore,
         read_client: IntervalsReadClient,
         llm_client: LlmClient,
+        writer: CalendarWriter | None = None,
     ) -> None:
         self._settings = settings
         self._store = store
         self._read_client = read_client
         self._llm_client = llm_client
+        self._writer = writer
 
     async def _extract(
         self, focus: str, *, user_feedback: str | None, today: date | None
@@ -148,3 +152,23 @@ class CoachEngine:
 
     def reject(self, draft_id: int) -> None:
         self._store.reject_draft(draft_id)
+
+    async def apply(self, decision_id: int | None = None, *, dry_run: bool = False) -> ApplyReport:
+        if self._writer is None:
+            raise RuntimeError("no calendar writer configured")
+        if decision_id is not None:
+            decision = self._store.get_decision(decision_id)
+            if decision is None:
+                raise ValueError(f"decision not found: {decision_id}")
+            if decision.applied_at is not None:
+                raise ValueError(f"decision {decision_id} is already applied")
+            decisions = [decision]
+        else:
+            decisions = self._store.list_unapplied_decisions()
+        applied: list[AppliedDecision] = []
+        for decision in decisions:
+            outcomes = await self._writer.apply_decision(decision, dry_run=dry_run)
+            applied.append(AppliedDecision(decision_id=decision.id, outcomes=outcomes))
+            if not dry_run:
+                self._store.mark_decision_applied(decision.id)
+        return ApplyReport(decisions=applied)

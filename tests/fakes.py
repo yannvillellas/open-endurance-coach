@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmCompletion
 
 
@@ -111,6 +112,71 @@ def make_intervals_client(**overrides: Any) -> FakeIntervalsClient:
     }
     payloads.update(overrides)
     return FakeIntervalsClient(**payloads)
+
+
+def make_event(
+    event_id: int, day: str, name: str = "Tempo Session", category: str = "WORKOUT"
+) -> dict[str, Any]:
+    return {
+        "id": event_id,
+        "name": name,
+        "start_date_local": f"{day}T00:00:00",
+        "category": category,
+        "type": "Ride",
+    }
+
+
+class FakeCalendarClient:
+    def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
+        self.events = [dict(item) for item in (events or [])]
+        self.next_id = 20000
+        self.created: list[dict[str, Any]] = []
+        self.updated: list[tuple[str, dict[str, Any]]] = []
+        self.deleted: list[str] = []
+        self.list_calls: list[tuple[str, str, str | None]] = []
+
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.list_calls.append((oldest, newest, category))
+        rows = []
+        for event in self.events:
+            if not (oldest <= event["start_date_local"][:10] < newest):
+                continue
+            if category and event.get("category") != category:
+                continue
+            rows.append(dict(event))
+        return rows
+
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                return dict(event)
+        raise IntervalsApiError(404, "not found")
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = dict(payload)
+        created["id"] = self.next_id
+        self.next_id += 1
+        self.events.append(created)
+        self.created.append(created)
+        return dict(created)
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event.update(payload)
+                self.updated.append((event_id, dict(payload)))
+                return dict(event)
+        raise IntervalsApiError(404, "not found")
+
+    async def delete_event(self, event_id: str) -> None:
+        for index, event in enumerate(self.events):
+            if str(event.get("id")) == str(event_id):
+                self.deleted.append(event_id)
+                del self.events[index]
+                return
+        raise IntervalsApiError(404, "not found")
 
 
 class FakeLlmProvider:

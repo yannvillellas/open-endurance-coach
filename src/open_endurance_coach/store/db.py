@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     draft_id INTEGER NOT NULL REFERENCES drafts(id),
     decided_at TEXT NOT NULL,
-    report_json TEXT NOT NULL
+    report_json TEXT NOT NULL,
+    applied_at TEXT
 );
 """
 
@@ -47,6 +48,12 @@ class CoachStore:
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.executescript(_SCHEMA)
+        columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(decisions)").fetchall()
+        }
+        if "applied_at" not in columns:
+            self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
         self._connection.commit()
 
     def close(self) -> None:
@@ -189,6 +196,7 @@ class CoachStore:
             id=lastrowid,
             draft_id=draft_id,
             decided_at=decided_at,
+            applied_at=None,
             report=draft.report,
         )
 
@@ -205,14 +213,40 @@ class CoachStore:
         )
         self._connection.commit()
 
+    def _decision_from_row(self, row: sqlite3.Row) -> Decision:
+        applied_at = row["applied_at"]
+        return Decision(
+            id=row["id"],
+            draft_id=row["draft_id"],
+            decided_at=datetime.fromisoformat(row["decided_at"]),
+            applied_at=datetime.fromisoformat(applied_at) if applied_at else None,
+            report=DecisionReport.model_validate(json.loads(row["report_json"])),
+        )
+
     def list_decisions(self) -> list[Decision]:
         rows = self._connection.execute("SELECT * FROM decisions ORDER BY id").fetchall()
-        return [
-            Decision(
-                id=row["id"],
-                draft_id=row["draft_id"],
-                decided_at=datetime.fromisoformat(row["decided_at"]),
-                report=DecisionReport.model_validate(json.loads(row["report_json"])),
-            )
-            for row in rows
-        ]
+        return [self._decision_from_row(row) for row in rows]
+
+    def get_decision(self, decision_id: int) -> Decision | None:
+        row = self._connection.execute(
+            "SELECT * FROM decisions WHERE id = ?", (decision_id,)
+        ).fetchone()
+        return self._decision_from_row(row) if row else None
+
+    def list_unapplied_decisions(self) -> list[Decision]:
+        rows = self._connection.execute(
+            "SELECT * FROM decisions WHERE applied_at IS NULL ORDER BY id"
+        ).fetchall()
+        return [self._decision_from_row(row) for row in rows]
+
+    def mark_decision_applied(self, decision_id: int) -> None:
+        decision = self.get_decision(decision_id)
+        if decision is None:
+            raise ValueError(f"decision not found: {decision_id}")
+        if decision.applied_at is not None:
+            raise ValueError(f"decision {decision_id} is already applied")
+        self._connection.execute(
+            "UPDATE decisions SET applied_at = ? WHERE id = ?",
+            (self._clock().isoformat(), decision_id),
+        )
+        self._connection.commit()
