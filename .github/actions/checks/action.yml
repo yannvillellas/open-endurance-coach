@@ -10,6 +10,10 @@ inputs:
     description: Re-download the OpenAPI snapshot before running checks
     required: false
     default: "false"
+  scope:
+    description: "full: all checks; contract-tests: OpenAPI contract tests only"
+    required: false
+    default: "full"
 
 runs:
   using: composite
@@ -25,11 +29,18 @@ runs:
       shell: bash
       run: refresh-spec
     - name: Lint (ruff)
+      if: inputs.scope == 'full'
       shell: bash
       run: ruff check . && ruff format --check .
     - name: Types (mypy)
+      if: inputs.scope == 'full'
       shell: bash
       run: mypy src tests
     - name: Tests (pytest)
+      if: inputs.scope == 'full'
       shell: bash
       run: pytest -q
+    - name: Contract tests (pytest)
+      if: inputs.scope == 'contract-tests'
+      shell: bash
+      run: pytest -q tests/test_openapi_contract.py
