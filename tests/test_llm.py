@@ -1,9 +1,11 @@
 import json
 from typing import Any
 
+import httpx
 import pytest
 
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
+from open_endurance_coach.clients.providers import DeepSeekProvider
 from open_endurance_coach.config import Settings
 
 from .fakes import FakeLlmProvider, RecordingSleep, completion
@@ -135,3 +137,160 @@ async def test_complete_json_validator_receives_parsed_payload(settings: Setting
     client = make_client(settings, provider)
     await client.complete_json([LlmMessage(role="user", content="json please")], validator=capture)
     assert seen == [{"nested": {"a": [1, 2]}}]
+
+
+def make_provider(
+    settings: Settings, handler: Any, sleep: RecordingSleep | None = None
+) -> tuple[DeepSeekProvider, RecordingSleep]:
+    sleep = sleep or RecordingSleep()
+    return DeepSeekProvider(settings, transport=httpx.MockTransport(handler), sleep=sleep), sleep
+
+
+def ok_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "choices": [{"message": {"content": "ok"}}],
+            "model": "deepseek-v4-pro",
+            "usage": {},
+        },
+    )
+
+
+async def test_provider_retries_on_429_then_succeeds(settings: Settings) -> None:
+    responses = [httpx.Response(429, json={}), ok_response()]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    provider, sleep = make_provider(settings, handler)
+    completion = await provider.complete(
+        model="deepseek-v4-pro",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert completion.content == "ok"
+    assert responses == []
+    assert sleep.calls == [0.0]
+
+
+async def test_provider_retries_on_500_then_succeeds(settings: Settings) -> None:
+    responses = [httpx.Response(500, json={}), ok_response()]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    provider, _ = make_provider(settings, handler)
+    completion = await provider.complete(
+        model="deepseek-v4-pro",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert completion.content == "ok"
+
+
+async def test_provider_raises_immediately_on_client_error(settings: Settings) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(401, json={"error": "bad key"})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="401"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    assert len(calls) == 1
+
+
+async def test_provider_retries_network_errors(settings: Settings) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ConnectError("connection reset")
+        return ok_response()
+
+    provider, _ = make_provider(settings, handler)
+    completion = await provider.complete(
+        model="deepseek-v4-pro",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert completion.content == "ok"
+    assert len(calls) == 2
+
+
+async def test_provider_raises_after_retries_exhausted(settings: Settings) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(429, json={})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="unreachable"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    assert len(calls) == 4
+
+
+async def test_provider_guards_malformed_success_response(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"error": "boom"})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="shape"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+
+
+async def test_provider_guards_non_json_body(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>gateway error</html>")
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="non-JSON"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )

@@ -1,4 +1,5 @@
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 import httpx
@@ -15,7 +16,10 @@ class DeepSeekProvider:
         self,
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
+        self._settings = settings
+        self._sleep = sleep or asyncio.sleep
         self._client = httpx.AsyncClient(
             base_url=settings.deepseek_base_url,
             headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
@@ -46,11 +50,29 @@ class DeepSeekProvider:
             payload["temperature"] = temperature
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
-        response = await self._client.post("/chat/completions", json=payload)
-        if response.status_code >= 400:
-            raise LlmError(f"DeepSeek API error {response.status_code}: {response.text[:500]}")
-        data = response.json()
-        choice = data["choices"][0]["message"]
+        response: httpx.Response | None = None
+        for attempt in range(self._settings.max_retries + 1):
+            try:
+                response = await self._client.post("/chat/completions", json=payload)
+            except httpx.TransportError:
+                await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                continue
+            if response.status_code >= 400:
+                raise LlmError(f"DeepSeek API error {response.status_code}: {response.text[:500]}")
+            break
+        if response is None or response.status_code >= 400:
+            raise LlmError("DeepSeek API unreachable after retries")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise LlmError(f"DeepSeek returned non-JSON response: {response.text[:200]}") from exc
+        try:
+            choice = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LlmError(f"unexpected DeepSeek response shape: {str(data)[:200]}") from exc
         return LlmCompletion(
             content=choice.get("content") or "",
             reasoning_content=choice.get("reasoning_content"),
