@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     database_path: str = "data/coach.db"
     http_port: int = 8000
 
+    athlete_profile: str = ""
+    coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
+
     requests_per_second: float = 8.0
     max_retries: int = 3
     retry_base_delay: float = 1.0
