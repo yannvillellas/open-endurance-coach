@@ -241,6 +241,54 @@ async def test_provider_retries_network_errors(settings: Settings) -> None:
     assert len(calls) == 2
 
 
+async def test_provider_network_exhaustion_sleeps_only_between_attempts(
+    settings: Settings,
+) -> None:
+    calls: list[httpx.Request] = []
+    sleep = RecordingSleep()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ConnectError("connection reset")
+
+    provider, _ = make_provider(settings, handler, sleep=sleep)
+    with pytest.raises(LlmError, match="unreachable after retries"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    assert len(calls) == 4
+    assert sleep.calls == [0.0, 0.0, 0.0]
+
+
+async def test_provider_429_then_network_error_reports_unreachable(settings: Settings) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, json={})
+        raise httpx.ConnectError("connection reset")
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="unreachable after retries"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    assert len(calls) == 4
+
+
 async def test_provider_raises_after_retries_exhausted(settings: Settings) -> None:
     calls: list[httpx.Request] = []
     sleep = RecordingSleep()

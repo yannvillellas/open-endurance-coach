@@ -55,7 +55,9 @@ class DeepSeekProvider:
             try:
                 response = await self._client.post("/chat/completions", json=payload)
             except httpx.TransportError:
-                await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                response = None
+                if attempt < self._settings.max_retries:
+                    await self._sleep(self._settings.retry_base_delay * 2**attempt)
                 continue
             if response.status_code == 429 and attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
@@ -66,7 +68,7 @@ class DeepSeekProvider:
             if response.status_code >= 400:
                 raise LlmError(f"DeepSeek API error {response.status_code}: {response.text[:500]}")
             break
-        if response is None or response.status_code >= 400:
+        if response is None:
             raise LlmError("DeepSeek API unreachable after retries")
         try:
             data = response.json()
