@@ -23,8 +23,8 @@ FIXTURE_SPEC: dict[str, type] = {
     "athlete_summary.json": list,
 }
 
-# The athlete's Intervals.icu calendar contains no events, so the recorded
-# events fixture is legitimately empty; all other fixtures must be non-empty.
+# A fresh athlete's calendar may legitimately contain no events; all other
+# fixtures must be non-empty.
 MAY_BE_EMPTY = {"events.json"}
 
 REAL_ID_RE = re.compile(r"^[a-z]\d{5,}$")

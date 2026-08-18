@@ -17,9 +17,6 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
-RIDE_TYPES = frozenset(
-    {"Ride", "VirtualRide", "GravelRide", "TrackRide", "Cyclocross", "MountainBikeRide"}
-)
 
 _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
