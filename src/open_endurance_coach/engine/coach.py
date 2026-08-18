@@ -60,8 +60,11 @@ class CoachEngine:
             f"{activity.name} ({activity.start_date_local.date().isoformat()})"
             for activity in new_activities
         )
-        return context.model_copy(
-            update={"focus": f"{context.focus}\nNew activities since last review: {listing}"}
+        return CoachContext.model_validate(
+            {
+                **context.model_dump(),
+                "focus": f"{context.focus}\nNew activities since last review: {listing}",
+            }
         )
 
     async def _run_llm(self, context: CoachContext) -> DecisionReport:
@@ -127,9 +130,13 @@ class CoachEngine:
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
         self._store.add_feedback(draft_id, feedback)
-        context = draft.context.model_copy(update={"user_feedback": feedback})
+        context = CoachContext.model_validate(
+            {**draft.context.model_dump(), "user_feedback": feedback}
+        )
         report = await self._run_llm(context)
-        self._store.update_draft_report(draft_id, report=report, user_feedback=feedback)
+        self._store.update_draft_report(
+            draft_id, report=report, user_feedback=feedback, context=context
+        )
         updated = self._store.get_draft(draft_id)
         assert updated is not None
         return updated

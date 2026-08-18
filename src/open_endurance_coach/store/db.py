@@ -133,6 +133,7 @@ class CoachStore:
         *,
         report: DecisionReport,
         user_feedback: str | None,
+        context: CoachContext | None = None,
     ) -> None:
         draft = self.get_draft(draft_id)
         if draft is None:
@@ -141,10 +142,22 @@ class CoachStore:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts can be updated"
             )
-        self._connection.execute(
-            "UPDATE drafts SET report_json = ?, user_feedback = ? WHERE id = ?",
-            (json.dumps(report.model_dump(mode="json")), user_feedback, draft_id),
-        )
+        if context is not None:
+            self._connection.execute(
+                "UPDATE drafts SET report_json = ?, user_feedback = ?, context_json = ?"
+                " WHERE id = ?",
+                (
+                    json.dumps(report.model_dump(mode="json")),
+                    user_feedback,
+                    json.dumps(context.model_dump(mode="json")),
+                    draft_id,
+                ),
+            )
+        else:
+            self._connection.execute(
+                "UPDATE drafts SET report_json = ?, user_feedback = ? WHERE id = ?",
+                (json.dumps(report.model_dump(mode="json")), user_feedback, draft_id),
+            )
         self._connection.commit()
 
     def add_feedback(self, draft_id: int, content: str) -> int:

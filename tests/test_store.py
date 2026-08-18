@@ -120,6 +120,23 @@ def test_update_draft_report_replaces_report_and_feedback(tmp_path: Path) -> Non
     assert draft.status is DraftStatus.PENDING
 
 
+def test_update_draft_report_with_context_persists_context(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    replacement = DecisionReport(summary="Revised.")
+    updated_context = make_context("status check with feedback")
+    updated_context = CoachContext(
+        focus=updated_context.focus, user_feedback="RPE 8", max_tokens=updated_context.max_tokens
+    )
+    store.update_draft_report(
+        draft_id, report=replacement, user_feedback="RPE 8", context=updated_context
+    )
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.context.user_feedback == "RPE 8"
+    assert draft.context.focus == "status check with feedback"
+
+
 def test_update_draft_report_missing_draft_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(ValueError, match="not found"):
