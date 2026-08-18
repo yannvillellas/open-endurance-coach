@@ -1,6 +1,9 @@
 name: API spec drift
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -14,15 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/checks
         with:
-          python-version: "3.12"
-      - name: Install
-        run: pip install -e ".[dev]"
-      - name: Refresh OpenAPI snapshot
-        run: refresh-spec
+          refresh-spec: "true"
       - name: Detect drift
         id: drift
+        if: always()
         run: |
           if git diff --quiet -- tests/spec/openapi.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -30,7 +30,9 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Open PR with the new snapshot
-        if: steps.drift.outputs.changed == 'true'
+        if: >-
+          always() && steps.drift.outputs.changed == 'true'
+          && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
