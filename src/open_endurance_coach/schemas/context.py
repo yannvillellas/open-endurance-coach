@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -15,6 +16,7 @@ class CoachContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     focus: str = Field(min_length=1)
+    today: date | None = None
     recent_activities: list[Activity] = Field(default_factory=list)
     activity_detail: Activity | None = None
     wellness: list[Wellness] = Field(default_factory=list)
@@ -26,6 +28,7 @@ class CoachContext(BaseModel):
     def _section_payloads(self) -> dict[str, Any]:
         return {
             "focus": self.focus,
+            "today": self.today.isoformat() if self.today else 0,
             "recent_activities": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.recent_activities
             ],

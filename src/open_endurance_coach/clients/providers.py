@@ -57,7 +57,10 @@ class DeepSeekProvider:
             except httpx.TransportError:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
                 continue
-            if response.status_code == 429 or response.status_code >= 500:
+            if response.status_code == 429 and attempt < self._settings.max_retries:
+                await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                continue
+            if response.status_code >= 500 and attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
                 continue
             if response.status_code >= 400:

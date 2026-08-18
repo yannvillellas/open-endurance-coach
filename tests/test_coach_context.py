@@ -84,6 +84,7 @@ def test_section_tokens_reports_per_section() -> None:
     sections = context.section_tokens()
     assert set(sections) == {
         "focus",
+        "today",
         "recent_activities",
         "activity_detail",
         "wellness",

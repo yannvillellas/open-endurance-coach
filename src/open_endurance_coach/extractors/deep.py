@@ -113,4 +113,5 @@ class DeepHistoricalExtractor:
             user_feedback=user_feedback,
             activity_detail=activity_detail,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
+            today=current,
         )

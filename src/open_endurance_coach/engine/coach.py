@@ -129,10 +129,10 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        self._store.add_feedback(draft_id, feedback)
         context = CoachContext.model_validate(
             {**draft.context.model_dump(), "user_feedback": feedback}
         )
+        self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context)
         self._store.update_draft_report(
             draft_id, report=report, user_feedback=feedback, context=context
@@ -161,6 +161,12 @@ class CoachEngine:
         self._store.reject_draft(draft_id)
 
     async def apply(self, decision_id: int | None = None, *, dry_run: bool = False) -> ApplyReport:
+        """Apply approved decisions to the calendar.
+
+        If a mutation fails, earlier mutations of the same decision stay applied while
+        the decision remains unapplied; re-running is safe because mutations are
+        idempotent (create resolves by name+date, update re-applies, delete skips).
+        """
         if self._writer is None:
             raise RuntimeError("no calendar writer configured")
         if decision_id is not None:

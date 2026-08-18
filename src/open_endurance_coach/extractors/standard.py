@@ -64,4 +64,5 @@ class StandardExtractor:
             user_feedback=user_feedback,
             activity_detail=None,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
+            today=current,
         )

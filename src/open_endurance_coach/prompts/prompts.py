@@ -70,6 +70,8 @@ def _user_message(context: CoachContext) -> str:
             item.model_dump(mode="json", exclude_none=True) for item in context.sport_settings
         ],
     }
+    if context.today:
+        sections["today"] = f"Today's date (athlete local): {context.today.isoformat()}"
     if context.user_feedback:
         sections["user_feedback"] = context.user_feedback
     return (

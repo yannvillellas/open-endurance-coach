@@ -21,6 +21,7 @@ async def test_standard_extraction_populates_all_sections(settings: Settings) ->
     assert context.sport_settings[0].ftp == 250.0
     assert context.activity_detail is None
     assert context.user_feedback is None
+    assert context.today == TODAY
 
 
 async def test_standard_extraction_uses_expected_windows(settings: Settings) -> None:

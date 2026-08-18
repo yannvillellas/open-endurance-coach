@@ -232,6 +232,7 @@ async def test_submit_feedback_over_budget_raises_before_llm(
             draft_id, "A very long feedback text that overflows the budget"
         )
     assert provider.calls == []
+    assert store.list_feedback(draft_id) == []
     stored = store.get_draft(draft_id)
     assert stored is not None
     assert stored.context.user_feedback is None

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 
 from open_endurance_coach.schemas.context import CoachContext
@@ -14,6 +15,7 @@ def build_within_budget(
     user_feedback: str | None,
     activity_detail: Activity | None,
     max_tokens: int,
+    today: date | None = None,
 ) -> CoachContext:
     activities = list(recent_activities)
     wellness_rows = list(wellness)
@@ -21,6 +23,7 @@ def build_within_budget(
     while True:
         payload: dict[str, Any] = {
             "focus": focus,
+            "today": today,
             "recent_activities": activities,
             "activity_detail": activity_detail,
             "wellness": wellness_rows,
