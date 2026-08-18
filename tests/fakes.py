@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Any
 
@@ -145,6 +146,20 @@ class FakeLlmProvider:
             raise AssertionError("FakeLlmProvider: no responses left")
         return self.responses.pop(0)
 
+    async def aclose(self) -> None:
+        pass
+
 
 def completion(content: str, reasoning_content: str | None = None) -> LlmCompletion:
     return LlmCompletion(content=content, reasoning_content=reasoning_content, model="fake-model")
+
+
+def report_json(summary: str = "Load stable.", **overrides: Any) -> str:
+    payload: dict[str, Any] = {
+        "summary": summary,
+        "findings": ["Tempo block hit target."],
+        "questions": ["RPE on Thursday?"],
+        "mutations": [],
+    }
+    payload.update(overrides)
+    return json.dumps(payload)

@@ -1,4 +1,3 @@
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ from .fakes import (
     make_activity,
     make_activity_list,
     make_intervals_client,
+    report_json,
 )
 
 TODAY = date(2024, 2, 1)
@@ -32,17 +32,6 @@ CREATE_MUTATION = {
     "start_date_local": "2024-02-05",
     "moving_time": 3600,
 }
-
-
-def report_json(summary: str = "Load stable.", **overrides: Any) -> str:
-    payload: dict[str, Any] = {
-        "summary": summary,
-        "findings": ["Tempo block hit target."],
-        "questions": ["RPE on Thursday?"],
-        "mutations": [],
-    }
-    payload.update(overrides)
-    return json.dumps(payload)
 
 
 def make_engine(
@@ -271,3 +260,16 @@ async def test_reject_flips_status(settings: Settings, tmp_path: Path) -> None:
     assert rejected is not None
     assert rejected.status is DraftStatus.REJECTED
     assert store.list_decisions() == []
+
+
+async def test_pending_drafts_lists_only_pending(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    first = store.save_draft(
+        focus="first", report=DecisionReport(summary="ok"), context=CoachContext(focus="first")
+    )
+    second = store.save_draft(
+        focus="second", report=DecisionReport(summary="ok"), context=CoachContext(focus="second")
+    )
+    store.approve_draft(first)
+    assert [draft.id for draft in engine.pending_drafts()] == [second]

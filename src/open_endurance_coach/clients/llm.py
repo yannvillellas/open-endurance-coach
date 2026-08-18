@@ -40,6 +40,8 @@ class LlmProvider(Protocol):
         reasoning_effort: str | None,
     ) -> LlmCompletion: ...
 
+    async def aclose(self) -> None: ...
+
 
 class LlmClient:
     def __init__(

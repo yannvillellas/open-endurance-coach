@@ -93,6 +93,9 @@ class CoachEngine:
             raise ValueError(f"draft not found: {draft_id}")
         return ReviewView(draft=draft, requested_feedback=self._solicitations(draft.context))
 
+    def pending_drafts(self) -> list[Draft]:
+        return self._store.list_drafts(DraftStatus.PENDING)
+
     @staticmethod
     def _solicitations(context: CoachContext) -> list[str]:
         missing = [
