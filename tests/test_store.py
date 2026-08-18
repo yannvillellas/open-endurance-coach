@@ -46,17 +46,31 @@ def test_new_store_is_empty(tmp_path: Path) -> None:
     assert store.unseen_activity_ids(["a", "b"]) == {"a", "b"}
 
 
-def test_mark_activity_seen_returns_true_once(tmp_path: Path) -> None:
+def test_mark_activities_seen_returns_new_count(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.mark_activity_seen("act-1") is True
-    assert store.mark_activity_seen("act-1") is False
+    assert store.mark_activities_seen(["act-1"]) == 1
+    assert store.mark_activities_seen(["act-1"]) == 0
     assert store.is_activity_seen("act-1") is True
     assert store.is_activity_seen("act-2") is False
 
 
+def test_mark_activities_seen_batches_multiple(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.mark_activities_seen(["act-1", "act-2", "act-1", "act-3"]) == 3
+    assert store.is_activity_seen("act-1") is True
+    assert store.is_activity_seen("act-2") is True
+    assert store.is_activity_seen("act-3") is True
+    assert store.is_activity_seen("act-4") is False
+
+
+def test_mark_activities_seen_handles_empty_input(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.mark_activities_seen([]) == 0
+
+
 def test_unseen_activity_ids_filters_seen(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    store.mark_activity_seen("act-1")
+    store.mark_activities_seen(["act-1"])
     assert store.unseen_activity_ids(["act-1", "act-2", "act-3"]) == {"act-2", "act-3"}
 
 
@@ -231,7 +245,7 @@ def test_store_persists_across_reopen(tmp_path: Path) -> None:
     draft_id = store.save_draft(
         focus="first", report=make_report(), context=make_context(), user_feedback="tired"
     )
-    store.mark_activity_seen("act-1")
+    store.mark_activities_seen(["act-1"])
     store.close()
     reopened = CoachStore(path, clock=FakeClock(NOW))
     draft = reopened.get_draft(draft_id)

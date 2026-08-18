@@ -88,8 +88,7 @@ class CoachEngine:
         draft_id = self._store.save_draft(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
-        for activity in context.recent_activities:
-            self._store.mark_activity_seen(activity.id)
+        self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
         draft = self._store.get_draft(draft_id)
         assert draft is not None
         return draft

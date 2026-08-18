@@ -59,13 +59,16 @@ class CoachStore:
     def close(self) -> None:
         self._connection.close()
 
-    def mark_activity_seen(self, activity_id: str) -> bool:
-        cursor = self._connection.execute(
+    def mark_activities_seen(self, activity_ids: Iterable[str]) -> int:
+        rows = [(activity_id, self._clock().isoformat()) for activity_id in activity_ids]
+        if not rows:
+            return 0
+        cursor = self._connection.executemany(
             "INSERT OR IGNORE INTO seen_activities (activity_id, seen_at) VALUES (?, ?)",
-            (activity_id, self._clock().isoformat()),
+            rows,
         )
         self._connection.commit()
-        return cursor.rowcount == 1
+        return cursor.rowcount
 
     def is_activity_seen(self, activity_id: str) -> bool:
         row = self._connection.execute(
