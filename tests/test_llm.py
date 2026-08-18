@@ -329,6 +329,23 @@ async def test_provider_guards_malformed_success_response(settings: Settings) ->
         )
 
 
+async def test_provider_guards_non_dict_message(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": "plain string"}]})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError, match="shape"):
+        await provider.complete(
+            model="deepseek-v4-pro",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+
+
 async def test_provider_guards_non_json_body(settings: Settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>gateway error</html>")

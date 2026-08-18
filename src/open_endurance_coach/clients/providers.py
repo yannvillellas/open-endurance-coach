@@ -78,6 +78,8 @@ class DeepSeekProvider:
             choice = data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LlmError(f"unexpected DeepSeek response shape: {str(data)[:200]}") from exc
+        if not isinstance(choice, dict):
+            raise LlmError(f"unexpected DeepSeek response shape: {str(data)[:200]}")
         return LlmCompletion(
             content=choice.get("content") or "",
             reasoning_content=choice.get("reasoning_content"),
