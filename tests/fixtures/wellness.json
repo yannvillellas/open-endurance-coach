@@ -1,64 +1,9 @@
 [
   {
     "id": "2024-01-01",
-    "ctl": 25.1609,
-    "atl": 12.7311,
-    "rampRate": -3.4107,
-    "ctlLoad": 0.0,
-    "atlLoad": 0.0,
-    "sportInfo": [
-      {
-        "type": "Ride",
-        "eftp": null,
-        "wPrime": null,
-        "pMax": null
-      }
-    ],
-    "updated": "2024-01-31T11:09:10",
-    "weight": null,
-    "restingHR": 55,
-    "hrv": 119.1315,
-    "hrvSDNN": null,
-    "menstrualPhase": null,
-    "menstrualPhasePredicted": null,
-    "kcalConsumed": null,
-    "sleepSecs": 29550,
-    "sleepScore": null,
-    "sleepQuality": null,
-    "avgSleepingHR": null,
-    "soreness": null,
-    "fatigue": null,
-    "stress": null,
-    "mood": null,
-    "motivation": null,
-    "injury": null,
-    "spO2": 96.0,
-    "systolic": null,
-    "diastolic": null,
-    "hydration": null,
-    "hydrationVolume": null,
-    "readiness": null,
-    "baevskySI": null,
-    "bloodGlucose": null,
-    "lactate": null,
-    "bodyFat": null,
-    "abdomen": null,
-    "vo2max": null,
-    "comments": null,
-    "steps": 3940,
-    "respiration": 17.1,
-    "carbohydrates": null,
-    "protein": null,
-    "fatTotal": null,
-    "locked": null,
-    "tempWeight": false,
-    "tempRestingHR": false
-  },
-  {
-    "id": "2024-01-02",
-    "ctl": 24.9689,
-    "atl": 13.2994,
-    "rampRate": -3.6364,
+    "ctl": 28.7414,
+    "atl": 20.7693,
+    "rampRate": -3.9581,
     "ctlLoad": 17.0,
     "atlLoad": 17.0,
     "sportInfo": [
@@ -69,7 +14,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T11:09:10",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 57,
     "hrv": 106.3365,
@@ -100,7 +45,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 8589,
+    "steps": 7196,
     "respiration": 16.8,
     "carbohydrates": null,
     "protein": null,
@@ -110,10 +55,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-03",
-    "ctl": 24.7578,
-    "atl": 13.6589,
-    "rampRate": -3.1743,
+    "id": "2024-01-02",
+    "ctl": 28.4416,
+    "atl": 20.1344,
+    "rampRate": -3.4886,
     "ctlLoad": 16.0,
     "atlLoad": 16.0,
     "sportInfo": [
@@ -124,7 +69,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T11:09:10",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 58,
     "hrv": 103.2444,
@@ -155,7 +100,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 15730,
+    "steps": 8249,
     "respiration": 17.0,
     "carbohydrates": null,
     "protein": null,
@@ -165,12 +110,12 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-04",
-    "ctl": 27.234,
-    "atl": 29.1465,
-    "rampRate": -0.441,
-    "ctlLoad": 130.0,
-    "atlLoad": 130.0,
+    "id": "2024-01-03",
+    "ctl": 30.8547,
+    "atl": 34.893,
+    "rampRate": -0.7242,
+    "ctlLoad": 131.0,
+    "atlLoad": 131.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -179,7 +124,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T11:09:10",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 57,
     "hrv": 91.5569,
@@ -210,7 +155,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 17898,
+    "steps": 6095,
     "respiration": 17.5333,
     "carbohydrates": null,
     "protein": null,
@@ -220,12 +165,12 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-05",
-    "ctl": 30.2872,
-    "atl": 46.1666,
-    "rampRate": 3.2634,
-    "ctlLoad": 157.0,
-    "atlLoad": 157.0,
+    "id": "2024-01-04",
+    "ctl": 33.8462,
+    "atl": 51.2813,
+    "rampRate": 2.8456,
+    "ctlLoad": 158.0,
+    "atlLoad": 158.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -234,7 +179,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T11:09:10",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 57,
     "hrv": 46.198,
@@ -265,7 +210,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 22484,
+    "steps": 7728,
     "respiration": 17.4,
     "carbohydrates": null,
     "protein": null,
@@ -275,10 +220,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-06",
-    "ctl": 31.2686,
-    "atl": 49.6056,
-    "rampRate": 4.8806,
+    "id": "2024-01-05",
+    "ctl": 34.7439,
+    "atl": 54.0394,
+    "rampRate": 4.4727,
     "ctlLoad": 72.0,
     "atlLoad": 72.0,
     "sportInfo": [
@@ -289,7 +234,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T10:51:36",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 60,
     "hrv": 32.019,
@@ -320,7 +265,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 10786,
+    "steps": 2929,
     "respiration": 18.0,
     "carbohydrates": null,
     "protein": null,
@@ -330,10 +275,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-07",
-    "ctl": 30.5329,
-    "atl": 43.002,
-    "rampRate": 4.7658,
+    "id": "2024-01-06",
+    "ctl": 33.9264,
+    "atl": 46.8456,
+    "rampRate": 4.2027,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -344,9 +289,9 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T10:51:36",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
-    "restingHR": null,
+    "restingHR": 58,
     "hrv": 46.0,
     "hrvSDNN": null,
     "menstrualPhase": null,
@@ -375,22 +320,77 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 9414,
+    "steps": 7325,
     "respiration": null,
     "carbohydrates": null,
     "protein": null,
     "fatTotal": null,
     "locked": null,
     "tempWeight": false,
+    "tempRestingHR": false
+  },
+  {
+    "id": "2024-01-07",
+    "ctl": 33.5752,
+    "atl": 43.1387,
+    "rampRate": 4.5509,
+    "ctlLoad": 19.0,
+    "atlLoad": 19.0,
+    "sportInfo": [
+      {
+        "type": "Ride",
+        "eftp": null,
+        "wPrime": null,
+        "pMax": null
+      }
+    ],
+    "updated": "2024-01-31T15:08:24",
+    "weight": null,
+    "restingHR": 56,
+    "hrv": 101.1131,
+    "hrvSDNN": null,
+    "menstrualPhase": null,
+    "menstrualPhasePredicted": null,
+    "kcalConsumed": null,
+    "sleepSecs": 29760,
+    "sleepScore": null,
+    "sleepQuality": null,
+    "avgSleepingHR": null,
+    "soreness": null,
+    "fatigue": null,
+    "stress": null,
+    "mood": null,
+    "motivation": null,
+    "injury": null,
+    "spO2": 96.0,
+    "systolic": null,
+    "diastolic": null,
+    "hydration": null,
+    "hydrationVolume": null,
+    "readiness": null,
+    "baevskySI": null,
+    "bloodGlucose": null,
+    "lactate": null,
+    "bodyFat": null,
+    "abdomen": null,
+    "vo2max": null,
+    "comments": null,
+    "steps": 10726,
+    "respiration": 17.3,
+    "carbohydrates": null,
+    "protein": null,
+    "fatTotal": null,
+    "locked": null,
+    "tempWeight": true,
     "tempRestingHR": false
   },
   {
     "id": "2024-01-08",
-    "ctl": 29.8145,
-    "atl": 37.2775,
-    "rampRate": 4.6537,
-    "ctlLoad": 0.0,
-    "atlLoad": 0.0,
+    "ctl": 33.3499,
+    "atl": 40.5909,
+    "rampRate": 4.6085,
+    "ctlLoad": 24.0,
+    "atlLoad": 24.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -399,15 +399,15 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T10:51:36",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
-    "restingHR": null,
-    "hrv": null,
+    "restingHR": 54,
+    "hrv": 109.7323,
     "hrvSDNN": null,
     "menstrualPhase": null,
     "menstrualPhasePredicted": null,
     "kcalConsumed": null,
-    "sleepSecs": null,
+    "sleepSecs": 28950,
     "sleepScore": null,
     "sleepQuality": null,
     "avgSleepingHR": null,
@@ -417,7 +417,7 @@
     "mood": null,
     "motivation": null,
     "injury": null,
-    "spO2": null,
+    "spO2": 96.0,
     "systolic": null,
     "diastolic": null,
     "hydration": null,
@@ -430,22 +430,22 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": null,
-    "respiration": null,
+    "steps": 2970,
+    "respiration": 17.5,
     "carbohydrates": null,
     "protein": null,
     "fatTotal": null,
     "locked": null,
-    "tempWeight": false,
+    "tempWeight": true,
     "tempRestingHR": false
   },
   {
     "id": "2024-01-09",
-    "ctl": 29.6542,
-    "atl": 35.3768,
-    "rampRate": 4.6853,
-    "ctlLoad": 23.0,
-    "atlLoad": 23.0,
+    "ctl": 35.7886,
+    "atl": 53.4251,
+    "rampRate": 7.347,
+    "ctlLoad": 137.0,
+    "atlLoad": 137.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -454,70 +454,15 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
-    "weight": null,
-    "restingHR": null,
-    "hrv": null,
-    "hrvSDNN": null,
-    "menstrualPhase": null,
-    "menstrualPhasePredicted": null,
-    "kcalConsumed": null,
-    "sleepSecs": null,
-    "sleepScore": null,
-    "sleepQuality": null,
-    "avgSleepingHR": null,
-    "soreness": null,
-    "fatigue": null,
-    "stress": null,
-    "mood": null,
-    "motivation": null,
-    "injury": null,
-    "spO2": null,
-    "systolic": null,
-    "diastolic": null,
-    "hydration": null,
-    "hydrationVolume": null,
-    "readiness": null,
-    "baevskySI": null,
-    "bloodGlucose": null,
-    "lactate": null,
-    "bodyFat": null,
-    "abdomen": null,
-    "vo2max": null,
-    "comments": null,
-    "steps": null,
-    "respiration": null,
-    "carbohydrates": null,
-    "protein": null,
-    "fatTotal": null,
-    "locked": null,
-    "tempWeight": true,
-    "tempRestingHR": true
-  },
-  {
-    "id": "2024-01-10",
-    "ctl": 32.1563,
-    "atl": 48.772,
-    "rampRate": 7.3985,
-    "ctlLoad": 136.0,
-    "atlLoad": 136.0,
-    "sportInfo": [
-      {
-        "type": "Ride",
-        "eftp": null,
-        "wPrime": null,
-        "pMax": null
-      }
-    ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 53,
-    "hrv": null,
+    "hrv": 106.6025,
     "hrvSDNN": null,
     "menstrualPhase": null,
     "menstrualPhasePredicted": null,
     "kcalConsumed": null,
-    "sleepSecs": null,
+    "sleepSecs": 24300,
     "sleepScore": null,
     "sleepQuality": null,
     "avgSleepingHR": null,
@@ -527,7 +472,7 @@
     "mood": null,
     "motivation": null,
     "injury": null,
-    "spO2": null,
+    "spO2": 96.0,
     "systolic": null,
     "diastolic": null,
     "hydration": null,
@@ -540,8 +485,8 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": null,
-    "respiration": null,
+    "steps": 6006,
+    "respiration": 17.0,
     "carbohydrates": null,
     "protein": null,
     "fatTotal": null,
@@ -550,10 +495,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-11",
-    "ctl": 31.3998,
-    "atl": 42.2794,
-    "rampRate": 4.1657,
+    "id": "2024-01-10",
+    "ctl": 34.9466,
+    "atl": 46.313,
+    "rampRate": 4.0919,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -564,7 +509,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 56,
     "hrv": 63.8379,
@@ -572,7 +517,7 @@
     "menstrualPhase": null,
     "menstrualPhasePredicted": null,
     "kcalConsumed": null,
-    "sleepSecs": null,
+    "sleepSecs": 30090,
     "sleepScore": null,
     "sleepQuality": null,
     "avgSleepingHR": null,
@@ -582,7 +527,7 @@
     "mood": null,
     "motivation": null,
     "injury": null,
-    "spO2": null,
+    "spO2": 96.0,
     "systolic": null,
     "diastolic": null,
     "hydration": null,
@@ -595,7 +540,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 9959,
+    "steps": 4840,
     "respiration": 18.2,
     "carbohydrates": null,
     "protein": null,
@@ -605,10 +550,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-12",
-    "ctl": 30.661,
-    "atl": 36.651,
-    "rampRate": 0.3738,
+    "id": "2024-01-11",
+    "ctl": 34.1244,
+    "atl": 40.1478,
+    "rampRate": 0.2782,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -619,7 +564,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 112.8442,
@@ -650,7 +595,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 13675,
+    "steps": 8505,
     "respiration": 17.8,
     "carbohydrates": null,
     "protein": null,
@@ -660,10 +605,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-13",
-    "ctl": 29.9396,
-    "atl": 31.772,
-    "rampRate": -1.3291,
+    "id": "2024-01-12",
+    "ctl": 33.3215,
+    "atl": 34.8032,
+    "rampRate": -1.4224,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -674,7 +619,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 104.6529,
@@ -705,7 +650,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 26457,
+    "steps": 13890,
     "respiration": 17.6,
     "carbohydrates": null,
     "protein": null,
@@ -715,10 +660,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-14",
-    "ctl": 29.6587,
-    "atl": 29.9386,
-    "rampRate": -0.8743,
+    "id": "2024-01-13",
+    "ctl": 32.961,
+    "atl": 32.5663,
+    "rampRate": -0.9654,
     "ctlLoad": 18.0,
     "atlLoad": 18.0,
     "sportInfo": [
@@ -729,7 +674,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 117.743,
@@ -760,7 +705,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 26880,
+    "steps": 16521,
     "respiration": 16.8,
     "carbohydrates": null,
     "protein": null,
@@ -770,10 +715,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-15",
-    "ctl": 28.9608,
-    "atl": 25.9531,
-    "rampRate": -0.8537,
+    "id": "2024-01-14",
+    "ctl": 32.1855,
+    "atl": 28.231,
+    "rampRate": -1.3897,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -784,7 +729,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T09:56:39",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 103.1705,
@@ -815,7 +760,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 22755,
+    "steps": 12241,
     "respiration": 17.8,
     "carbohydrates": null,
     "protein": null,
@@ -825,10 +770,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-16",
-    "ctl": 28.3971,
-    "atl": 23.1638,
-    "rampRate": -1.2571,
+    "id": "2024-01-15",
+    "ctl": 31.5458,
+    "atl": 25.1385,
+    "rampRate": -1.8041,
     "ctlLoad": 5.0,
     "atlLoad": 5.0,
     "sportInfo": [
@@ -839,7 +784,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 113.2547,
@@ -870,7 +815,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 8626,
+    "steps": 5527,
     "respiration": 16.7,
     "carbohydrates": null,
     "protein": null,
@@ -880,12 +825,12 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-17",
-    "ctl": 31.3523,
-    "atl": 40.581,
-    "rampRate": -0.804,
-    "ctlLoad": 154.0,
-    "atlLoad": 154.0,
+    "id": "2024-01-16",
+    "ctl": 34.4505,
+    "atl": 42.4259,
+    "rampRate": -1.3381,
+    "ctlLoad": 155.0,
+    "atlLoad": 155.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -894,7 +839,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 73.0779,
@@ -925,7 +870,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 17165,
+    "steps": 3165,
     "respiration": 17.2,
     "carbohydrates": null,
     "protein": null,
@@ -935,10 +880,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-18",
-    "ctl": 31.0617,
-    "atl": 37.7081,
-    "rampRate": -0.3381,
+    "id": "2024-01-17",
+    "ctl": 34.087,
+    "atl": 39.3074,
+    "rampRate": -0.8596,
     "ctlLoad": 19.0,
     "atlLoad": 19.0,
     "sportInfo": [
@@ -949,7 +894,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 56,
     "hrv": 110.1417,
@@ -980,7 +925,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 9456,
+    "steps": 8003,
     "respiration": 17.8,
     "carbohydrates": null,
     "protein": null,
@@ -990,10 +935,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-19",
-    "ctl": 30.8249,
-    "atl": 35.4839,
-    "rampRate": 0.164,
+    "id": "2024-01-18",
+    "ctl": 33.7791,
+    "atl": 36.8703,
+    "rampRate": -0.3453,
     "ctlLoad": 21.0,
     "atlLoad": 21.0,
     "sportInfo": [
@@ -1004,7 +949,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 55,
     "hrv": 101.5513,
@@ -1035,7 +980,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 5250,
+    "steps": 2844,
     "respiration": 17.4,
     "carbohydrates": null,
     "protein": null,
@@ -1045,10 +990,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-20",
-    "ctl": 30.0997,
-    "atl": 30.7602,
-    "rampRate": 0.1601,
+    "id": "2024-01-19",
+    "ctl": 32.9843,
+    "atl": 31.962,
+    "rampRate": -0.3372,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1059,7 +1004,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 114.4377,
@@ -1090,7 +1035,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 2590,
+    "steps": 1890,
     "respiration": 16.4667,
     "carbohydrates": null,
     "protein": null,
@@ -1100,10 +1045,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-21",
-    "ctl": 29.3915,
-    "atl": 26.6653,
-    "rampRate": -0.2672,
+    "id": "2024-01-20",
+    "ctl": 32.2082,
+    "atl": 27.7072,
+    "rampRate": -0.7527,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1114,7 +1059,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 84.6391,
@@ -1145,7 +1090,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 15632,
+    "steps": 7912,
     "respiration": 17.5333,
     "carbohydrates": null,
     "protein": null,
@@ -1155,10 +1100,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-22",
-    "ctl": 28.7,
-    "atl": 23.1156,
-    "rampRate": -0.2609,
+    "id": "2024-01-21",
+    "ctl": 31.4504,
+    "atl": 24.0187,
+    "rampRate": -0.735,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1169,7 +1114,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 56,
     "hrv": 100.8404,
@@ -1200,7 +1145,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 3677,
+    "steps": 2259,
     "respiration": 17.4,
     "carbohydrates": null,
     "protein": null,
@@ -1210,10 +1155,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-23",
-    "ctl": 28.0247,
-    "atl": 20.0384,
-    "rampRate": -0.3724,
+    "id": "2024-01-22",
+    "ctl": 30.7105,
+    "atl": 20.8213,
+    "rampRate": -0.8354,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1224,7 +1169,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 56,
     "hrv": 99.6694,
@@ -1255,7 +1200,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 10354,
+    "steps": 5409,
     "respiration": 16.6,
     "carbohydrates": null,
     "protein": null,
@@ -1265,10 +1210,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-24",
-    "ctl": 28.8241,
-    "atl": 25.6244,
-    "rampRate": -2.5282,
+    "id": "2024-01-23",
+    "ctl": 31.4467,
+    "atl": 26.3031,
+    "rampRate": -3.0039,
     "ctlLoad": 62.0,
     "atlLoad": 62.0,
     "sportInfo": [
@@ -1279,7 +1224,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 103.7091,
@@ -1310,7 +1255,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 9250,
+    "steps": 2769,
     "respiration": 17.0,
     "carbohydrates": null,
     "protein": null,
@@ -1320,10 +1265,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-25",
-    "ctl": 28.1459,
-    "atl": 22.2132,
-    "rampRate": -2.9158,
+    "id": "2024-01-24",
+    "ctl": 30.7068,
+    "atl": 22.8016,
+    "rampRate": -3.3802,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1334,7 +1279,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 54,
     "hrv": 95.4976,
@@ -1365,7 +1310,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 9624,
+    "steps": 4570,
     "respiration": 16.6,
     "carbohydrates": null,
     "protein": null,
@@ -1375,12 +1320,12 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-26",
-    "ctl": 28.7307,
-    "atl": 26.3116,
-    "rampRate": -2.0943,
-    "ctlLoad": 53.0,
-    "atlLoad": 53.0,
+    "id": "2024-01-25",
+    "ctl": 31.2548,
+    "atl": 26.9548,
+    "rampRate": -2.5243,
+    "ctlLoad": 54.0,
+    "atlLoad": 54.0,
     "sportInfo": [
       {
         "type": "Ride",
@@ -1389,7 +1334,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T07:47:59",
+    "updated": "2024-01-31T15:08:24",
     "weight": null,
     "restingHR": 57,
     "hrv": 70.5776,
@@ -1420,7 +1365,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 11622,
+    "steps": 6161,
     "respiration": 17.0,
     "carbohydrates": null,
     "protein": null,
@@ -1430,10 +1375,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-27",
-    "ctl": 29.6781,
-    "atl": 31.9944,
-    "rampRate": -0.4215,
+    "id": "2024-01-26",
+    "ctl": 32.1429,
+    "atl": 32.5519,
+    "rampRate": -0.8414,
     "ctlLoad": 69.0,
     "atlLoad": 69.0,
     "sportInfo": [
@@ -1444,7 +1389,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T12:59:58",
+    "updated": "2024-01-31T15:09:58",
     "weight": null,
     "restingHR": 56,
     "hrv": 102.5302,
@@ -1475,7 +1420,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 28062,
+    "steps": 16023,
     "respiration": 16.2,
     "carbohydrates": null,
     "protein": null,
@@ -1485,10 +1430,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-28",
-    "ctl": 29.9916,
-    "atl": 33.4595,
-    "rampRate": 0.6001,
+    "id": "2024-01-27",
+    "ctl": 32.3983,
+    "atl": 33.9428,
+    "rampRate": 0.1901,
     "ctlLoad": 43.0,
     "atlLoad": 43.0,
     "sportInfo": [
@@ -1499,7 +1444,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T12:59:58",
+    "updated": "2024-01-31T15:10:48",
     "weight": null,
     "restingHR": 57,
     "hrv": 79.8753,
@@ -1530,7 +1475,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 7005,
+    "steps": 4554,
     "respiration": 17.4,
     "carbohydrates": null,
     "protein": null,
@@ -1540,10 +1485,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-29",
-    "ctl": 29.2859,
-    "atl": 29.0053,
-    "rampRate": 0.586,
+    "id": "2024-01-28",
+    "ctl": 31.6361,
+    "atl": 29.4243,
+    "rampRate": 0.1856,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1554,7 +1499,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T14:41:03",
+    "updated": "2024-01-31T15:10:55",
     "weight": null,
     "restingHR": 59,
     "hrv": 73.7087,
@@ -1585,7 +1530,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 11863,
+    "steps": 8876,
     "respiration": 18.8,
     "carbohydrates": null,
     "protein": null,
@@ -1595,10 +1540,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-30",
-    "ctl": 28.5969,
-    "atl": 25.144,
-    "rampRate": 0.5722,
+    "id": "2024-01-29",
+    "ctl": 30.8917,
+    "atl": 25.5072,
+    "rampRate": 0.1813,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1609,7 +1554,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T14:41:02",
+    "updated": "2024-01-31T15:10:31",
     "weight": null,
     "restingHR": 56,
     "hrv": 115.3256,
@@ -1640,7 +1585,7 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 15091,
+    "steps": 10333,
     "respiration": 17.6,
     "carbohydrates": null,
     "protein": null,
@@ -1650,10 +1595,10 @@
     "tempRestingHR": false
   },
   {
-    "id": "2024-01-31",
-    "ctl": 28.6769,
-    "atl": 26.0567,
-    "rampRate": -0.1471,
+    "id": "2024-01-30",
+    "ctl": 30.9178,
+    "atl": 26.3716,
+    "rampRate": -0.5289,
     "ctlLoad": 32.0,
     "atlLoad": 32.0,
     "sportInfo": [
@@ -1664,9 +1609,9 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T19:48:01",
+    "updated": "2024-01-31T15:10:08",
     "weight": null,
-    "restingHR": 54,
+    "restingHR": null,
     "hrv": 138.4038,
     "hrvSDNN": null,
     "menstrualPhase": null,
@@ -1695,8 +1640,63 @@
     "abdomen": null,
     "vo2max": null,
     "comments": null,
-    "steps": 19306,
+    "steps": 12444,
     "respiration": 16.6,
+    "carbohydrates": null,
+    "protein": null,
+    "fatTotal": null,
+    "locked": null,
+    "tempWeight": true,
+    "tempRestingHR": true
+  },
+  {
+    "id": "2024-01-31",
+    "ctl": 31.1785,
+    "atl": 28.4521,
+    "rampRate": 0.4718,
+    "ctlLoad": 42.0,
+    "atlLoad": 42.0,
+    "sportInfo": [
+      {
+        "type": "Ride",
+        "eftp": null,
+        "wPrime": null,
+        "pMax": null
+      }
+    ],
+    "updated": "2024-01-31T15:10:08",
+    "weight": null,
+    "restingHR": 56,
+    "hrv": 118.4606,
+    "hrvSDNN": null,
+    "menstrualPhase": null,
+    "menstrualPhasePredicted": null,
+    "kcalConsumed": null,
+    "sleepSecs": 21420,
+    "sleepScore": null,
+    "sleepQuality": null,
+    "avgSleepingHR": null,
+    "soreness": null,
+    "fatigue": null,
+    "stress": null,
+    "mood": null,
+    "motivation": null,
+    "injury": null,
+    "spO2": 96.0,
+    "systolic": null,
+    "diastolic": null,
+    "hydration": null,
+    "hydrationVolume": null,
+    "readiness": null,
+    "baevskySI": null,
+    "bloodGlucose": null,
+    "lactate": null,
+    "bodyFat": null,
+    "abdomen": null,
+    "vo2max": null,
+    "comments": null,
+    "steps": 712,
+    "respiration": 17.4,
     "carbohydrates": null,
     "protein": null,
     "fatTotal": null,
@@ -1706,9 +1706,9 @@
   },
   {
     "id": "2024-02-01",
-    "ctl": 28.0022,
-    "atl": 22.588,
-    "rampRate": -0.1437,
+    "ctl": 30.445,
+    "atl": 24.6645,
+    "rampRate": -0.8098,
     "ctlLoad": 0.0,
     "atlLoad": 0.0,
     "sportInfo": [
@@ -1719,7 +1719,7 @@
         "pMax": null
       }
     ],
-    "updated": "2024-01-31T12:59:58",
+    "updated": "2024-01-31T15:10:08",
     "weight": null,
     "restingHR": null,
     "hrv": null,

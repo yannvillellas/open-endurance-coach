@@ -1,1 +1,209 @@
-[]
+[
+  {
+    "id": 10003,
+    "start_date_local": "2024-01-28T00:00:00",
+    "icu_training_load": 36,
+    "icu_atl": null,
+    "icu_ctl": null,
+    "type": "Ride",
+    "carbs_used": null,
+    "ss_p_max": null,
+    "ss_w_prime": null,
+    "ss_cp": null,
+    "calendar_id": 10004,
+    "uid": "681d6da5-d9de-4ae1-94d0-4e29126f9e2f",
+    "athlete_id": "fx000002",
+    "category": "WORKOUT",
+    "end_date_local": "2024-01-29T00:00:00",
+    "name": "Fixture Athlete",
+    "description": "Recovery Spin",
+    "indoor": false,
+    "color": null,
+    "moving_time": 2100,
+    "icu_ftp": null,
+    "w_prime": null,
+    "p_max": null,
+    "atl_days": null,
+    "ctl_days": null,
+    "updated": "2024-01-31T15:59:07",
+    "not_on_fitness_chart": false,
+    "show_as_note": false,
+    "show_on_ctl_line": false,
+    "for_week": false,
+    "target": null,
+    "joules": 429334,
+    "joules_above_ftp": 0,
+    "workout_doc": {
+      "steps": [
+        {
+          "warmup": true,
+          "distance": 1000,
+          "duration": 120
+        },
+        {
+          "reps": 3,
+          "text": "3x",
+          "steps": [
+            {
+              "hr": {
+                "units": "hr_zone",
+                "value": 3
+              },
+              "duration": 600
+            },
+            {
+              "hr": {
+                "end": 50,
+                "start": 25,
+                "units": "%hr"
+              },
+              "duration": 60
+            }
+          ],
+          "distance": 0,
+          "duration": 1980
+        }
+      ],
+      "locales": [],
+      "options": {},
+      "distance": 1000,
+      "duration": 2100,
+      "zoneTimes": [
+        {
+          "id": "fx000065",
+          "secs": 180
+        },
+        {
+          "id": "fx000066",
+          "secs": 0
+        },
+        {
+          "id": "fx000067",
+          "secs": 1800
+        },
+        {
+          "id": "fx000068",
+          "secs": 0
+        },
+        {
+          "id": "fx000069",
+          "secs": 0
+        },
+        {
+          "id": "fx000070",
+          "secs": 0
+        },
+        {
+          "id": "fx000071",
+          "secs": 0
+        }
+      ],
+      "strain_score": null,
+      "average_watts": 0,
+      "normalized_power": 0,
+      "variability_index": null,
+      "polarization_index": 0
+    },
+    "push_errors": null,
+    "athlete_cannot_edit": false,
+    "hide_from_athlete": false,
+    "structure_read_only": false,
+    "created_by_id": "fx000002",
+    "shared_event_id": null,
+    "entered": false,
+    "carbs_per_hour": null,
+    "sub_type": null,
+    "distance": 1000.0,
+    "tags": null,
+    "attachments": null,
+    "oauth_client_id": null,
+    "external_id": null,
+    "load_target": null,
+    "time_target": null,
+    "distance_target": null,
+    "training_availability": "NORMAL",
+    "max_training_time": null,
+    "can_train_sports": null,
+    "plan_athlete_id": null,
+    "plan_folder_id": null,
+    "plan_workout_id": null,
+    "plan_applied": null,
+    "icu_intensity": 78.5584,
+    "strain_score": null,
+    "plan_name": null,
+    "paired_activity_id": null
+  },
+  {
+    "id": 10005,
+    "start_date_local": "2024-02-07T00:00:00",
+    "icu_training_load": null,
+    "icu_atl": null,
+    "icu_ctl": null,
+    "type": "Ride",
+    "carbs_used": null,
+    "ss_p_max": null,
+    "ss_w_prime": null,
+    "ss_cp": null,
+    "calendar_id": 10004,
+    "uid": "c070f562-6300-4be5-aaca-aa637e870f58",
+    "athlete_id": "fx000002",
+    "category": "WORKOUT",
+    "end_date_local": "2024-02-08T00:00:00",
+    "name": "Criterium Skills",
+    "description": null,
+    "indoor": false,
+    "color": null,
+    "moving_time": null,
+    "icu_ftp": null,
+    "w_prime": null,
+    "p_max": null,
+    "atl_days": null,
+    "ctl_days": null,
+    "updated": "2024-01-31T15:55:02",
+    "not_on_fitness_chart": false,
+    "show_as_note": false,
+    "show_on_ctl_line": false,
+    "for_week": false,
+    "target": null,
+    "joules": null,
+    "joules_above_ftp": null,
+    "workout_doc": {
+      "steps": [],
+      "locales": [],
+      "options": {},
+      "distance": 0,
+      "duration": 0,
+      "strain_score": null,
+      "average_watts": null,
+      "variability_index": null
+    },
+    "push_errors": null,
+    "athlete_cannot_edit": false,
+    "hide_from_athlete": false,
+    "structure_read_only": false,
+    "created_by_id": "fx000002",
+    "shared_event_id": null,
+    "entered": false,
+    "carbs_per_hour": null,
+    "sub_type": null,
+    "distance": 0.0,
+    "tags": null,
+    "attachments": null,
+    "oauth_client_id": null,
+    "external_id": null,
+    "load_target": null,
+    "time_target": null,
+    "distance_target": null,
+    "training_availability": "NORMAL",
+    "max_training_time": null,
+    "can_train_sports": null,
+    "plan_athlete_id": null,
+    "plan_folder_id": null,
+    "plan_workout_id": null,
+    "plan_applied": null,
+    "icu_intensity": null,
+    "strain_score": null,
+    "plan_name": null,
+    "paired_activity_id": null
+  }
+]
