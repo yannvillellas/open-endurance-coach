@@ -6,6 +6,7 @@ import httpx
 
 from open_endurance_coach.config import Settings
 
+from .http import parse_retry_after
 from .llm import LlmCompletion, LlmError, LlmMessage, LlmProvider
 
 
@@ -60,7 +61,8 @@ class DeepSeekProvider:
                     await self._sleep(self._settings.retry_base_delay * 2**attempt)
                 continue
             if response.status_code == 429 and attempt < self._settings.max_retries:
-                await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                backoff = self._settings.retry_base_delay * 2**attempt
+                await self._sleep(parse_retry_after(response.headers, default=backoff))
                 continue
             if response.status_code >= 500 and attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)

@@ -8,6 +8,8 @@ import httpx
 
 from open_endurance_coach.config import Settings
 
+from .http import parse_retry_after
+
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -109,7 +111,7 @@ class IntervalsClient:
             if response is not None:
                 self.rate_limits = RateLimits.from_headers(response.headers)
                 if response.status_code == 429 and attempt < self._settings.max_retries:
-                    retry_after = float(response.headers.get("Retry-After", 60))
+                    retry_after = parse_retry_after(response.headers, default=60.0)
                     await self._sleep(retry_after)
                     continue
                 if response.status_code >= 500 and attempt < self._settings.max_retries:
@@ -123,7 +125,7 @@ class IntervalsClient:
         if response.status_code >= 400:
             error_retry_after: float | None = None
             if response.status_code == 429:
-                error_retry_after = float(response.headers.get("Retry-After", 0)) or None
+                error_retry_after = parse_retry_after(response.headers, default=0.0) or None
             raise IntervalsApiError(
                 response.status_code,
                 response.text[:500],

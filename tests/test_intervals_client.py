@@ -96,6 +96,39 @@ async def test_429_retry_then_success(settings: Settings) -> None:
     await client.aclose()
 
 
+async def test_429_http_date_retry_after_falls_back_to_default(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, captured = make_client(
+        settings,
+        [
+            httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+            httpx.Response(200, json=[{"id": "i1"}]),
+        ],
+        sleep=sleep,
+    )
+    result = await client.list_activities("2026-08-01", "2026-08-17")
+    assert len(captured) == 2
+    assert sleep.calls == [60.0]
+    assert result == [{"id": "i1"}]
+    await client.aclose()
+
+
+async def test_429_exhaustion_with_http_date_raises_cleanly(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, captured = make_client(
+        settings,
+        [httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={})]
+        * 4,
+        sleep=sleep,
+    )
+    with pytest.raises(IntervalsApiError) as excinfo:
+        await client.list_activities("2026-08-01", "2026-08-17")
+    assert excinfo.value.status_code == 429
+    assert len(captured) == 4
+    assert sleep.calls == [60.0, 60.0, 60.0]
+    await client.aclose()
+
+
 async def test_5xx_retry_then_success(settings: Settings) -> None:
     sleep = RecordingSleep()
     client, captured = make_client(

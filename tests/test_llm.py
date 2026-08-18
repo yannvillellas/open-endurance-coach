@@ -178,6 +178,52 @@ async def test_provider_retries_on_429_then_succeeds(settings: Settings) -> None
     assert sleep.calls == [0.0]
 
 
+async def test_provider_honors_retry_after_on_429(settings: Settings) -> None:
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "5"}, json={}),
+        ok_response(),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    provider, sleep = make_provider(settings, handler)
+    completion = await provider.complete(
+        model="deepseek-v4-pro",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert completion.content == "ok"
+    assert sleep.calls == [5.0]
+
+
+async def test_provider_429_http_date_retry_after_falls_back(settings: Settings) -> None:
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+        ok_response(),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return responses.pop(0)
+
+    provider, sleep = make_provider(settings, handler)
+    completion = await provider.complete(
+        model="deepseek-v4-pro",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert completion.content == "ok"
+    assert sleep.calls == [0.0]
+
+
 async def test_provider_retries_on_500_then_succeeds(settings: Settings) -> None:
     responses = [httpx.Response(500, json={}), ok_response()]
 
