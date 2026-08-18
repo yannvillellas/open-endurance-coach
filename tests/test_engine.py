@@ -12,8 +12,10 @@ from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
+    FakeCalendarClient,
     FakeIntervalsClient,
     FakeLlmProvider,
     RecordingSleep,
@@ -39,13 +41,14 @@ def make_engine(
     store: CoachStore,
     provider: FakeLlmProvider,
     client: FakeIntervalsClient | None = None,
+    writer: CalendarWriter | None = None,
 ) -> CoachEngine:
     llm = LlmClient(
         settings.model_copy(update={"llm_provider": "fake"}),
         {"fake": provider},
         sleep=RecordingSleep(),
     )
-    return CoachEngine(settings, store, client or make_intervals_client(), llm)
+    return CoachEngine(settings, store, client or make_intervals_client(), llm, writer=writer)
 
 
 def make_activity_model(activity_id: str, day: int, **overrides: Any) -> Activity:
@@ -273,3 +276,96 @@ async def test_pending_drafts_lists_only_pending(settings: Settings, tmp_path: P
     )
     store.approve_draft(first)
     assert [draft.id for draft in engine.pending_drafts()] == [second]
+
+
+async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    with pytest.raises(RuntimeError, match="writer"):
+        await engine.apply()
+
+
+def applied_decision(store: CoachStore, decision_id: int) -> Any:
+    decision = store.get_decision(decision_id)
+    assert decision is not None
+    return decision
+
+
+async def test_apply_applies_unapplied_decisions_and_marks_applied(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    engine.approve(draft.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    report = await writer_engine.apply()
+    assert len(report.decisions) == 1
+    assert report.decisions[0].decision_id == 1
+    assert report.decisions[0].outcomes[0].target == "created"
+    assert len(calendar.created) == 1
+    assert store.get_decision(1) is not None
+    assert applied_decision(store, 1).applied_at is not None
+    assert store.list_unapplied_decisions() == []
+
+
+async def test_apply_dry_run_writes_nothing_and_leaves_unapplied(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    engine.approve(draft.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    report = await writer_engine.apply(dry_run=True)
+    assert report.decisions[0].outcomes[0].target == "created"
+    assert calendar.created == []
+    assert applied_decision(store, 1).applied_at is None
+    assert len(store.list_unapplied_decisions()) == 1
+
+
+async def test_apply_specific_decision_only(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    first = await engine.analyze("status check", today=TODAY)
+    second = await engine.analyze("status check", today=TODAY)
+    engine.approve(first.id)
+    engine.approve(second.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    report = await writer_engine.apply(decision_id=second.id)
+    assert [item.decision_id for item in report.decisions] == [second.id]
+    assert applied_decision(store, first.id).applied_at is None
+    assert applied_decision(store, second.id).applied_at is not None
+
+
+async def test_apply_already_applied_decision_raises(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    engine.approve(draft.id)
+    writer_engine = make_engine(
+        settings, store, provider, writer=CalendarWriter(FakeCalendarClient())
+    )
+    await writer_engine.apply()
+    with pytest.raises(ValueError, match="already applied"):
+        await writer_engine.apply(decision_id=1)
+
+
+async def test_apply_marks_empty_decision_applied(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    engine.approve(draft.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    report = await writer_engine.apply()
+    assert report.decisions[0].outcomes == []
+    assert calendar.created == []
+    assert applied_decision(store, 1).applied_at is not None
