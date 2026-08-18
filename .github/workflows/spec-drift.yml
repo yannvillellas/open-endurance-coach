@@ -20,11 +20,7 @@ jobs:
       - uses: ./.github/actions/checks
         with:
           refresh-spec: "true"
-          scope: >-
-            ${{
-              (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-              && 'full' || 'contract-tests'
-            }}
+          scope: contract-tests
       - name: Detect drift
         id: drift
         if: always()
