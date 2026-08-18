@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 record-fixtures = "open_endurance_coach.fixtures.record:main"
+refresh-spec = "open_endurance_coach.spec.refresh:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
