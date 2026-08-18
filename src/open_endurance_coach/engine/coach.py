@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from datetime import date
 
+from pydantic import ValidationError
+
 from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
@@ -63,12 +65,15 @@ class CoachEngine:
             f"{activity.name} ({activity.start_date_local.date().isoformat()})"
             for activity in new_activities
         )
-        return CoachContext.model_validate(
-            {
-                **context.model_dump(),
-                "focus": f"{context.focus}\nNew activities since last review: {listing}",
-            }
-        )
+        try:
+            return CoachContext.model_validate(
+                {
+                    **context.model_dump(),
+                    "focus": f"{context.focus}\nNew activities since last review: {listing}",
+                }
+            )
+        except ValidationError:
+            return context
 
     async def _run_llm(self, context: CoachContext) -> DecisionReport:
         content = await self._llm_client.complete_json(

@@ -40,14 +40,15 @@ def detect_deep_query(focus: str) -> DeepQuery | None:
         amount = int(duration.group(1))
         unit = duration.group(2).lower()
         lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
-    metric = (
-        "elevation"
-        if _HILL_RE.search(focus)
-        else "heart_rate"
-        if _HEART_RATE_RE.search(focus)
-        else None
-    )
-    activity_types = frozenset({"Ride"}) if _HILL_RE.search(focus) else frozenset()
+    if _HEART_RATE_RE.search(focus):
+        metric = "heart_rate"
+        activity_types = frozenset({"Ride"}) if _HILL_RE.search(focus) else frozenset()
+    elif _HILL_RE.search(focus):
+        metric = "elevation"
+        activity_types = frozenset({"Ride"})
+    else:
+        metric = None
+        activity_types = frozenset()
     return DeepQuery(lookback_days=lookback, metric_focus=metric, activity_types=activity_types)
 
 

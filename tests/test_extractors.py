@@ -76,6 +76,7 @@ async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
         ("how did my power improve on hills in the last 3 months", 90, "elevation"),
         ("progress on climbs over the last 4 weeks", 28, "elevation"),
         ("heart rate evolution", 90, "heart_rate"),
+        ("heart rate improve on hilly sections", 90, "heart_rate"),
     ],
 )
 def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) -> None:
@@ -83,6 +84,13 @@ def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) 
     assert query is not None
     assert query.lookback_days == lookback
     assert query.metric_focus == metric
+
+
+def test_hill_and_hr_query_keeps_ride_filter() -> None:
+    query = detect_deep_query("heart rate improve on hilly sections")
+    assert query is not None
+    assert query.metric_focus == "heart_rate"
+    assert query.activity_types == frozenset({"Ride"})
 
 
 def test_detect_deep_query_returns_none_for_plain_focus() -> None:

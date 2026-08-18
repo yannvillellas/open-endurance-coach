@@ -238,7 +238,9 @@ async def test_submit_feedback_over_budget_raises_before_llm(
     assert stored.context.user_feedback is None
 
 
-async def test_surface_unseen_over_budget_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_surface_unseen_falls_back_when_listing_overflows_budget(
+    settings: Settings, tmp_path: Path
+) -> None:
     store = CoachStore(tmp_path / "coach.db")
     context = CoachContext(
         focus="status check",
@@ -246,8 +248,9 @@ async def test_surface_unseen_over_budget_raises(settings: Settings, tmp_path: P
         max_tokens=75,
     )
     engine = make_engine(settings, store, FakeLlmProvider())
-    with pytest.raises(ValueError, match="token budget"):
-        engine._surface_unseen(context)
+    surfaced = engine._surface_unseen(context)
+    assert surfaced.focus == "status check"
+    assert "New activities since last review" not in surfaced.focus
 
 
 async def test_submit_feedback_non_pending_raises(settings: Settings, tmp_path: Path) -> None:
