@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -56,6 +58,22 @@ def test_sections_default_to_empty() -> None:
     assert context.user_feedback is None
 
 
+def test_estimated_tokens_match_indented_prompt_format() -> None:
+    context = CoachContext.model_validate(
+        {"focus": "status check", "recent_activities": [ACTIVITY], "max_tokens": 4096}
+    )
+    compact = sum(
+        len(json.dumps(payload, ensure_ascii=False)) // 4
+        for payload in context._section_payloads().values()
+    )
+    indented = sum(
+        len(json.dumps(payload, ensure_ascii=False, indent=2)) // 4
+        for payload in context._section_payloads().values()
+    )
+    assert context.estimated_tokens() == indented
+    assert indented > compact
+
+
 def test_estimated_tokens_grow_with_content() -> None:
     small = CoachContext.model_validate({"focus": "status check"})
     larger = CoachContext.model_validate(
@@ -84,6 +102,7 @@ def test_section_tokens_reports_per_section() -> None:
     sections = context.section_tokens()
     assert set(sections) == {
         "focus",
+        "today",
         "recent_activities",
         "activity_detail",
         "wellness",

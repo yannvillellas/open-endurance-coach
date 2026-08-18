@@ -59,13 +59,16 @@ class CoachStore:
     def close(self) -> None:
         self._connection.close()
 
-    def mark_activity_seen(self, activity_id: str) -> bool:
-        cursor = self._connection.execute(
+    def mark_activities_seen(self, activity_ids: Iterable[str]) -> int:
+        rows = [(activity_id, self._clock().isoformat()) for activity_id in activity_ids]
+        if not rows:
+            return 0
+        cursor = self._connection.executemany(
             "INSERT OR IGNORE INTO seen_activities (activity_id, seen_at) VALUES (?, ?)",
-            (activity_id, self._clock().isoformat()),
+            rows,
         )
         self._connection.commit()
-        return cursor.rowcount == 1
+        return cursor.rowcount
 
     def is_activity_seen(self, activity_id: str) -> bool:
         row = self._connection.execute(
@@ -74,9 +77,16 @@ class CoachStore:
         return row is not None
 
     def unseen_activity_ids(self, activity_ids: Iterable[str]) -> set[str]:
-        rows = self._connection.execute("SELECT activity_id FROM seen_activities").fetchall()
+        ids = list(activity_ids)
+        if not ids:
+            return set()
+        placeholders = ",".join("?" for _ in ids)
+        rows = self._connection.execute(
+            f"SELECT activity_id FROM seen_activities WHERE activity_id IN ({placeholders})",
+            ids,
+        ).fetchall()
         seen = {row["activity_id"] for row in rows}
-        return {item for item in activity_ids if item not in seen}
+        return {item for item in ids if item not in seen}
 
     def save_draft(
         self,
@@ -133,6 +143,7 @@ class CoachStore:
         *,
         report: DecisionReport,
         user_feedback: str | None,
+        context: CoachContext | None = None,
     ) -> None:
         draft = self.get_draft(draft_id)
         if draft is None:
@@ -141,10 +152,22 @@ class CoachStore:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts can be updated"
             )
-        self._connection.execute(
-            "UPDATE drafts SET report_json = ?, user_feedback = ? WHERE id = ?",
-            (json.dumps(report.model_dump(mode="json")), user_feedback, draft_id),
-        )
+        if context is not None:
+            self._connection.execute(
+                "UPDATE drafts SET report_json = ?, user_feedback = ?, context_json = ?"
+                " WHERE id = ?",
+                (
+                    json.dumps(report.model_dump(mode="json")),
+                    user_feedback,
+                    json.dumps(context.model_dump(mode="json")),
+                    draft_id,
+                ),
+            )
+        else:
+            self._connection.execute(
+                "UPDATE drafts SET report_json = ?, user_feedback = ? WHERE id = ?",
+                (json.dumps(report.model_dump(mode="json")), user_feedback, draft_id),
+            )
         self._connection.commit()
 
     def add_feedback(self, draft_id: int, content: str) -> int:

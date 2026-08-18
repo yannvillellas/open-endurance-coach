@@ -17,9 +17,6 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
-RIDE_TYPES = frozenset(
-    {"Ride", "VirtualRide", "GravelRide", "TrackRide", "Cyclocross", "MountainBikeRide"}
-)
 
 _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
@@ -43,14 +40,15 @@ def detect_deep_query(focus: str) -> DeepQuery | None:
         amount = int(duration.group(1))
         unit = duration.group(2).lower()
         lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
-    metric = (
-        "elevation"
-        if _HILL_RE.search(focus)
-        else "heart_rate"
-        if _HEART_RATE_RE.search(focus)
-        else None
-    )
-    activity_types = frozenset({"Ride"}) if _HILL_RE.search(focus) else frozenset()
+    if _HEART_RATE_RE.search(focus):
+        metric = "heart_rate"
+        activity_types = frozenset({"Ride"}) if _HILL_RE.search(focus) else frozenset()
+    elif _HILL_RE.search(focus):
+        metric = "elevation"
+        activity_types = frozenset({"Ride"})
+    else:
+        metric = None
+        activity_types = frozenset()
     return DeepQuery(lookback_days=lookback, metric_focus=metric, activity_types=activity_types)
 
 
@@ -73,11 +71,11 @@ class DeepHistoricalExtractor:
         self,
         focus: str,
         *,
+        query: DeepQuery | None,
         user_feedback: str | None = None,
         max_tokens: int | None = None,
         today: date | None = None,
     ) -> CoachContext:
-        query = detect_deep_query(focus)
         if query is None:
             raise ValueError(f"focus is not a deep query: {focus!r}")
         current = self._today(today)
@@ -116,4 +114,5 @@ class DeepHistoricalExtractor:
             user_feedback=user_feedback,
             activity_detail=activity_detail,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
+            today=current,
         )

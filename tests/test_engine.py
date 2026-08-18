@@ -202,6 +202,57 @@ async def test_submit_feedback_updates_draft_and_injects_feedback(
     assert [item.content for item in store.list_feedback(draft.id)] == ["Legs heavy, RPE 8"]
 
 
+async def test_submit_feedback_persists_feedback_context(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider(
+        [completion(report_json()), completion(report_json("Revised after feedback."))]
+    )
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    await engine.submit_feedback(draft.id, "Legs heavy, RPE 8")
+    stored = store.get_draft(draft.id)
+    assert stored is not None
+    assert stored.context.user_feedback == "Legs heavy, RPE 8"
+
+
+async def test_submit_feedback_over_budget_raises_before_llm(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    context = CoachContext(focus="status check", max_tokens=10)
+    draft_id = store.save_draft(
+        focus="status check", report=DecisionReport(summary="ok"), context=context
+    )
+    provider = FakeLlmProvider([completion(report_json("Should not run."))])
+    engine = make_engine(settings, store, provider)
+    with pytest.raises(ValueError, match="token budget"):
+        await engine.submit_feedback(
+            draft_id, "A very long feedback text that overflows the budget"
+        )
+    assert provider.calls == []
+    assert store.list_feedback(draft_id) == []
+    stored = store.get_draft(draft_id)
+    assert stored is not None
+    assert stored.context.user_feedback is None
+
+
+async def test_surface_unseen_falls_back_when_listing_overflows_budget(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    context = CoachContext(
+        focus="status check",
+        recent_activities=[make_activity_model("fx-a", 20)],
+        max_tokens=75,
+    )
+    engine = make_engine(settings, store, FakeLlmProvider())
+    surfaced = engine._surface_unseen(context)
+    assert surfaced.focus == "status check"
+    assert "New activities since last review" not in surfaced.focus
+
+
 async def test_submit_feedback_non_pending_raises(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
@@ -243,7 +294,8 @@ async def test_approve_with_override_mutations(settings: Settings, tmp_path: Pat
     ]
     decision = engine.approve(draft.id, mutations=override)
     assert decision.report.mutations == override
-    assert decision.report.summary == "Load stable."
+    assert decision.report.summary == "Mutations overridden by the athlete."
+    assert decision.report.findings == []
     assert decision.report.questions == []
 
 

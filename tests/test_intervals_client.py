@@ -96,6 +96,39 @@ async def test_429_retry_then_success(settings: Settings) -> None:
     await client.aclose()
 
 
+async def test_429_http_date_retry_after_falls_back_to_default(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, captured = make_client(
+        settings,
+        [
+            httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+            httpx.Response(200, json=[{"id": "i1"}]),
+        ],
+        sleep=sleep,
+    )
+    result = await client.list_activities("2026-08-01", "2026-08-17")
+    assert len(captured) == 2
+    assert sleep.calls == [60.0]
+    assert result == [{"id": "i1"}]
+    await client.aclose()
+
+
+async def test_429_exhaustion_with_http_date_raises_cleanly(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, captured = make_client(
+        settings,
+        [httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={})]
+        * 4,
+        sleep=sleep,
+    )
+    with pytest.raises(IntervalsApiError) as excinfo:
+        await client.list_activities("2026-08-01", "2026-08-17")
+    assert excinfo.value.status_code == 429
+    assert len(captured) == 4
+    assert sleep.calls == [60.0, 60.0, 60.0]
+    await client.aclose()
+
+
 async def test_5xx_retry_then_success(settings: Settings) -> None:
     sleep = RecordingSleep()
     client, captured = make_client(
@@ -156,3 +189,65 @@ def test_rate_limits_from_headers_partial() -> None:
     limits = RateLimits.from_headers(httpx.Headers({"X-RateLimit-Limit": "2500,5000"}))
     assert limits.limit_15m == 2500
     assert limits.remaining_15m is None
+
+
+async def test_get_athlete_summary_returns_list(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json=[{"month": "x"}, {"month": "y"}])])
+    result = await client.get_athlete_summary()
+    assert isinstance(result, list)
+    assert len(result) == 2
+    await client.aclose()
+
+
+async def test_429_exhaustion_sleeps_only_between_attempts(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, captured = make_client(
+        settings,
+        [
+            httpx.Response(429, headers={"Retry-After": "1"}, json={}),
+            httpx.Response(429, headers={"Retry-After": "1"}, json={}),
+            httpx.Response(429, headers={"Retry-After": "1"}, json={}),
+            httpx.Response(429, headers={"Retry-After": "1"}, json={}),
+        ],
+        sleep=sleep,
+    )
+    with pytest.raises(IntervalsApiError) as excinfo:
+        await client.list_activities("2026-08-01", "2026-08-17")
+    assert excinfo.value.status_code == 429
+    assert len(captured) == 4
+    assert sleep.calls == [1.0, 1.0, 1.0]
+    await client.aclose()
+
+
+async def test_transport_error_retried_then_success(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if len(captured) == 1:
+            raise httpx.ConnectError("connection reset")
+        return httpx.Response(200, json=[{"id": "i1"}])
+
+    client = IntervalsClient(settings, transport=httpx.MockTransport(handler), sleep=sleep)
+    result = await client.list_activities("2026-08-01", "2026-08-17")
+    assert len(captured) == 2
+    assert sleep.calls == [0.0]
+    assert result == [{"id": "i1"}]
+    await client.aclose()
+
+
+async def test_redirects_are_followed(settings: Settings) -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if len(captured) == 1:
+            return httpx.Response(302, headers={"Location": "https://intervals.icu/api/v1/moved"})
+        return httpx.Response(200, json=[{"id": "i1"}])
+
+    client = IntervalsClient(settings, transport=httpx.MockTransport(handler))
+    result = await client.list_activities("2026-08-01", "2026-08-17")
+    assert len(captured) == 2
+    assert result == [{"id": "i1"}]
+    await client.aclose()

@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from datetime import date
 
+from pydantic import ValidationError
+
 from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
@@ -40,12 +42,15 @@ class CoachEngine:
     async def _extract(
         self, focus: str, *, user_feedback: str | None, today: date | None
     ) -> CoachContext:
-        extractor: StandardExtractor | DeepHistoricalExtractor
-        if detect_deep_query(focus) is not None:
+        deep_query = detect_deep_query(focus)
+        if deep_query is not None:
             extractor = DeepHistoricalExtractor(self._settings, self._read_client)
-        else:
-            extractor = StandardExtractor(self._settings, self._read_client)
-        return await extractor.extract(focus, user_feedback=user_feedback, today=today)
+            return await extractor.extract(
+                focus, query=deep_query, user_feedback=user_feedback, today=today
+            )
+        return await StandardExtractor(self._settings, self._read_client).extract(
+            focus, user_feedback=user_feedback, today=today
+        )
 
     def _surface_unseen(self, context: CoachContext) -> CoachContext:
         unseen = self._store.unseen_activity_ids(
@@ -60,9 +65,15 @@ class CoachEngine:
             f"{activity.name} ({activity.start_date_local.date().isoformat()})"
             for activity in new_activities
         )
-        return context.model_copy(
-            update={"focus": f"{context.focus}\nNew activities since last review: {listing}"}
-        )
+        try:
+            return CoachContext.model_validate(
+                {
+                    **context.model_dump(),
+                    "focus": f"{context.focus}\nNew activities since last review: {listing}",
+                }
+            )
+        except ValidationError:
+            return context
 
     async def _run_llm(self, context: CoachContext) -> DecisionReport:
         content = await self._llm_client.complete_json(
@@ -85,8 +96,7 @@ class CoachEngine:
         draft_id = self._store.save_draft(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
-        for activity in context.recent_activities:
-            self._store.mark_activity_seen(activity.id)
+        self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
         draft = self._store.get_draft(draft_id)
         assert draft is not None
         return draft
@@ -126,10 +136,14 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
+        context = CoachContext.model_validate(
+            {**draft.context.model_dump(), "user_feedback": feedback}
+        )
         self._store.add_feedback(draft_id, feedback)
-        context = draft.context.model_copy(update={"user_feedback": feedback})
         report = await self._run_llm(context)
-        self._store.update_draft_report(draft_id, report=report, user_feedback=feedback)
+        self._store.update_draft_report(
+            draft_id, report=report, user_feedback=feedback, context=context
+        )
         updated = self._store.get_draft(draft_id)
         assert updated is not None
         return updated
@@ -140,8 +154,8 @@ class CoachEngine:
             raise ValueError(f"draft not found: {draft_id}")
         if mutations is not None:
             overridden = DecisionReport(
-                summary=draft.report.summary,
-                findings=draft.report.findings,
+                summary="Mutations overridden by the athlete.",
+                findings=[],
                 questions=[],
                 mutations=mutations,
             )
@@ -154,6 +168,12 @@ class CoachEngine:
         self._store.reject_draft(draft_id)
 
     async def apply(self, decision_id: int | None = None, *, dry_run: bool = False) -> ApplyReport:
+        """Apply approved decisions to the calendar.
+
+        If a mutation fails, earlier mutations of the same decision stay applied while
+        the decision remains unapplied; re-running is safe because mutations are
+        idempotent (create resolves by name+date, update re-applies, delete skips).
+        """
         if self._writer is None:
             raise RuntimeError("no calendar writer configured")
         if decision_id is not None:

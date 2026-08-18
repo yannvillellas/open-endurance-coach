@@ -62,6 +62,24 @@ def test_system_message_contains_json_word_and_schema_example() -> None:
     assert "delete" in system[example_start:]
 
 
+def test_system_message_anchors_dates_to_today() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "never copy the example dates" in system
+    assert "on or after today" in system
+
+
+def test_user_message_states_today_when_known() -> None:
+    context = CoachContext.model_validate({**CONTEXT.model_dump(), "today": "2024-02-01"})
+    user = build_messages(context, make_settings())[1].content
+    assert "Today's date (athlete local)" in user
+    assert "2024-02-01" in user
+
+
+def test_user_message_omits_today_when_unknown() -> None:
+    user = build_messages(CONTEXT, make_settings())[1].content
+    assert "Today's date" not in user
+
+
 def test_system_message_contains_coaching_methodology() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "Joe Friel" in system

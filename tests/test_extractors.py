@@ -21,6 +21,7 @@ async def test_standard_extraction_populates_all_sections(settings: Settings) ->
     assert context.sport_settings[0].ftp == 250.0
     assert context.activity_detail is None
     assert context.user_feedback is None
+    assert context.today == TODAY
 
 
 async def test_standard_extraction_uses_expected_windows(settings: Settings) -> None:
@@ -75,6 +76,7 @@ async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
         ("how did my power improve on hills in the last 3 months", 90, "elevation"),
         ("progress on climbs over the last 4 weeks", 28, "elevation"),
         ("heart rate evolution", 90, "heart_rate"),
+        ("heart rate improve on hilly sections", 90, "heart_rate"),
     ],
 )
 def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) -> None:
@@ -82,6 +84,13 @@ def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) 
     assert query is not None
     assert query.lookback_days == lookback
     assert query.metric_focus == metric
+
+
+def test_hill_and_hr_query_keeps_ride_filter() -> None:
+    query = detect_deep_query("heart rate improve on hilly sections")
+    assert query is not None
+    assert query.metric_focus == "heart_rate"
+    assert query.activity_types == frozenset({"Ride"})
 
 
 def test_detect_deep_query_returns_none_for_plain_focus() -> None:
@@ -104,10 +113,9 @@ async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Sett
             "icu_intervals": [{"average_heartrate": 165}],
         }
     )
+    focus = "how did my heart rate improve on hills in the last 3 months"
     extractor = DeepHistoricalExtractor(settings, client)
-    context = await extractor.extract(
-        "how did my heart rate improve on hills in the last 3 months", today=TODAY
-    )
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
     activities_oldest = next(call for call in client.calls if call[0] == "activities")[1]
     assert activities_oldest == "2023-11-03"
     assert context.activity_detail is not None
@@ -119,11 +127,16 @@ async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Sett
 async def test_deep_extraction_rejects_non_deep_focus(settings: Settings) -> None:
     extractor = DeepHistoricalExtractor(settings, make_intervals_client())
     with pytest.raises(ValueError, match="deep query"):
-        await extractor.extract("status check", today=TODAY)
+        await extractor.extract("status check", query=None, today=TODAY)
 
 
 async def test_deep_extraction_respects_budget(settings: Settings) -> None:
     extractor = DeepHistoricalExtractor(settings, make_intervals_client())
-    context = await extractor.extract("heart rate evolution", today=TODAY, max_tokens=150)
+    context = await extractor.extract(
+        "heart rate evolution",
+        query=detect_deep_query("heart rate evolution"),
+        today=TODAY,
+        max_tokens=150,
+    )
     assert isinstance(context, CoachContext)
     assert context.estimated_tokens() <= 150

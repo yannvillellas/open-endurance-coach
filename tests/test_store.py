@@ -46,18 +46,44 @@ def test_new_store_is_empty(tmp_path: Path) -> None:
     assert store.unseen_activity_ids(["a", "b"]) == {"a", "b"}
 
 
-def test_mark_activity_seen_returns_true_once(tmp_path: Path) -> None:
+def test_mark_activities_seen_returns_new_count(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.mark_activity_seen("act-1") is True
-    assert store.mark_activity_seen("act-1") is False
+    assert store.mark_activities_seen(["act-1"]) == 1
+    assert store.mark_activities_seen(["act-1"]) == 0
     assert store.is_activity_seen("act-1") is True
     assert store.is_activity_seen("act-2") is False
 
 
+def test_mark_activities_seen_batches_multiple(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.mark_activities_seen(["act-1", "act-2", "act-1", "act-3"]) == 3
+    assert store.is_activity_seen("act-1") is True
+    assert store.is_activity_seen("act-2") is True
+    assert store.is_activity_seen("act-3") is True
+    assert store.is_activity_seen("act-4") is False
+
+
+def test_mark_activities_seen_handles_empty_input(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.mark_activities_seen([]) == 0
+
+
 def test_unseen_activity_ids_filters_seen(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    store.mark_activity_seen("act-1")
+    store.mark_activities_seen(["act-1"])
     assert store.unseen_activity_ids(["act-1", "act-2", "act-3"]) == {"act-2", "act-3"}
+
+
+def test_unseen_activity_ids_queries_only_candidates(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.mark_activities_seen([f"seen-{index}" for index in range(100)])
+    queries: list[str] = []
+    store._connection.set_trace_callback(lambda statement: queries.append(statement))
+    result = store.unseen_activity_ids(["fx-a", "fx-b", "fx-c"])
+    assert result == {"fx-a", "fx-b", "fx-c"}
+    assert len(queries) == 1
+    assert "WHERE activity_id IN" in queries[0]
+    assert "fx-a" in queries[0]
 
 
 def test_unseen_activity_ids_handles_empty_input(tmp_path: Path) -> None:
@@ -118,6 +144,23 @@ def test_update_draft_report_replaces_report_and_feedback(tmp_path: Path) -> Non
     assert draft.report == replacement
     assert draft.user_feedback == "Legs were heavy"
     assert draft.status is DraftStatus.PENDING
+
+
+def test_update_draft_report_with_context_persists_context(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    replacement = DecisionReport(summary="Revised.")
+    updated_context = make_context("status check with feedback")
+    updated_context = CoachContext(
+        focus=updated_context.focus, user_feedback="RPE 8", max_tokens=updated_context.max_tokens
+    )
+    store.update_draft_report(
+        draft_id, report=replacement, user_feedback="RPE 8", context=updated_context
+    )
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.context.user_feedback == "RPE 8"
+    assert draft.context.focus == "status check with feedback"
 
 
 def test_update_draft_report_missing_draft_raises(tmp_path: Path) -> None:
@@ -214,7 +257,7 @@ def test_store_persists_across_reopen(tmp_path: Path) -> None:
     draft_id = store.save_draft(
         focus="first", report=make_report(), context=make_context(), user_feedback="tired"
     )
-    store.mark_activity_seen("act-1")
+    store.mark_activities_seen(["act-1"])
     store.close()
     reopened = CoachStore(path, clock=FakeClock(NOW))
     draft = reopened.get_draft(draft_id)

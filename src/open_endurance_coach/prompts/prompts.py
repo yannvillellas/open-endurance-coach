@@ -36,6 +36,8 @@ def _json_contract() -> str:
     return (
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
+        "Every start_date_local must be on or after today (the athlete's local date), "
+        "taken from the upcoming schedule - never copy the example dates.\n"
         "Example json:\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )
@@ -68,6 +70,8 @@ def _user_message(context: CoachContext) -> str:
             item.model_dump(mode="json", exclude_none=True) for item in context.sport_settings
         ],
     }
+    if context.today:
+        sections["today"] = f"Today's date (athlete local): {context.today.isoformat()}"
     if context.user_feedback:
         sections["user_feedback"] = context.user_feedback
     return (

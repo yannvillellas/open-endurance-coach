@@ -8,6 +8,8 @@ import httpx
 
 from open_endurance_coach.config import Settings
 
+from .http import parse_retry_after
+
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -76,6 +78,7 @@ class IntervalsClient:
             },
             transport=transport,
             timeout=60.0,
+            follow_redirects=True,
         )
         self._min_interval = 1.0 / settings.requests_per_second
         self._last_request_at = 0.0
@@ -101,22 +104,28 @@ class IntervalsClient:
         await self._throttle()
         response: httpx.Response | None = None
         for attempt in range(self._settings.max_retries + 1):
-            response = await self._client.request(method, path, params=params, json=payload)
-            self.rate_limits = RateLimits.from_headers(response.headers)
-            if response.status_code == 429:
-                retry_after = float(response.headers.get("Retry-After", 60))
-                await self._sleep(retry_after)
-                continue
-            if response.status_code >= 500:
+            try:
+                response = await self._client.request(method, path, params=params, json=payload)
+            except httpx.TransportError:
+                response = None
+            if response is not None:
+                self.rate_limits = RateLimits.from_headers(response.headers)
+                if response.status_code == 429 and attempt < self._settings.max_retries:
+                    retry_after = parse_retry_after(response.headers, default=60.0)
+                    await self._sleep(retry_after)
+                    continue
+                if response.status_code >= 500 and attempt < self._settings.max_retries:
+                    await self._sleep(self._settings.retry_base_delay * 2**attempt)
+                    continue
+                break
+            if attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
-                continue
-            break
         if response is None:
-            raise IntervalsApiError(0, "no response")
+            raise IntervalsApiError(0, "transport error after retries")
         if response.status_code >= 400:
             error_retry_after: float | None = None
             if response.status_code == 429:
-                error_retry_after = float(response.headers.get("Retry-After", 0)) or None
+                error_retry_after = parse_retry_after(response.headers, default=0.0) or None
             raise IntervalsApiError(
                 response.status_code,
                 response.text[:500],
@@ -184,7 +193,7 @@ class IntervalsClient:
         response = await self._request("GET", self._athlete_path(""))
         return response.json()
 
-    async def get_athlete_summary(self) -> dict[str, Any]:
+    async def get_athlete_summary(self) -> list[dict[str, Any]]:
         response = await self._request("GET", self._athlete_path("/athlete-summary"))
         return response.json()
 

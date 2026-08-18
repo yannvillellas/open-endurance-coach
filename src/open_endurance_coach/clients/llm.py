@@ -92,6 +92,7 @@ class LlmClient:
         validator: Callable[[Any], Any] | None = None,
     ) -> str:
         attempts = self._settings.max_retries if max_attempts is None else max_attempts
+        attempts = max(1, attempts)
         last_error: LlmError | None = None
         for attempt in range(attempts):
             completion = await self.complete(messages, json_mode=True)

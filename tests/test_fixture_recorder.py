@@ -34,7 +34,7 @@ class FakeIntervalsClient:
         self.calls.append("get_sport_settings")
         return self._payloads["sport_settings"]
 
-    async def get_athlete_summary(self) -> dict[str, Any]:
+    async def get_athlete_summary(self) -> list[dict[str, Any]]:
         self.calls.append("get_athlete_summary")
         return self._payloads["athlete_summary"]
 
