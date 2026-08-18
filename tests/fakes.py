@@ -1,6 +1,15 @@
+from datetime import datetime
 from typing import Any
 
 from open_endurance_coach.clients.llm import LlmCompletion
+
+
+class FakeClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
 
 
 class RecordingSleep:
