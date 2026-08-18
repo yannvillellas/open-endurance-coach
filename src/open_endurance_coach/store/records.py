@@ -36,4 +36,5 @@ class Decision:
     id: int
     draft_id: int
     decided_at: datetime
+    applied_at: datetime | None
     report: DecisionReport
