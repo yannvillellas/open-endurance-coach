@@ -36,6 +36,8 @@ def _json_contract() -> str:
     return (
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
+        "Every start_date_local must be on or after today (the athlete's local date), "
+        "taken from the upcoming schedule - never copy the example dates.\n"
         "Example json:\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )

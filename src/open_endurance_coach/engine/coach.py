@@ -147,8 +147,8 @@ class CoachEngine:
             raise ValueError(f"draft not found: {draft_id}")
         if mutations is not None:
             overridden = DecisionReport(
-                summary=draft.report.summary,
-                findings=draft.report.findings,
+                summary="Mutations overridden by the athlete.",
+                findings=[],
                 questions=[],
                 mutations=mutations,
             )

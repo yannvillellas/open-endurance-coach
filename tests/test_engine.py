@@ -290,7 +290,8 @@ async def test_approve_with_override_mutations(settings: Settings, tmp_path: Pat
     ]
     decision = engine.approve(draft.id, mutations=override)
     assert decision.report.mutations == override
-    assert decision.report.summary == "Load stable."
+    assert decision.report.summary == "Mutations overridden by the athlete."
+    assert decision.report.findings == []
     assert decision.report.questions == []
 
 

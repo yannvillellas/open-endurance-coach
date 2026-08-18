@@ -311,3 +311,14 @@ def test_apply_error_propagates(patched: Any) -> None:
     assert result.exit_code == 1
     assert "non-WORKOUT" in result.output
     assert decision_of(store, 1).applied_at is None
+
+
+def test_missing_env_shows_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken_settings() -> Settings:
+        return Settings(_env_file=None)
+
+    monkeypatch.setattr(cli_main, "get_settings", broken_settings)
+    result = runner.invoke(cli_main.app, ["review"])
+    assert result.exit_code == 1
+    assert "configuration missing" in result.output
+    assert ".env" in result.output

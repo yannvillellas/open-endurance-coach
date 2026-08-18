@@ -62,6 +62,12 @@ def test_system_message_contains_json_word_and_schema_example() -> None:
     assert "delete" in system[example_start:]
 
 
+def test_system_message_anchors_dates_to_today() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "never copy the example dates" in system
+    assert "on or after today" in system
+
+
 def test_system_message_contains_coaching_methodology() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "Joe Friel" in system

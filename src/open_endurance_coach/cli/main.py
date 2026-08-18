@@ -25,7 +25,15 @@ DEFAULT_ANALYZE_FOCUS = "Analyze my recent training"
 
 
 async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        console.print(
+            "[red]error:[/red] configuration missing: is there a readable .env file"
+            " in the current directory with all required keys?"
+        )
+        console.print(f"[dim]{exc}[/dim]")
+        raise typer.Exit(code=1) from None
     intervals = IntervalsClient(settings)
     providers = build_registry(settings)
     llm = LlmClient(settings, providers)
