@@ -121,24 +121,39 @@ def test_approve_records_decision(patched: Any) -> None:
     assert len(store.list_decisions()) == 1
 
 
-def test_approve_with_mutations_override(patched: Any) -> None:
+def test_approve_with_mutations_file(patched: Any, tmp_path: Path) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    override = json.dumps(
-        [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text(
+        json.dumps(
+            [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
+        )
     )
-    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations", override])
+    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path)])
     assert result.exit_code == 0
     decision = store.list_decisions()[0]
     assert decision.report.mutations[0].name == "Custom Session"
 
 
-def test_approve_invalid_mutations_fails(patched: Any) -> None:
+def test_approve_invalid_mutations_file_fails(patched: Any, tmp_path: Path) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations", "not json"])
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text("not json")
+    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path)])
     assert result.exit_code == 2
-    assert "invalid mutations JSON" in result.output
+    assert "invalid mutations file" in result.output
+
+
+def test_approve_missing_mutations_file_fails(patched: Any, tmp_path: Path) -> None:
+    patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(
+        cli_main.app, ["approve", "1", "--mutations-file", str(tmp_path / "missing.json")]
+    )
+    assert result.exit_code == 2
+    assert "invalid mutations file" in result.output
 
 
 def test_reject_flips_status(patched: Any) -> None:
@@ -155,3 +170,46 @@ def test_ask_llm_failure_exits_with_error(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["ask", "How is my form?"])
     assert result.exit_code == 1
     assert "error:" in result.output
+
+
+def test_feedback_updates_draft_and_prints_revised_summary(patched: Any) -> None:
+    _, store = patched(
+        FakeLlmProvider(
+            [completion(report_json()), completion(report_json("Revised after feedback."))]
+        )
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["feedback", "1", "Legs heavy, RPE 8"])
+    assert result.exit_code == 0
+    assert "Revised after feedback." in result.output
+    assert "Draft #1 updated" in result.output
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.user_feedback == "Legs heavy, RPE 8"
+    assert draft.report.summary == "Revised after feedback."
+    assert draft.status is DraftStatus.PENDING
+
+
+def test_feedback_missing_draft_fails_gracefully(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["feedback", "404", "RPE was 7"])
+    assert result.exit_code == 1
+    assert "not found" in result.output
+
+
+def test_review_suggests_feedback_command(patched: Any) -> None:
+    patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["review", "1"])
+    assert result.exit_code == 0
+    assert "RPE missing" in result.output
+    assert "coach feedback 1" in result.output
+
+
+def test_review_no_suggestion_after_approve(patched: Any) -> None:
+    patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["review", "1"])
+    assert result.exit_code == 0
+    assert "coach feedback 1" not in result.output

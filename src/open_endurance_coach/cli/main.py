@@ -14,7 +14,7 @@ from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import Draft
+from open_endurance_coach.store.records import Draft, DraftStatus
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -55,9 +55,10 @@ def _render_report(report: DecisionReport) -> None:
         console.print(f"  [yellow]? {question}[/yellow]")
 
 
-def _render_draft(draft: Draft) -> None:
+def _render_draft(draft: Draft, *, updated: bool = False) -> None:
     _render_report(draft.report)
-    console.print(f"Draft #{draft.id} saved (pending). Review it: coach review {draft.id}")
+    verb = "updated" if updated else "saved"
+    console.print(f"Draft #{draft.id} {verb} (pending). Review it: coach review {draft.id}")
 
 
 @app.command()
@@ -99,8 +100,22 @@ def review(
             return
         view = engine.review(draft_id)
         _render_report(view.draft.report)
-        for line in view.requested_feedback:
-            console.print(f"  [yellow]? {line}[/yellow]")
+        if view.draft.status is DraftStatus.PENDING:
+            for line in view.requested_feedback:
+                console.print(f"  [yellow]? {line}[/yellow]")
+            if view.requested_feedback:
+                console.print(f'Answer the coach: coach feedback {draft_id} "your RPE and notes"')
+
+    _run(run)
+
+
+@app.command()
+def feedback(
+    draft_id: int = typer.Argument(...),
+    text: str = typer.Argument(...),
+) -> None:
+    async def run(engine: CoachEngine) -> None:
+        _render_draft(await engine.submit_feedback(draft_id, text), updated=True)
 
     _run(run)
 
@@ -108,13 +123,13 @@ def review(
 @app.command()
 def approve(
     draft_id: int = typer.Argument(...),
-    mutations: str | None = typer.Option(
+    mutations_file: str | None = typer.Option(
         None,
-        "--mutations",
-        help="JSON array of workout mutations replacing the coach's proposals",
+        "--mutations-file",
+        help="JSON file with workout mutations replacing the coach's proposals",
     ),
 ) -> None:
-    override = _parse_mutations(mutations) if mutations is not None else None
+    override = _read_mutations(mutations_file) if mutations_file is not None else None
 
     async def run(engine: CoachEngine) -> None:
         decision = engine.approve(draft_id, mutations=override)
@@ -135,12 +150,13 @@ def reject(draft_id: int = typer.Argument(...)) -> None:
     _run(run)
 
 
-def _parse_mutations(raw: str) -> list[WorkoutMutation]:
+def _read_mutations(path: str) -> list[WorkoutMutation]:
     try:
-        payload: Any = json.loads(raw)
+        with open(path, encoding="utf-8") as handle:
+            payload: Any = json.load(handle)
         return _mutations_adapter.validate_python(payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise typer.BadParameter(f"invalid mutations JSON: {exc}") from exc
+    except (OSError, json.JSONDecodeError, ValidationError) as exc:
+        raise typer.BadParameter(f"invalid mutations file: {exc}") from exc
 
 
 def main() -> None:
