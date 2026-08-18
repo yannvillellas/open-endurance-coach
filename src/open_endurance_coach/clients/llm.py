@@ -40,6 +40,8 @@ class LlmProvider(Protocol):
         reasoning_effort: str | None,
     ) -> LlmCompletion: ...
 
+    async def aclose(self) -> None: ...
+
 
 class LlmClient:
     def __init__(
@@ -87,6 +89,7 @@ class LlmClient:
         messages: list[LlmMessage],
         *,
         max_attempts: int | None = None,
+        validator: Callable[[Any], Any] | None = None,
     ) -> str:
         attempts = self._settings.max_retries if max_attempts is None else max_attempts
         last_error: LlmError | None = None
@@ -97,10 +100,18 @@ class LlmClient:
                 last_error = LlmError("empty content returned")
             else:
                 try:
-                    json.loads(content)
+                    payload = json.loads(content)
                 except json.JSONDecodeError as exc:
                     last_error = LlmError(f"invalid JSON returned: {exc}")
                 else:
-                    return content
+                    if validator is not None:
+                        try:
+                            validator(payload)
+                        except Exception as exc:
+                            last_error = LlmError(f"JSON validation failed: {exc}")
+                        else:
+                            return content
+                    else:
+                        return content
             await self._sleep(2**attempt)
         raise LlmError(f"JSON completion failed after {attempts} attempts: {last_error}")
