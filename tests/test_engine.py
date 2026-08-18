@@ -243,7 +243,7 @@ async def test_surface_unseen_over_budget_raises(settings: Settings, tmp_path: P
     context = CoachContext(
         focus="status check",
         recent_activities=[make_activity_model("fx-a", 20)],
-        max_tokens=70,
+        max_tokens=75,
     )
     engine = make_engine(settings, store, FakeLlmProvider())
     with pytest.raises(ValueError, match="token budget"):

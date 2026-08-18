@@ -8,7 +8,7 @@ from open_endurance_coach.schemas.intervals import Activity, Event, SportSetting
 
 
 def _tokens_of(payload: Any) -> int:
-    serialized = json.dumps(payload, ensure_ascii=False)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
     return len(serialized) // 4
 
 

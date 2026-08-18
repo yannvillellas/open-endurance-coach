@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     llm_temperature: float | None = None
     llm_timeout_seconds: float = 180.0
 
+    # Training-day boundaries and calendar dates are written as midnight in this zone;
+    # it must match the athlete's Intervals.icu account timezone.
     app_timezone: str = "Europe/Paris"
     database_path: str = "data/coach.db"
     http_port: int = 8000
