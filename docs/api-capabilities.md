@@ -109,3 +109,13 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 - **Weekly load history:** the reference project reads `GET /api/v1/athlete/{id}/athlete-summary{ext}` for server-aggregated weekly training-load history — candidate for our standard extraction scope.
 - **Upload idempotency pattern (reference):** index existing WORKOUT events by `(name, date)` in the target range → `PUT` update if found, else `POST` create; safe re-runs, no duplicates. Structured workouts upload as `.zwo` `file_contents` with step definitions; tags are supported on events.
 - **Tunnel + localhost note:** the reference MCP setup requires an allowed-host configuration for the tunnel's public hostname (`Host` header) — any local receiver will need the same when wired to the tunnel.
+
+## 7. Addendum (payload field shapes verified against live data, 2026-08-17/18)
+
+Verified by recording real read-only payloads into anonymized test fixtures (`tests/fixtures/`) and cross-checking the OpenAPI spec (`https://intervals.icu/api/v1/docs`). Field names below differ from intuitive guesses:
+
+- **Activity rows:** power is `icu_average_watts` / `icu_weighted_avg_watts` — there is **no `avg_power`**. RPE is `icu_rpe` (with `perceived_exertion` and `session_rpe` as separate fields). List rows carry no `icu_intervals`; only `GET /activity/{id}?intervals=true` returns them. Activities carry `group` (hash token) and generated `interval_summary` strings (e.g. `1x 15s 187bpm`).
+- **Intervals (`icu_intervals[]`):** ids are ints; `start_time`/`end_time` are seconds within the activity, not epochs; `type`/`zone`/`intensity` are Intervals-generated classifications.
+- **Wellness:** `id` is the date string (`YYYY-MM-DD`); 46 fields including nested `sportInfo[]` (`type`, `eftp`, `wPrime`, `pMax`); `cols`/`fields` params select columns.
+- **Sport settings:** `id` is an int but `athlete_id` is a string; `power_zones`/`hr_zones` are 7-boundary numeric lists.
+- **Athlete summary:** returns a list of server-aggregated rows, not a single object.
