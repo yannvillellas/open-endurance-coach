@@ -70,11 +70,11 @@ class DeepHistoricalExtractor:
         self,
         focus: str,
         *,
+        query: DeepQuery | None,
         user_feedback: str | None = None,
         max_tokens: int | None = None,
         today: date | None = None,
     ) -> CoachContext:
-        query = detect_deep_query(focus)
         if query is None:
             raise ValueError(f"focus is not a deep query: {focus!r}")
         current = self._today(today)
