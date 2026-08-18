@@ -15,6 +15,7 @@ from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import Draft, DraftStatus
+from open_endurance_coach.writer.calendar import CalendarWriter
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -29,7 +30,8 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
     providers = build_registry(settings)
     llm = LlmClient(settings, providers)
     store = CoachStore(settings.database_path)
-    engine = CoachEngine(settings, store, intervals, llm)
+    writer = CalendarWriter(intervals)
+    engine = CoachEngine(settings, store, intervals, llm, writer=writer)
     try:
         await callback(engine)
     finally:
@@ -146,6 +148,33 @@ def reject(draft_id: int = typer.Argument(...)) -> None:
     async def run(engine: CoachEngine) -> None:
         engine.reject(draft_id)
         console.print(f"Draft #{draft_id} rejected.")
+
+    _run(run)
+
+
+@app.command()
+def apply(
+    decision_id: int | None = typer.Argument(None, help="Decision id; omit to apply all unapplied"),
+    write: bool = typer.Option(
+        False, "--write", help="Write to the calendar (default is a dry-run)"
+    ),
+) -> None:
+    async def run(engine: CoachEngine) -> None:
+        report = await engine.apply(decision_id, dry_run=not write)
+        if not report.decisions:
+            console.print("No unapplied decisions.")
+            return
+        if write:
+            console.print("[green]Applied:[/green]")
+        else:
+            console.print("[yellow]DRY RUN - no changes written[/yellow]")
+        for applied in report.decisions:
+            console.print(f"Decision #{applied.decision_id}:")
+            for outcome in applied.outcomes:
+                target = (
+                    str(outcome.event_id) if outcome.event_id is not None else outcome.name or ""
+                )
+                console.print(f"  - {outcome.action} {outcome.target}: {target}")
 
     _run(run)
 

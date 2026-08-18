@@ -12,11 +12,14 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
+    FakeCalendarClient,
     FakeLlmProvider,
     RecordingSleep,
     completion,
+    make_event,
     make_intervals_client,
     report_json,
 )
@@ -32,7 +35,10 @@ CREATE_MUTATION = {
 
 
 def make_engine(
-    settings: Settings, tmp_path: Path, provider: FakeLlmProvider
+    settings: Settings,
+    tmp_path: Path,
+    provider: FakeLlmProvider,
+    calendar: FakeCalendarClient | None = None,
 ) -> tuple[CoachEngine, CoachStore]:
     llm = LlmClient(
         settings.model_copy(update={"llm_provider": "fake"}),
@@ -40,7 +46,8 @@ def make_engine(
         sleep=RecordingSleep(),
     )
     store = CoachStore(tmp_path / "coach.db")
-    engine = CoachEngine(settings, store, make_intervals_client(), llm)
+    writer = CalendarWriter(calendar) if calendar is not None else None
+    engine = CoachEngine(settings, store, make_intervals_client(), llm, writer=writer)
     return engine, store
 
 
@@ -54,8 +61,10 @@ class FakeRunner:
 
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path) -> Any:
-    def build(provider: FakeLlmProvider) -> tuple[CoachEngine, CoachStore]:
-        engine, store = make_engine(settings, tmp_path, provider)
+    def build(
+        provider: FakeLlmProvider, calendar: FakeCalendarClient | None = None
+    ) -> tuple[CoachEngine, CoachStore]:
+        engine, store = make_engine(settings, tmp_path, provider, calendar=calendar)
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
         return engine, store
 
@@ -213,3 +222,92 @@ def test_review_no_suggestion_after_approve(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["review", "1"])
     assert result.exit_code == 0
     assert "coach feedback 1" not in result.output
+
+
+def decision_of(store: CoachStore, decision_id: int) -> Any:
+    decision = store.get_decision(decision_id)
+    assert decision is not None
+    return decision
+
+
+def approve_draft(patched: Any) -> tuple[FakeCalendarClient, CoachStore]:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    return calendar, store
+
+
+def test_apply_dry_run_by_default(patched: Any) -> None:
+    calendar, store = approve_draft(patched)
+    result = runner.invoke(cli_main.app, ["apply"])
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+    assert "create" in result.output
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_apply_write_flag_writes(patched: Any) -> None:
+    calendar, store = approve_draft(patched)
+    result = runner.invoke(cli_main.app, ["apply", "--write"])
+    assert result.exit_code == 0
+    assert "created" in result.output
+    assert "DRY RUN" not in result.output
+    assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
+
+
+def test_apply_specific_decision_only(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider(
+            [
+                completion(report_json()),
+                completion(report_json(mutations=[CREATE_MUTATION])),
+            ]
+        ),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "2"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "2"])
+    assert result.exit_code == 0
+    assert "Decision #2" in result.output
+    assert "Decision #1" not in result.output
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_apply_no_unapplied_decisions(patched: Any) -> None:
+    patched(FakeLlmProvider(), calendar=FakeCalendarClient())
+    result = runner.invoke(cli_main.app, ["apply"])
+    assert result.exit_code == 0
+    assert "No unapplied decisions" in result.output
+
+
+def test_apply_error_propagates(patched: Any) -> None:
+    calendar = FakeCalendarClient([make_event(10001, "2024-02-05", category="RACE_B")])
+    _, store = patched(
+        FakeLlmProvider(
+            [
+                completion(
+                    report_json(
+                        mutations=[{"action": "update", "event_id": 10001, "moving_time": 4200}]
+                    )
+                )
+            ]
+        ),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "--write"])
+    assert result.exit_code == 1
+    assert "non-WORKOUT" in result.output
+    assert decision_of(store, 1).applied_at is None
