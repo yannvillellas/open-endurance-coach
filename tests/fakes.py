@@ -20,6 +20,98 @@ class RecordingSleep:
         self.calls.append(seconds)
 
 
+class FakeIntervalsClient:
+    def __init__(
+        self,
+        activities: list[dict[str, Any]],
+        wellness: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+        sport_settings: list[dict[str, Any]],
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        self.activities = activities
+        self.wellness = wellness
+        self.events = events
+        self.sport_settings = sport_settings
+        self.detail = detail or {}
+        self.calls: list[tuple[Any, ...]] = []
+
+    async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+        self.calls.append(("activities", oldest, newest))
+        return list(self.activities)
+
+    async def get_activity(self, activity_id: str, intervals: bool = True) -> dict[str, Any]:
+        self.calls.append(("detail", activity_id))
+        detail = dict(self.detail)
+        detail["id"] = activity_id
+        return detail
+
+    async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+        self.calls.append(("wellness", oldest, newest))
+        return list(self.wellness)
+
+    async def list_events(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+        self.calls.append(("events", oldest, newest))
+        return list(self.events)
+
+    async def get_sport_settings(self) -> list[dict[str, Any]]:
+        self.calls.append(("sport_settings",))
+        return list(self.sport_settings)
+
+
+def make_activity(
+    activity_id: str,
+    day: int,
+    activity_type: str = "Ride",
+    name: str = "Synthetic Workout",
+) -> dict[str, Any]:
+    return {
+        "id": activity_id,
+        "start_date_local": f"2024-01-{day:02d}T08:00:00",
+        "type": activity_type,
+        "name": name,
+        "icu_training_load": 80.0,
+        "moving_time": 3600,
+        "icu_average_watts": 240.0,
+        "average_heartrate": 150.0,
+        "total_elevation_gain": 800.0,
+    }
+
+
+def make_wellness(day: int) -> dict[str, Any]:
+    return {"id": f"2024-01-{day:02d}", "ctl": 40.0, "hrv": 90.0, "sleepSecs": 28000}
+
+
+def make_activity_list() -> list[dict[str, Any]]:
+    return [
+        make_activity("fx-a", 20),
+        make_activity("fx-b", 18),
+        make_activity("fx-c", 15, activity_type="Run"),
+        make_activity("fx-d", 10),
+        make_activity("fx-e", 5),
+    ]
+
+
+def make_intervals_client(**overrides: Any) -> FakeIntervalsClient:
+    payloads: dict[str, Any] = {
+        "activities": make_activity_list(),
+        "wellness": [make_wellness(19), make_wellness(18), make_wellness(10)],
+        "events": [
+            {"name": "Tempo Session", "start_date_local": "2024-02-03T00:00:00"},
+            {"name": "Long Ride", "start_date_local": "2024-02-10T00:00:00"},
+        ],
+        "sport_settings": [{"id": 1, "ftp": 250.0}],
+        "detail": {
+            "start_date_local": "2024-01-20T08:00:00",
+            "type": "Ride",
+            "name": "Synthetic Workout",
+            "icu_intervals": [{"average_heartrate": 165}],
+        },
+    }
+    payloads.update(overrides)
+    return FakeIntervalsClient(**payloads)
+
+
 class FakeLlmProvider:
     name = "fake"
 
