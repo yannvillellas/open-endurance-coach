@@ -26,13 +26,21 @@ class CoachContext(BaseModel):
     def _section_payloads(self) -> dict[str, Any]:
         return {
             "focus": self.focus,
-            "recent_activities": [item.model_dump(mode="json") for item in self.recent_activities],
+            "recent_activities": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.recent_activities
+            ],
             "activity_detail": (
-                self.activity_detail.model_dump(mode="json") if self.activity_detail else 0
+                self.activity_detail.model_dump(mode="json", exclude_none=True)
+                if self.activity_detail
+                else 0
             ),
-            "wellness": [item.model_dump(mode="json") for item in self.wellness],
-            "upcoming_events": [item.model_dump(mode="json") for item in self.upcoming_events],
-            "sport_settings": [item.model_dump(mode="json") for item in self.sport_settings],
+            "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
+            "upcoming_events": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.upcoming_events
+            ],
+            "sport_settings": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings
+            ],
             "user_feedback": self.user_feedback if self.user_feedback else 0,
         }
 
