@@ -77,9 +77,16 @@ class CoachStore:
         return row is not None
 
     def unseen_activity_ids(self, activity_ids: Iterable[str]) -> set[str]:
-        rows = self._connection.execute("SELECT activity_id FROM seen_activities").fetchall()
+        ids = list(activity_ids)
+        if not ids:
+            return set()
+        placeholders = ",".join("?" for _ in ids)
+        rows = self._connection.execute(
+            f"SELECT activity_id FROM seen_activities WHERE activity_id IN ({placeholders})",
+            ids,
+        ).fetchall()
         seen = {row["activity_id"] for row in rows}
-        return {item for item in activity_ids if item not in seen}
+        return {item for item in ids if item not in seen}
 
     def save_draft(
         self,

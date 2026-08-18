@@ -74,6 +74,18 @@ def test_unseen_activity_ids_filters_seen(tmp_path: Path) -> None:
     assert store.unseen_activity_ids(["act-1", "act-2", "act-3"]) == {"act-2", "act-3"}
 
 
+def test_unseen_activity_ids_queries_only_candidates(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.mark_activities_seen([f"seen-{index}" for index in range(100)])
+    queries: list[str] = []
+    store._connection.set_trace_callback(lambda statement: queries.append(statement))
+    result = store.unseen_activity_ids(["fx-a", "fx-b", "fx-c"])
+    assert result == {"fx-a", "fx-b", "fx-c"}
+    assert len(queries) == 1
+    assert "WHERE activity_id IN" in queries[0]
+    assert "fx-a" in queries[0]
+
+
 def test_unseen_activity_ids_handles_empty_input(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     assert store.unseen_activity_ids([]) == set()

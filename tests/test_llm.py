@@ -84,6 +84,17 @@ async def test_complete_json_exhausts_attempts(settings: Settings) -> None:
     assert len(provider.calls) == 3
 
 
+async def test_complete_json_max_attempts_zero_still_attempts_once(settings: Settings) -> None:
+    settings = settings.model_copy(update={"llm_provider": "fake"})
+    provider = FakeLlmProvider([completion('{"a": 1}')])
+    client = make_client(settings, provider)
+    result = await client.complete_json(
+        [LlmMessage(role="user", content="json please")], max_attempts=0
+    )
+    assert result == '{"a": 1}'
+    assert len(provider.calls) == 1
+
+
 def require_summary(payload: Any) -> None:
     if not isinstance(payload, dict) or not payload.get("summary"):
         raise ValueError("missing summary")
