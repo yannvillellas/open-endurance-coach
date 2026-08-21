@@ -1,10 +1,12 @@
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from open_endurance_coach.cli.rendering import (
+    apply_plan_text,
+    mutations_plan_text,
     render_apply,
     render_draft,
     render_report,
@@ -12,7 +14,12 @@ from open_endurance_coach.cli.rendering import (
 )
 from open_endurance_coach.engine.coach import ReviewView
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.decisions import (
+    CreateWorkout,
+    DecisionReport,
+    UpdateWorkout,
+    WorkoutMutation,
+)
 from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
 
@@ -126,3 +133,37 @@ def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
     render_apply(ApplyReport(), write=False)
     out = capsys.readouterr().out
     assert "No unapplied decisions." in out
+
+
+def test_mutations_plan_text_lists_each_mutation() -> None:
+    mutations: list[WorkoutMutation] = [
+        CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)),
+        UpdateWorkout(action="update", event_id=10001, moving_time=4200),
+    ]
+    text = mutations_plan_text(3, mutations)
+    assert "Draft #3 - approve these mutations:" in text
+    assert "- create Tempo Session" in text
+    assert "- update 10001" in text
+
+
+def test_mutations_plan_text_empty_mutations() -> None:
+    text = mutations_plan_text(3, [])
+    assert "(no calendar mutations)" in text
+
+
+def test_apply_plan_text_lists_decisions_and_outcomes() -> None:
+    report = ApplyReport(
+        decisions=[
+            AppliedDecision(
+                decision_id=1,
+                outcomes=[
+                    MutationOutcome(action="create", target="created", name="Tempo Session"),
+                    MutationOutcome(action="update", target="updated", event_id=10001),
+                ],
+            )
+        ]
+    )
+    text = apply_plan_text(report)
+    assert "Decision #1:" in text
+    assert "- create created: Tempo Session" in text
+    assert "- update updated: 10001" in text

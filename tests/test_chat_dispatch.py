@@ -9,7 +9,12 @@ from open_endurance_coach.chat.dispatch import (
     UnknownCommand,
     dispatch,
 )
-from open_endurance_coach.chat.state import ChatMode, ChatState
+from open_endurance_coach.chat.gate import PlanSnapshot
+from open_endurance_coach.chat.state import ChatState
+
+_CONFIRMING = ChatState(
+    plan=PlanSnapshot(action="approve", plan_text="Draft #3 - approve", draft_id=3)
+)
 
 
 @pytest.mark.parametrize(
@@ -76,10 +81,8 @@ def test_blank_lines_are_ignored(line: str) -> None:
     ["yes", "no", "cancel", "YES", "yes, but wait", "any free text", "/exit", "/approve 3"],
 )
 def test_confirming_state_consumes_every_line_before_routing(line: str) -> None:
-    state = ChatState(mode=ChatMode.CONFIRMING)
-    assert dispatch(line, state) == Confirmation(line.strip())
+    assert dispatch(line, _CONFIRMING) == Confirmation(line.strip())
 
 
 def test_blank_line_ignored_even_in_confirming_state() -> None:
-    state = ChatState(mode=ChatMode.CONFIRMING)
-    assert dispatch("   ", state) == Ignore()
+    assert dispatch("   ", _CONFIRMING) == Ignore()

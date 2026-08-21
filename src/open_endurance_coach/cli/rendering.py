@@ -1,7 +1,11 @@
 from rich.console import Console
 
 from open_endurance_coach.engine.coach import ReviewView
-from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.decisions import (
+    CreateWorkout,
+    DecisionReport,
+    WorkoutMutation,
+)
 from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import ApplyReport
 
@@ -33,6 +37,26 @@ def render_review(view: ReviewView, *, chat: bool = False) -> None:
             console.print(f'Answer the coach: {hint} "your RPE and notes"')
 
 
+def mutations_plan_text(draft_id: int, mutations: list[WorkoutMutation]) -> str:
+    lines = [f"Draft #{draft_id} - approve these mutations:"]
+    if not mutations:
+        lines.append("  (no calendar mutations)")
+    for mutation in mutations:
+        target = mutation.name if isinstance(mutation, CreateWorkout) else str(mutation.event_id)
+        lines.append(f"  - {mutation.action} {target}")
+    return "\n".join(lines)
+
+
+def apply_plan_text(report: ApplyReport) -> str:
+    lines: list[str] = []
+    for applied in report.decisions:
+        lines.append(f"Decision #{applied.decision_id}:")
+        for outcome in applied.outcomes:
+            target = str(outcome.event_id) if outcome.event_id is not None else outcome.name or ""
+            lines.append(f"  - {outcome.action} {outcome.target}: {target}")
+    return "\n".join(lines)
+
+
 def render_apply(report: ApplyReport, *, write: bool) -> None:
     if not report.decisions:
         console.print("No unapplied decisions.")
@@ -41,8 +65,4 @@ def render_apply(report: ApplyReport, *, write: bool) -> None:
         console.print("[green]Applied:[/green]")
     else:
         console.print("[yellow]DRY RUN - no changes written[/yellow]")
-    for applied in report.decisions:
-        console.print(f"Decision #{applied.decision_id}:")
-        for outcome in applied.outcomes:
-            target = str(outcome.event_id) if outcome.event_id is not None else outcome.name or ""
-            console.print(f"  - {outcome.action} {outcome.target}: {target}")
+    console.print(apply_plan_text(report))

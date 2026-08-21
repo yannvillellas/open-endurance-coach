@@ -1,18 +1,39 @@
+from dataclasses import replace
+
 import typer
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.dispatch import (
     Command,
+    Confirmation,
     Converse,
     Exit,
     Ignore,
     UnknownCommand,
     dispatch,
 )
+from open_endurance_coach.chat.gate import (
+    Cancelled,
+    Declined,
+    Discuss,
+    Feedback,
+    Ignored,
+    PlanSnapshot,
+    Proceed,
+    handle,
+)
 from open_endurance_coach.chat.state import ChatState
-from open_endurance_coach.cli.rendering import console, render_draft, render_review
+from open_endurance_coach.cli.rendering import (
+    apply_plan_text,
+    console,
+    mutations_plan_text,
+    render_apply,
+    render_draft,
+    render_review,
+)
 from open_endurance_coach.clients.llm import LlmError
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.store.records import DraftStatus
 
 chat_app = typer.Typer()
 
@@ -20,9 +41,9 @@ HELP_TEXT = (
     "/analyze [focus]       run a full analysis and save a draft\n"
     "/review [id]           list pending drafts, or inspect one\n"
     "/feedback <id> <text>  answer the coach's questions on a draft\n"
-    "/approve <id>          approve a draft (confirmation-gated, wired in 2b)\n"
-    "/reject <id>           reject a draft (confirmation-gated, wired in 2b)\n"
-    "/apply [id] [--write]  apply decisions (confirmation-gated, wired in 2b)\n"
+    "/approve <id>          approve a draft (yes/no confirmation)\n"
+    "/reject <id>           reject a draft (yes/no confirmation)\n"
+    "/apply [id] [--write]  apply decisions (dry-run; --write needs yes)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
     "Any other line is a conversation turn (wired in 4c)."
@@ -51,10 +72,113 @@ def _render_review(engine: CoachEngine, draft_id: int) -> None:
     render_review(engine.review(draft_id), chat=True)
 
 
-async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
+def _build_approve_snapshot(engine: CoachEngine, args: list[str]) -> PlanSnapshot | None:
+    if len(args) != 1 or _parse_id(args[0]) is None:
+        console.print("usage: /approve <draft_id>")
+        return None
+    draft_id = _parse_id(args[0])
+    assert draft_id is not None
+    view = engine.review(draft_id)
+    if view.draft.status is not DraftStatus.PENDING:
+        console.print(
+            f"[red]error:[/red] draft #{draft_id} is {view.draft.status.value};"
+            " only pending drafts can be approved"
+        )
+        return None
+    return PlanSnapshot(
+        action="approve",
+        plan_text=mutations_plan_text(draft_id, view.draft.report.mutations),
+        draft_id=draft_id,
+    )
+
+
+def _build_reject_snapshot(engine: CoachEngine, args: list[str]) -> PlanSnapshot | None:
+    if len(args) != 1 or _parse_id(args[0]) is None:
+        console.print("usage: /reject <draft_id>")
+        return None
+    draft_id = _parse_id(args[0])
+    assert draft_id is not None
+    view = engine.review(draft_id)
+    if view.draft.status is not DraftStatus.PENDING:
+        console.print(
+            f"[red]error:[/red] draft #{draft_id} is {view.draft.status.value};"
+            " only pending drafts can be rejected"
+        )
+        return None
+    return PlanSnapshot(
+        action="reject",
+        plan_text=(
+            f"Draft #{draft_id} - reject: discards the draft and its feedback;"
+            " nothing changes on Intervals.icu."
+        ),
+        draft_id=draft_id,
+    )
+
+
+def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
+    console.print("[bold yellow]Confirm? Reply with exactly yes or no.[/bold yellow]")
+    console.print(snapshot.plan_text)
+    console.print("[dim](yes / no / cancel)[/dim]")
+    return ChatState(plan=snapshot)
+
+
+async def _execute_gated(engine: CoachEngine, snapshot: PlanSnapshot) -> None:
+    if snapshot.action == "approve":
+        assert snapshot.draft_id is not None
+        decision = engine.approve(snapshot.draft_id)
+        console.print(
+            f"Decision #{decision.id} recorded from draft #{snapshot.draft_id}"
+            f" ({len(decision.report.mutations)} mutations)."
+        )
+    elif snapshot.action == "reject":
+        assert snapshot.draft_id is not None
+        engine.reject(snapshot.draft_id)
+        console.print(f"Draft #{snapshot.draft_id} rejected.")
+    else:
+        report = await engine.apply(snapshot.decision_id, dry_run=not snapshot.write)
+        render_apply(report, write=snapshot.write)
+
+
+async def _handle_confirmation(engine: CoachEngine, state: ChatState, line: str) -> ChatState:
+    assert state.plan is not None
+    snapshot = state.plan
+    try:
+        match handle(line, snapshot):
+            case Proceed():
+                await _execute_gated(engine, snapshot)
+                return ChatState()
+            case Declined():
+                console.print("[yellow]Nothing changed.[/yellow]")
+                return ChatState()
+            case Cancelled():
+                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+                return ChatState()
+            case Ignored():
+                return _enter_confirmation(snapshot)
+            case Feedback(feedback):
+                assert snapshot.draft_id is not None
+                updated = await engine.submit_feedback(snapshot.draft_id, feedback)
+                render_draft(updated, updated=True, chat=True)
+                restated = replace(
+                    snapshot,
+                    plan_text=mutations_plan_text(updated.id, updated.report.mutations),
+                )
+                return _enter_confirmation(restated)
+            case Discuss():
+                console.print(
+                    "[dim]Conversation turns are wired in 4c;"
+                    " /analyze runs a full review now.[/dim]"
+                )
+                return _enter_confirmation(snapshot)
+    except (LlmError, ValueError, RuntimeError) as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        return ChatState()
+
+
+async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatState | None:
     if name == "help":
-        console.print(HELP_TEXT)
-        return
+        console.print(HELP_TEXT, markup=False)
+        return None
     try:
         if name == "analyze":
             from open_endurance_coach.cli import main as cli_main
@@ -64,19 +188,19 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
         elif name == "review":
             if not args:
                 _render_pending(engine)
-                return
+                return None
             if len(args) > 1:
-                console.print("usage: /review [id]")
-                return
+                console.print("usage: /review [id]", markup=False)
+                return None
             draft_id = _parse_id(args[0])
             if draft_id is None:
                 console.print("[red]error:[/red] draft id must be a number")
-                return
+                return None
             _render_review(engine, draft_id)
         elif name == "feedback":
             if len(args) < 2 or _parse_id(args[0]) is None:
                 console.print("usage: /feedback <draft_id> <text>")
-                return
+                return None
             draft_id = _parse_id(args[0])
             assert draft_id is not None
             render_draft(
@@ -84,13 +208,40 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
                 updated=True,
                 chat=True,
             )
-        elif name in {"approve", "reject", "apply"}:
-            console.print(
-                f"[yellow]{name} is confirmation-gated and wired in 2b;"
-                f" use `coach {name}` meanwhile.[/yellow]"
+        elif name == "approve":
+            snapshot = _build_approve_snapshot(engine, args)
+            if snapshot is not None:
+                return _enter_confirmation(snapshot)
+        elif name == "reject":
+            snapshot = _build_reject_snapshot(engine, args)
+            if snapshot is not None:
+                return _enter_confirmation(snapshot)
+        elif name == "apply":
+            write = "--write" in args
+            rest = [arg for arg in args if arg != "--write"]
+            if len(rest) > 1 or (rest and _parse_id(rest[0]) is None):
+                console.print("usage: /apply [decision_id] [--write]", markup=False)
+                return None
+            decision_id = _parse_id(rest[0]) if rest else None
+            report = await engine.apply(decision_id, dry_run=True)
+            if not report.decisions:
+                console.print("No unapplied decisions.")
+                return None
+            if not write:
+                render_apply(report, write=False)
+                return None
+            return _enter_confirmation(
+                PlanSnapshot(
+                    action="apply",
+                    plan_text=f"Decision(s) - write to calendar:\n{apply_plan_text(report)}",
+                    draft_id=None,
+                    decision_id=decision_id,
+                    write=True,
+                )
             )
     except (LlmError, ValueError, RuntimeError) as exc:
         console.print(f"[red]error:[/red] {exc}")
+    return None
 
 
 async def run_chat(engine: CoachEngine) -> None:
@@ -99,7 +250,16 @@ async def run_chat(engine: CoachEngine) -> None:
     while True:
         try:
             line = Prompt.ask("[bold cyan]you[/bold cyan]")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
+            if state.plan is not None:
+                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+            console.print("bye")
+            return
+        except KeyboardInterrupt:
+            if state.plan is not None:
+                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+                state = ChatState()
+                continue
             console.print("bye")
             return
         match dispatch(line, state):
@@ -115,9 +275,11 @@ async def run_chat(engine: CoachEngine) -> None:
                 )
             case UnknownCommand():
                 console.print("[red]Unknown command.[/red]")
-                console.print(HELP_TEXT)
+                console.print(HELP_TEXT, markup=False)
+            case Confirmation(line=line):
+                state = await _handle_confirmation(engine, state, line)
             case Command(name=name, args=args):
-                await _run_command(engine, name, args)
+                state = await _run_command(engine, name, args) or state
 
 
 @chat_app.command()

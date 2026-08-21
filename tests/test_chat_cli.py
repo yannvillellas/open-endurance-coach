@@ -11,7 +11,7 @@ from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 
 from .fakes import FakeCalendarClient, FakeLlmProvider, completion, report_json
-from .test_cli import CREATE_MUTATION, FakeRunner, make_engine
+from .test_cli import CREATE_MUTATION, FakeRunner, decision_of, make_engine
 
 runner = CliRunner()
 
@@ -152,22 +152,169 @@ def test_chat_missing_draft_error_continues(patched: Any) -> None:
     assert "/analyze" in result.output
 
 
-def test_chat_approve_is_not_wired_and_writes_nothing(patched: Any) -> None:
+def test_chat_approve_requires_literal_yes(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/approve 1\nYES\n")
+    assert result.exit_code == 0
+    assert "Confirm?" in result.output
+    assert "approve these mutations" in result.output
+    assert "Decision #1 recorded" in result.output
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.status is DraftStatus.APPROVED
+    assert len(store.list_decisions()) == 1
+
+
+def test_chat_approve_no_declines_without_change(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/approve 1\nno\n")
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_approve_cancel_writes_nothing(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/approve 1\ncancel\n")
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_approve_non_yes_falls_back_to_feedback_then_restates_plan(patched: Any) -> None:
+    _, store = patched(
+        FakeLlmProvider(
+            [
+                completion(report_json(mutations=[CREATE_MUTATION])),
+                completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
+            ]
+        )
+    )
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nwait, explain\nyes\n"
+    )
+    assert result.exit_code == 0
+    assert "Decision #1 recorded" in result.output
+    assert result.output.count("approve these mutations") == 2
+    assert [row.content for row in store.list_feedback(1)] == ["wait, explain"]
+    draft = store.get_draft(1)
+    assert draft.report.summary == "Reconsidered."
+    assert draft.status is DraftStatus.APPROVED
+
+
+def test_chat_approve_fuzzy_yes_is_feedback_then_cancel(patched: Any) -> None:
+    _, store = patched(
+        FakeLlmProvider(
+            [
+                completion(report_json(mutations=[CREATE_MUTATION])),
+                completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
+            ]
+        )
+    )
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes, but wait\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output
+    assert [row.content for row in store.list_feedback(1)] == ["yes, but wait"]
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_approve_requires_draft_id(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/approve\n")
+    assert result.exit_code == 0
+    assert "usage: /approve <draft_id>" in result.output
+
+
+def test_chat_reject_requires_literal_yes(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/reject 1\nyes\n")
+    assert result.exit_code == 0
+    assert "Confirm?" in result.output
+    assert "Draft #1 rejected." in result.output
+    assert store.get_draft(1).status is DraftStatus.REJECTED
+
+
+def test_chat_reject_no_keeps_draft_pending(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/reject 1\nno\n")
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_chat_apply_dry_run_is_ungated(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes\n/apply\n")
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+    assert result.output.count("Confirm?") == 1
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_chat_apply_write_requires_literal_yes(patched: Any) -> None:
     calendar = FakeCalendarClient()
     _, store = patched(
         FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
         calendar=calendar,
     )
     result = runner.invoke(
-        cli_main.app, ["chat"], input="/analyze\n/approve 1\n/apply 1 --write\n/exit\n"
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes\n/apply 1 --write\nyes\n"
     )
     assert result.exit_code == 0
-    assert "2b" in result.output
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.status is DraftStatus.PENDING
-    assert store.list_decisions() == []
+    assert "Confirm?" in result.output
+    assert "Tempo Session" in result.output
+    assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
+
+
+def test_chat_apply_write_declined_writes_nothing(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes\n/apply 1 --write\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
     assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_chat_apply_discuss_fallback_re_prompts_same_plan(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input="/analyze\n/approve 1\nyes\n/apply --write\nwhat does update mean?\nno\n",
+    )
+    assert result.exit_code == 0
+    assert result.output.count("Confirm?") == 3
+    assert "4c" in result.output
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_chat_apply_bad_args_show_usage(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/apply abc --write\n")
+    assert result.exit_code == 0
+    assert "usage: /apply [decision_id] [--write]" in result.output
 
 
 def test_chat_converse_turns_are_not_wired_yet(patched: Any) -> None:
@@ -184,3 +331,82 @@ def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     assert result.exit_code == 0
     assert "error" not in result.output
     assert "/analyze" in result.output
+
+
+def make_fake_prompt(monkeypatch: pytest.MonkeyPatch, script: list[object]) -> None:
+    from types import SimpleNamespace
+
+    from open_endurance_coach.cli import chat as cli_chat
+
+    remaining = list(script)
+
+    def ask(prompt: str, *args: Any, **kwargs: Any) -> str:
+        step = remaining.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        assert isinstance(step, str)
+        return step
+
+    monkeypatch.setattr(cli_chat, "Prompt", SimpleNamespace(ask=ask))
+
+
+def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    make_fake_prompt(
+        monkeypatch, ["/analyze", "/approve 1", KeyboardInterrupt(), "/help", EOFError()]
+    )
+    result = runner.invoke(cli_main.app, ["chat"])
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
+    assert "/analyze" in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_eof_during_confirmation_cancels_and_exits(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    make_fake_prompt(monkeypatch, ["/analyze", "/approve 1", EOFError()])
+    result = runner.invoke(cli_main.app, ["chat"])
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
+    assert "bye" in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    patched(FakeLlmProvider())
+    make_fake_prompt(monkeypatch, [KeyboardInterrupt()])
+    result = runner.invoke(cli_main.app, ["chat"])
+    assert result.exit_code == 0
+    assert "bye" in result.output
+    assert "Cancelled" not in result.output
+
+
+def test_chat_approve_on_approved_draft_refuses_before_prompting(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    make_fake_prompt(monkeypatch, ["/analyze", "/approve 1", "yes", "/approve 1", EOFError()])
+    result = runner.invoke(cli_main.app, ["chat"])
+    assert result.exit_code == 0
+    assert result.output.count("Confirm?") == 1
+    assert "only pending drafts can be approved" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+    assert len(store.list_decisions()) == 1
+
+
+def test_chat_reject_on_approved_draft_refuses_before_prompting(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    make_fake_prompt(monkeypatch, ["/analyze", "/approve 1", "yes", "/reject 1", EOFError()])
+    result = runner.invoke(cli_main.app, ["chat"])
+    assert result.exit_code == 0
+    assert result.output.count("Confirm?") == 1
+    assert "only pending drafts can be rejected" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
