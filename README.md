@@ -16,13 +16,57 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 ```text
 coach ask <question>          Ask the coach anything (trend queries supported)
-coach analyze [focus]         Post-training analysis (optional --feedback)
+coach analyze [focus]         Post-training analysis (default focus used when omitted)
 coach review [draft_id]       List pending drafts or inspect one
 coach feedback <id> <text>    Answer the coach's questions on a draft
-coach approve <id>            Approve a draft (optional --mutations-file)
-coach reject <id>             Discard a draft
-coach apply [decision_id]     Dry-run by default; --write applies to the calendar
+coach approve <id>            Approve a draft (yes/no confirmation; --yes to skip)
+coach reject <id>             Discard a draft (yes/no confirmation; --yes to skip)
+coach apply [decision_id]     Dry-run by default; --write applies (needs confirmation)
+coach chat                    Interactive conversation mode
 ```
+
+Options: `--feedback` (inject subjective context into ask/analyze), `--mutations-file` (approve with your own workout mutations), `--write`/`--yes` (apply).
+
+### Modes
+
+- **Analysis mode** (`ask`, `analyze`): extracts a fresh data snapshot (recent activities, wellness, upcoming events, sport settings — or a 90-day filtered window for trend questions), runs the strict JSON analysis, saves a **draft**, and marks the analyzed activities as seen so they surface as "New activities since last review" only once. Nothing is written to the calendar here.
+- **Chat mode** (`coach chat`): free-text lines are **conversation turns** — the coach answers in prose from one cached data snapshot (re-verified only for trend-shaped questions), never creates drafts, and never marks activities seen. The `/`-prefixed commands run the classic operations inside the session:
+
+```text
+/analyze [focus]       run a full analysis and save a draft
+/review [id]           list pending drafts, or inspect one
+/feedback <id> <text>  answer the coach's questions on a draft
+/approve <id>          approve a draft (yes/no confirmation)
+/reject <id>           reject a draft (yes/no confirmation)
+/apply [id] [--write]  apply decisions (dry-run; --write needs yes)
+/help                  show this help
+/exit, /quit           leave the chat
+```
+
+- **Confirmation gate:** nothing changes on Intervals.icu unless the last input was literally `yes` (or `no` to decline). The exact plan is restated before asking; any other answer is treated as discussion and never writes. Mid-confirmation Ctrl-C cancels safely; `--yes` on the one-shot commands bypasses the prompt for scripts.
+
+- **Chat memory:** a session starts with the last N feedback exchanges (10 turns, up to 2048 tokens) reconstructed from the feedback table, and trims itself to that cap as the conversation grows. Memory is per-session: quitting forgets the in-memory turns, but the feedback table persists as the audit trail.
+
+## Configuration
+
+All settings come from environment variables or a `.env` file (see `.env.example`). Essentials: `INTERVALS_API_KEY`, `INTERVALS_ATHLETE_ID`, `DEEPSEEK_API_KEY`. Optional knobs:
+
+| Variable                           | Default                    | Purpose                                                                |
+| ---------------------------------- | -------------------------- | ---------------------------------------------------------------------- |
+| `LLM_MODEL` / `LLM_THINKING`       | `deepseek-v4-pro` / `true` | Model and reasoning mode                                               |
+| `LLM_MAX_TOKENS`                   | `8192`                     | Output budget for the analysis JSON                                    |
+| `LLM_TIMEOUT_SECONDS`              | `180`                      | Per-call timeout                                                       |
+| `APP_TIMEZONE`                     | `Europe/Paris`             | Training-day boundaries; must match the Intervals.icu account timezone |
+| `DATABASE_PATH`                    | `data/coach.db`            | Local SQLite state (drafts, decisions, feedback)                       |
+| `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`                  | HTTP retry policy                                                      |
+| `REQUESTS_PER_SECOND`              | `8`                        | Intervals.icu rate-limit throttle                                      |
+| `ATHLETE_PROFILE` / `COACH_TONE`   | configurable               | Persona injected into every prompt                                     |
+| `CHAT_HISTORY_TURNS`               | `10`                       | Feedback rows loaded as chat memory                                    |
+| `CHAT_HISTORY_MAX_TOKENS`          | `2048`                     | Chat memory budget (self-trimmed)                                      |
+
+## Safety model
+
+Approved decisions are applied to Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only draft approval, and an explicit yes/no confirmation restating the exact plan. The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event. Applying defaults to a dry-run.
 
 ## Coaching Methodology
 
