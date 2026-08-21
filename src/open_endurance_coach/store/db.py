@@ -7,7 +7,7 @@ from pathlib import Path
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 
-from .records import Decision, Draft, DraftStatus, Feedback
+from .records import Decision, Draft, DraftStatus, Feedback, FeedbackWithReport
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_activities (
@@ -192,6 +192,29 @@ class CoachStore:
                 draft_id=row["draft_id"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 content=row["content"],
+            )
+            for row in rows
+        ]
+
+    def recent_feedback(self, limit: int) -> list[FeedbackWithReport]:
+        if limit <= 0:
+            return []
+        rows = self._connection.execute(
+            "SELECT f.id AS id, f.draft_id AS draft_id, f.created_at AS created_at,"
+            " f.content AS content, d.report_json AS report_json"
+            " FROM feedback f JOIN drafts d ON d.id = f.draft_id"
+            " ORDER BY f.id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            FeedbackWithReport(
+                feedback=Feedback(
+                    id=row["id"],
+                    draft_id=row["draft_id"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    content=row["content"],
+                ),
+                report=DecisionReport.model_validate(json.loads(row["report_json"])),
             )
             for row in rows
         ]

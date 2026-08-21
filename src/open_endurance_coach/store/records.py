@@ -32,6 +32,12 @@ class Feedback:
 
 
 @dataclass(frozen=True)
+class FeedbackWithReport:
+    feedback: Feedback
+    report: DecisionReport
+
+
+@dataclass(frozen=True)
 class Decision:
     id: int
     draft_id: int
