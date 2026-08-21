@@ -1,5 +1,4 @@
 import typer
-from rich.console import Console
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.dispatch import (
@@ -11,12 +10,11 @@ from open_endurance_coach.chat.dispatch import (
     dispatch,
 )
 from open_endurance_coach.chat.state import ChatState
+from open_endurance_coach.cli.rendering import console, render_draft, render_review
 from open_endurance_coach.clients.llm import LlmError
 from open_endurance_coach.engine.coach import CoachEngine
-from open_endurance_coach.store.records import DraftStatus
 
 chat_app = typer.Typer()
-console = Console()
 
 HELP_TEXT = (
     "/analyze [focus]       run a full analysis and save a draft\n"
@@ -50,15 +48,7 @@ def _render_pending(engine: CoachEngine) -> None:
 
 
 def _render_review(engine: CoachEngine, draft_id: int) -> None:
-    from open_endurance_coach.cli import main as cli_main
-
-    view = engine.review(draft_id)
-    cli_main._render_report(view.draft.report)
-    if view.draft.status is DraftStatus.PENDING:
-        for line in view.requested_feedback:
-            console.print(f"  [yellow]? {line}[/yellow]")
-        if view.requested_feedback:
-            console.print(f'Answer the coach: /feedback {draft_id} "your RPE and notes"')
+    render_review(engine.review(draft_id), chat=True)
 
 
 async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
@@ -70,7 +60,7 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
             from open_endurance_coach.cli import main as cli_main
 
             focus = " ".join(args) if args else cli_main.DEFAULT_ANALYZE_FOCUS
-            cli_main._render_draft(await engine.analyze(focus))
+            render_draft(await engine.analyze(focus), chat=True)
         elif name == "review":
             if not args:
                 _render_pending(engine)
@@ -89,10 +79,10 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> None:
                 return
             draft_id = _parse_id(args[0])
             assert draft_id is not None
-            from open_endurance_coach.cli import main as cli_main
-
-            cli_main._render_draft(
-                await engine.submit_feedback(draft_id, " ".join(args[1:])), updated=True
+            render_draft(
+                await engine.submit_feedback(draft_id, " ".join(args[1:])),
+                updated=True,
+                chat=True,
             )
         elif name in {"approve", "reject", "apply"}:
             console.print(
