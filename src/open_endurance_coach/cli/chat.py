@@ -27,7 +27,7 @@ from open_endurance_coach.clients.llm import LlmError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.extractors.deep import detect_deep_query
-from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.store.records import Draft, DraftStatus
 
 chat_app = typer.Typer()
 
@@ -152,6 +152,9 @@ async def _handle_confirmation(
     async def discuss(line: str) -> None:
         await _handle_converse(engine, session, line)
 
+    async def feedback(line: str, updated: Draft) -> None:
+        session.append(line, assistant_turn(updated.report).content)
+
     try:
         step = await respond(
             engine,
@@ -160,6 +163,7 @@ async def _handle_confirmation(
             executor=execute,
             chat=True,
             on_discuss=discuss,
+            on_feedback=feedback,
         )
     except (LlmError, ValueError, RuntimeError) as exc:
         console.print(f"[red]error:[/red] {exc}")
@@ -241,7 +245,7 @@ async def _run_command(
 
 
 async def run_chat(engine: CoachEngine, settings: Settings) -> None:
-    session = ChatSession()
+    session = ChatSession(cap=settings.chat_history_max_tokens)
     session.seed(
         engine.recent_history(settings.chat_history_turns),
         max_tokens=settings.chat_history_max_tokens,

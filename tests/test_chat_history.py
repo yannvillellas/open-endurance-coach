@@ -152,3 +152,17 @@ def test_session_append_extends_history_in_order() -> None:
         LlmMessage(role="user", content="follow up"),
         LlmMessage(role="assistant", content="reply 2"),
     ]
+
+
+def test_session_append_trims_to_cap() -> None:
+    session = ChatSession(cap=100)
+    session.append("x" * 40, "y" * 4000)
+    assert len(session.history) == 1
+    assert session.history[0].role == "assistant"
+    assert session.history[0].content == "y" * 400
+
+
+def test_session_append_without_cap_keeps_everything() -> None:
+    session = ChatSession()
+    session.append("x" * 400, "y" * 4000)
+    assert len(session.history) == 2

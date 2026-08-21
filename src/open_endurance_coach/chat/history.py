@@ -47,6 +47,7 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
 class ChatSession:
     history: list[LlmMessage] = field(default_factory=list)
     context: CoachContext | None = None
+    cap: int | None = None
 
     def seed(self, entries: list[FeedbackWithReport], *, max_tokens: int) -> None:
         self.history = trim_history(seed_turns(entries), max_tokens)
@@ -54,3 +55,5 @@ class ChatSession:
     def append(self, user_text: str, assistant_text: str) -> None:
         self.history.append(LlmMessage(role="user", content=user_text))
         self.history.append(LlmMessage(role="assistant", content=assistant_text))
+        if self.cap is not None:
+            self.history = trim_history(self.history, self.cap)

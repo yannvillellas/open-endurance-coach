@@ -406,6 +406,46 @@ def test_chat_feedback_appends_to_session_history(patched: Any) -> None:
     assert third[4].content == "how is it going?"
 
 
+def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
+            completion("Chat reply."),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input="/analyze\n/approve 1\nwait, explain\nyes\nhow is it going?\n",
+    )
+    assert result.exit_code == 0
+    third = provider.calls[2]["messages"]
+    assert third[2].content == "wait, explain"
+    assert "Reconsidered." in third[3].content
+    assert third[4].content == "how is it going?"
+
+
+def test_chat_session_trims_to_cap(
+    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    provider = FakeLlmProvider(
+        [completion("A" * 4000), completion("B" * 4000), completion("C" * 4000)]
+    )
+    patched(provider)
+    monkeypatch.setattr(
+        cli_main,
+        "get_settings",
+        lambda: settings.model_copy(update={"chat_history_max_tokens": 100}),
+    )
+    result = runner.invoke(cli_main.app, ["chat"], input="first\nsecond\nthird\n")
+    assert result.exit_code == 0
+    history = provider.calls[2]["messages"][2:-1]
+    assert len(history) == 1
+    assert history[0].content == "B" * 400
+
+
 def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     patched(FakeLlmProvider())
     result = runner.invoke(cli_main.app, ["chat"], input="\n   \n/help\n")

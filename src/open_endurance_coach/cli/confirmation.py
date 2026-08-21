@@ -45,6 +45,7 @@ async def respond(
     discuss_message: str | None = None,
     restate: Callable[[Draft], str] = restate_mutations,
     on_discuss: Callable[[str], Awaitable[None]] | None = None,
+    on_feedback: Callable[[str, Draft], Awaitable[None]] | None = None,
 ) -> Done | PlanSnapshot:
     match handle(line, snapshot):
         case Proceed():
@@ -62,6 +63,8 @@ async def respond(
             assert snapshot.draft_id is not None
             updated = await engine.submit_feedback(snapshot.draft_id, feedback)
             render_draft(updated, updated=True, chat=chat)
+            if on_feedback is not None:
+                await on_feedback(feedback, updated)
             return replace(snapshot, plan_text=restate(updated))
         case Discuss(line):
             if on_discuss is not None:
