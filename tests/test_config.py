@@ -34,3 +34,16 @@ def test_missing_secrets_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_chat_history_defaults(settings: Settings) -> None:
+    assert settings.chat_history_turns == 10
+    assert settings.chat_history_max_tokens == 2048
+
+
+def test_chat_history_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHAT_HISTORY_TURNS", "20")
+    monkeypatch.setenv("CHAT_HISTORY_MAX_TOKENS", "4096")
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    assert settings.chat_history_turns == 20
+    assert settings.chat_history_max_tokens == 4096

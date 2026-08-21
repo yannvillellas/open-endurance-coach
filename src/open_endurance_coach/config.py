@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     athlete_profile: str = ""
     coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
 
+    chat_history_turns: int = 10
+    chat_history_max_tokens: int = 2048
+
     requests_per_second: float = 8.0
     max_retries: int = 3
     retry_base_delay: float = 1.0

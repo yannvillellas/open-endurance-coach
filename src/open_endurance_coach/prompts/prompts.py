@@ -51,7 +51,7 @@ def _system_message(settings: Settings) -> str:
     return "".join(parts)
 
 
-def _user_message(context: CoachContext) -> str:
+def context_sections(context: CoachContext) -> dict[str, Any]:
     sections: dict[str, Any] = {
         "focus": context.focus,
         "recent_activities": [
@@ -74,9 +74,13 @@ def _user_message(context: CoachContext) -> str:
         sections["today"] = f"Today's date (athlete local): {context.today.isoformat()}"
     if context.user_feedback:
         sections["user_feedback"] = context.user_feedback
+    return sections
+
+
+def _user_message(context: CoachContext) -> str:
     return (
         "Athlete data:\n"
-        f"{json.dumps(sections, indent=2, ensure_ascii=False)}\n"
+        f"{json.dumps(context_sections(context), indent=2, ensure_ascii=False)}\n"
         "Produce your analysis as json per the contract.\n"
     )
 
