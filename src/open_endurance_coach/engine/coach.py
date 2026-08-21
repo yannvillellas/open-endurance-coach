@@ -4,11 +4,12 @@ from datetime import date
 
 from pydantic import ValidationError
 
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
+from open_endurance_coach.prompts.chat import build_chat_messages
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
@@ -100,6 +101,24 @@ class CoachEngine:
         draft = self._store.get_draft(draft_id)
         assert draft is not None
         return draft
+
+    async def converse(
+        self,
+        text: str,
+        *,
+        history: list[LlmMessage] | None = None,
+        context: CoachContext | None = None,
+        today: date | None = None,
+    ) -> str:
+        if context is None:
+            context = self._surface_unseen(
+                await self._extract(text, user_feedback=None, today=today)
+            )
+        messages = build_chat_messages(context, self._settings, history=history, text=text)
+        completion = await self._llm_client.complete(messages, json_mode=False)
+        if not completion.content.strip():
+            raise LlmError("empty content returned")
+        return completion.content
 
     def review(self, draft_id: int) -> ReviewView:
         draft = self._store.get_draft(draft_id)
