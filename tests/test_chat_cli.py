@@ -491,3 +491,117 @@ def test_chat_reject_on_approved_draft_refuses_before_prompting(
     assert result.output.count("Confirm?") == 1
     assert "only pending drafts can be rejected" in result.output
     assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
+def _spy_writes(engine: CoachEngine) -> dict[str, int]:
+    calls = {"approve": 0, "reject": 0, "apply_write": 0}
+    original_approve = engine.approve
+    original_reject = engine.reject
+    original_apply = engine.apply
+
+    def approve(draft_id: int, *, mutations: Any = None) -> Any:
+        calls["approve"] += 1
+        return original_approve(draft_id, mutations=mutations)
+
+    def reject(draft_id: int) -> None:
+        calls["reject"] += 1
+        original_reject(draft_id)
+
+    async def apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
+        if not dry_run:
+            calls["apply_write"] += 1
+        return await original_apply(decision_id, dry_run=dry_run)
+
+    engine.approve = approve  # type: ignore[method-assign]
+    engine.reject = reject  # type: ignore[method-assign]
+    engine.apply = apply  # type: ignore[method-assign]
+    return calls
+
+
+def test_chat_yes_outside_confirmation_never_writes(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Sure.")])
+    engine, store = patched(provider)
+    calls = _spy_writes(engine)
+    result = runner.invoke(cli_main.app, ["chat"], input="yes\n")
+    assert result.exit_code == 0
+    assert "Coach: Sure." in result.output
+    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert store.list_decisions() == []
+
+
+def test_chat_fuzzy_yes_at_gate_never_writes(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    engine, store = patched(provider)
+    calls = _spy_writes(engine)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes please\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert calls["approve"] == 0
+    assert store.list_decisions() == []
+    assert [row.content for row in store.list_feedback(1)] == ["yes please"]
+
+
+@pytest.mark.parametrize("answer", ["y", "sure", "yes!", "YES SIR", ""])
+def test_chat_approve_never_writes_without_literal_yes(patched: Any, answer: str) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    engine, store = patched(provider)
+    calls = _spy_writes(engine)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input=f"/analyze\n/approve 1\n{answer}\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert calls["approve"] == 0
+    assert store.list_decisions() == []
+
+
+def test_chat_apply_write_requires_gate_yes(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    calls = _spy_writes(engine)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/approve 1\nyes\n/apply --write\nno\n"
+    )
+    assert result.exit_code == 0
+    assert calls["apply_write"] == 0
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_chat_reject_requires_gate_yes(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json("R."))])
+    engine, store = patched(provider)
+    calls = _spy_writes(engine)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/reject 1\nYES, DO IT\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert calls["reject"] == 0
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_chat_only_literal_yes_reaches_the_gated_calls(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    calls = _spy_writes(engine)
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input="/analyze\n/approve 1\nyes\n/apply 1 --write\nyes\n",
+    )
+    assert result.exit_code == 0
+    assert calls == {"approve": 1, "reject": 0, "apply_write": 1}
+    assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
