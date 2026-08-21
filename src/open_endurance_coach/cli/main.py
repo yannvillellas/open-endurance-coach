@@ -7,6 +7,8 @@ import typer
 from pydantic import TypeAdapter, ValidationError
 from rich.console import Console
 
+# imported before app.add_typer below; cli.chat reaches cli.main lazily to avoid a cycle
+from open_endurance_coach.cli.chat import chat_app
 from open_endurance_coach.clients.intervals import IntervalsClient
 from open_endurance_coach.clients.llm import LlmClient, LlmError
 from open_endurance_coach.clients.providers import build_registry
@@ -18,6 +20,7 @@ from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(chat_app)
 console = Console()
 _mutations_adapter = TypeAdapter(list[WorkoutMutation])
 
