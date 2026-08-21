@@ -11,6 +11,7 @@ from open_endurance_coach.chat.dispatch import (
     dispatch,
 )
 from open_endurance_coach.chat.gate import PlanSnapshot
+from open_endurance_coach.chat.history import ChatSession, assistant_turn
 from open_endurance_coach.chat.state import ChatState
 from open_endurance_coach.cli.confirmation import Done, prompt_plan, respond
 from open_endurance_coach.cli.rendering import (
@@ -23,7 +24,9 @@ from open_endurance_coach.cli.rendering import (
     render_review,
 )
 from open_endurance_coach.clients.llm import LlmError
+from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.store.records import DraftStatus
 
 chat_app = typer.Typer()
@@ -37,7 +40,7 @@ HELP_TEXT = (
     "/apply [id] [--write]  apply decisions (dry-run; --write needs yes)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
-    "Any other line is a conversation turn (wired in 4c)."
+    "Any other line is a conversation turn."
 )
 
 
@@ -125,12 +128,29 @@ async def _execute_gated(engine: CoachEngine, snapshot: PlanSnapshot) -> None:
         render_apply(report, write=snapshot.write)
 
 
-async def _handle_confirmation(engine: CoachEngine, state: ChatState, line: str) -> ChatState:
+async def _handle_converse(engine: CoachEngine, session: ChatSession, text: str) -> None:
+    try:
+        if session.context is None or detect_deep_query(text) is not None:
+            session.context = await engine.build_context(text)
+        reply = await engine.converse(text, history=session.history, context=session.context)
+        console.print("[bold green]Coach:[/bold green]", end=" ")
+        console.print(reply, markup=False)
+        session.append(text, reply)
+    except (LlmError, ValueError, RuntimeError) as exc:
+        console.print(f"[red]error:[/red] {exc}")
+
+
+async def _handle_confirmation(
+    engine: CoachEngine, state: ChatState, line: str, session: ChatSession
+) -> ChatState:
     assert state.plan is not None
     snapshot = state.plan
 
     async def execute(current: CoachEngine) -> None:
         await _execute_gated(current, snapshot)
+
+    async def discuss(line: str) -> None:
+        await _handle_converse(engine, session, line)
 
     try:
         step = await respond(
@@ -139,9 +159,7 @@ async def _handle_confirmation(engine: CoachEngine, state: ChatState, line: str)
             line,
             executor=execute,
             chat=True,
-            discuss_message=(
-                "[dim]Conversation turns are wired in 4c; /analyze runs a full review now.[/dim]"
-            ),
+            on_discuss=discuss,
         )
     except (LlmError, ValueError, RuntimeError) as exc:
         console.print(f"[red]error:[/red] {exc}")
@@ -151,7 +169,9 @@ async def _handle_confirmation(engine: CoachEngine, state: ChatState, line: str)
     return _enter_confirmation(step)
 
 
-async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatState | None:
+async def _run_command(
+    engine: CoachEngine, name: str, args: list[str], session: ChatSession
+) -> ChatState | None:
     if name == "help":
         console.print(HELP_TEXT, markup=False)
         return None
@@ -161,6 +181,7 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatS
 
             focus = " ".join(args) if args else cli_main.DEFAULT_ANALYZE_FOCUS
             render_draft(await engine.analyze(focus), chat=True)
+            session.context = None
         elif name == "review":
             if not args:
                 _render_pending(engine)
@@ -179,11 +200,10 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatS
                 return None
             draft_id = _parse_id(args[0])
             assert draft_id is not None
-            render_draft(
-                await engine.submit_feedback(draft_id, " ".join(args[1:])),
-                updated=True,
-                chat=True,
-            )
+            text = " ".join(args[1:])
+            updated = await engine.submit_feedback(draft_id, text)
+            render_draft(updated, updated=True, chat=True)
+            session.append(text, assistant_turn(updated.report).content)
         elif name == "approve":
             snapshot = _build_approve_snapshot(engine, args)
             if snapshot is not None:
@@ -220,7 +240,12 @@ async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatS
     return None
 
 
-async def run_chat(engine: CoachEngine) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings) -> None:
+    session = ChatSession()
+    session.seed(
+        engine.recent_history(settings.chat_history_turns),
+        max_tokens=settings.chat_history_max_tokens,
+    )
     state = ChatState()
     console.print("Chat with the coach. /help lists commands.")
     while True:
@@ -244,18 +269,15 @@ async def run_chat(engine: CoachEngine) -> None:
             case Exit():
                 console.print("bye")
                 return
-            case Converse():
-                console.print(
-                    "[dim]Conversation turns are wired in 4c;"
-                    " /analyze runs a full review now.[/dim]"
-                )
+            case Converse(text=text):
+                await _handle_converse(engine, session, text)
             case UnknownCommand():
                 console.print("[red]Unknown command.[/red]")
                 console.print(HELP_TEXT, markup=False)
             case Confirmation(line=line):
-                state = await _handle_confirmation(engine, state, line)
+                state = await _handle_confirmation(engine, state, line, session)
             case Command(name=name, args=args):
-                state = await _run_command(engine, name, args) or state
+                state = await _run_command(engine, name, args, session) or state
 
 
 @chat_app.command()
@@ -263,6 +285,6 @@ def chat() -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine)
+        await run_chat(engine, cli_main.get_settings())
 
     cli_main._run(run)

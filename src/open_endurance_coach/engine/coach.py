@@ -14,7 +14,12 @@ from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import Decision, Draft, DraftStatus
+from open_endurance_coach.store.records import (
+    Decision,
+    Draft,
+    DraftStatus,
+    FeedbackWithReport,
+)
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
@@ -83,6 +88,17 @@ class CoachEngine:
         )
         return DecisionReport.model_validate(json.loads(content))
 
+    async def build_context(
+        self,
+        focus: str,
+        *,
+        user_feedback: str | None = None,
+        today: date | None = None,
+    ) -> CoachContext:
+        return self._surface_unseen(
+            await self._extract(focus, user_feedback=user_feedback, today=today)
+        )
+
     async def analyze(
         self,
         focus: str,
@@ -90,9 +106,7 @@ class CoachEngine:
         user_feedback: str | None = None,
         today: date | None = None,
     ) -> Draft:
-        context = self._surface_unseen(
-            await self._extract(focus, user_feedback=user_feedback, today=today)
-        )
+        context = await self.build_context(focus, user_feedback=user_feedback, today=today)
         report = await self._run_llm(context)
         draft_id = self._store.save_draft(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
@@ -128,6 +142,9 @@ class CoachEngine:
 
     def pending_drafts(self) -> list[Draft]:
         return self._store.list_drafts(DraftStatus.PENDING)
+
+    def recent_history(self, limit: int) -> list[FeedbackWithReport]:
+        return self._store.recent_feedback(limit)
 
     @staticmethod
     def _solicitations(context: CoachContext) -> list[str]:

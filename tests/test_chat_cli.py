@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,8 @@ from typer.testing import CliRunner
 from open_endurance_coach.cli import main as cli_main
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 
@@ -23,6 +26,7 @@ def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path)
     ) -> tuple[CoachEngine, CoachStore]:
         engine, store = make_engine(settings, tmp_path, provider, calendar=calendar)
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
+        monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
         return engine, store
 
     return build
@@ -52,7 +56,7 @@ def test_chat_quit_alias_exits(patched: Any) -> None:
 
 
 def test_chat_eof_exits_cleanly(patched: Any) -> None:
-    patched(FakeLlmProvider())
+    patched(FakeLlmProvider([completion("Hello.")]))
     result = runner.invoke(cli_main.app, ["chat"], input="hi\n")
     assert result.exit_code == 0
     assert "bye" in result.output
@@ -292,10 +296,15 @@ def test_chat_apply_write_declined_writes_nothing(patched: Any) -> None:
     assert decision_of(store, 1).applied_at is None
 
 
-def test_chat_apply_discuss_fallback_re_prompts_same_plan(patched: Any) -> None:
+def test_chat_apply_discuss_fallback_converses_and_re_prompts(patched: Any) -> None:
     calendar = FakeCalendarClient()
     _, store = patched(
-        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        FakeLlmProvider(
+            [
+                completion(report_json(mutations=[CREATE_MUTATION])),
+                completion("Let me explain."),
+            ]
+        ),
         calendar=calendar,
     )
     result = runner.invoke(
@@ -304,8 +313,8 @@ def test_chat_apply_discuss_fallback_re_prompts_same_plan(patched: Any) -> None:
         input="/analyze\n/approve 1\nyes\n/apply --write\nwhat does update mean?\nno\n",
     )
     assert result.exit_code == 0
+    assert "Coach: Let me explain." in result.output
     assert result.output.count("Confirm?") == 3
-    assert "4c" in result.output
     assert calendar.created == []
     assert decision_of(store, 1).applied_at is None
 
@@ -317,12 +326,84 @@ def test_chat_apply_bad_args_show_usage(patched: Any) -> None:
     assert "usage: /apply [decision_id] [--write]" in result.output
 
 
-def test_chat_converse_turns_are_not_wired_yet(patched: Any) -> None:
-    _, store = patched(FakeLlmProvider())
+def test_chat_free_text_converses_without_drafts(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Keep it steady.")])
+    _, store = patched(provider)
     result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "4c" in result.output
+    assert "Coach: Keep it steady." in result.output
     assert store.list_drafts() == []
+    assert store.is_activity_seen("fx-a") is False
+    assert provider.calls[0]["json_mode"] is False
+
+
+def test_chat_seeds_history_from_feedback(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Chat reply.")])
+    _, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json("Reconsidered."))),
+        context=CoachContext(focus="f"),
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    result = runner.invoke(cli_main.app, ["chat"], input="how is it going?\n")
+    assert result.exit_code == 0
+    messages = provider.calls[-1]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "user", "assistant", "user"]
+    assert messages[2].content == "legs heavy"
+    assert "Reconsidered." in messages[3].content
+    assert messages[4].content == "how is it going?"
+
+
+def test_chat_session_memory_appends_turns(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Answer one."), completion("Answer two.")])
+    patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="first question\nsecond question\n")
+    assert result.exit_code == 0
+    second = provider.calls[1]["messages"]
+    assert [message.role for message in second] == ["system", "user", "user", "assistant", "user"]
+    assert second[2].content == "first question"
+    assert second[3].content == "Answer one."
+    assert second[4].content == "second question"
+
+
+def test_chat_deep_query_refreshes_context(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Hills improving.")])
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input="how much did my heart rate improve on hills over the last 3 months\n",
+    )
+    assert result.exit_code == 0
+    assert "activity_detail" in provider.calls[0]["messages"][1].content
+
+
+def test_chat_analyze_resets_cached_context(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
+    patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\nhow is it going?\n")
+    assert result.exit_code == 0
+    assert "New activities since last review" not in provider.calls[1]["messages"][1].content
+
+
+def test_chat_feedback_appends_to_session_history(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json()),
+            completion(report_json("Reconsidered.")),
+            completion("Chat reply."),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/feedback 1 legs heavy\nhow is it going?\n"
+    )
+    assert result.exit_code == 0
+    third = provider.calls[2]["messages"]
+    assert third[2].content == "legs heavy"
+    assert "Reconsidered." in third[3].content
+    assert third[4].content == "how is it going?"
 
 
 def test_chat_blank_lines_are_skipped(patched: Any) -> None:

@@ -506,3 +506,28 @@ async def test_converse_empty_content_raises_without_writes(
     with pytest.raises(LlmError, match="empty content"):
         await engine.converse("hi", context=CoachContext(focus="f"))
     assert store.list_drafts() == []
+
+
+async def test_recent_history_reads_feedback_from_store(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    draft_id = store.save_draft(
+        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    rows = engine.recent_history(10)
+    assert len(rows) == 1
+    assert rows[0].feedback.content == "legs heavy"
+    assert rows[0].report.summary == "ok"
+    assert engine.recent_history(0) == []
+
+
+async def test_build_context_surfaces_unseen_without_marking(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    context = await engine.build_context("how was my week?", today=TODAY)
+    assert "New activities since last review" in context.focus
+    assert store.is_activity_seen("fx-a") is False
+    assert store.list_drafts() == []

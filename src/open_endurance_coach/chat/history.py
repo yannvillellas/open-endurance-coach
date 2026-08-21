@@ -10,7 +10,7 @@ def _tokens_of(turn: LlmMessage) -> int:
     return max(1, len(turn.content) // 4)
 
 
-def _assistant_turn(report: DecisionReport) -> LlmMessage:
+def assistant_turn(report: DecisionReport) -> LlmMessage:
     content = report.summary
     if report.findings:
         content += "\n" + "\n".join(f"- {finding}" for finding in report.findings)
@@ -26,7 +26,7 @@ def seed_turns(entries: list[FeedbackWithReport]) -> list[LlmMessage]:
             entries[count - 2 - position].feedback.draft_id if position + 1 < count else None
         )
         if next_draft != entry.feedback.draft_id:
-            turns.append(_assistant_turn(entry.report))
+            turns.append(assistant_turn(entry.report))
     return turns
 
 
