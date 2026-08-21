@@ -47,6 +47,13 @@ def mutations_plan_text(draft_id: int, mutations: list[WorkoutMutation]) -> str:
     return "\n".join(lines)
 
 
+def reject_plan_text(draft_id: int) -> str:
+    return (
+        f"Draft #{draft_id} - reject: discards the draft and its feedback;"
+        " nothing changes on Intervals.icu."
+    )
+
+
 def apply_plan_text(report: ApplyReport) -> str:
     lines: list[str] = []
     for applied in report.decisions:

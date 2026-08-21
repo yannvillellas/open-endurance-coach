@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import typer
 from rich.prompt import Prompt
 
@@ -12,21 +10,14 @@ from open_endurance_coach.chat.dispatch import (
     UnknownCommand,
     dispatch,
 )
-from open_endurance_coach.chat.gate import (
-    Cancelled,
-    Declined,
-    Discuss,
-    Feedback,
-    Ignored,
-    PlanSnapshot,
-    Proceed,
-    handle,
-)
+from open_endurance_coach.chat.gate import PlanSnapshot
 from open_endurance_coach.chat.state import ChatState
+from open_endurance_coach.cli.confirmation import Done, prompt_plan, respond
 from open_endurance_coach.cli.rendering import (
     apply_plan_text,
     console,
     mutations_plan_text,
+    reject_plan_text,
     render_apply,
     render_draft,
     render_review,
@@ -107,18 +98,13 @@ def _build_reject_snapshot(engine: CoachEngine, args: list[str]) -> PlanSnapshot
         return None
     return PlanSnapshot(
         action="reject",
-        plan_text=(
-            f"Draft #{draft_id} - reject: discards the draft and its feedback;"
-            " nothing changes on Intervals.icu."
-        ),
+        plan_text=reject_plan_text(draft_id),
         draft_id=draft_id,
     )
 
 
 def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
-    console.print("[bold yellow]Confirm? Reply with exactly yes or no.[/bold yellow]")
-    console.print(snapshot.plan_text)
-    console.print("[dim](yes / no / cancel)[/dim]")
+    prompt_plan(snapshot)
     return ChatState(plan=snapshot)
 
 
@@ -142,37 +128,27 @@ async def _execute_gated(engine: CoachEngine, snapshot: PlanSnapshot) -> None:
 async def _handle_confirmation(engine: CoachEngine, state: ChatState, line: str) -> ChatState:
     assert state.plan is not None
     snapshot = state.plan
+
+    async def execute(current: CoachEngine) -> None:
+        await _execute_gated(current, snapshot)
+
     try:
-        match handle(line, snapshot):
-            case Proceed():
-                await _execute_gated(engine, snapshot)
-                return ChatState()
-            case Declined():
-                console.print("[yellow]Nothing changed.[/yellow]")
-                return ChatState()
-            case Cancelled():
-                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
-                return ChatState()
-            case Ignored():
-                return _enter_confirmation(snapshot)
-            case Feedback(feedback):
-                assert snapshot.draft_id is not None
-                updated = await engine.submit_feedback(snapshot.draft_id, feedback)
-                render_draft(updated, updated=True, chat=True)
-                restated = replace(
-                    snapshot,
-                    plan_text=mutations_plan_text(updated.id, updated.report.mutations),
-                )
-                return _enter_confirmation(restated)
-            case Discuss():
-                console.print(
-                    "[dim]Conversation turns are wired in 4c;"
-                    " /analyze runs a full review now.[/dim]"
-                )
-                return _enter_confirmation(snapshot)
+        step = await respond(
+            engine,
+            snapshot,
+            line,
+            executor=execute,
+            chat=True,
+            discuss_message=(
+                "[dim]Conversation turns are wired in 4c; /analyze runs a full review now.[/dim]"
+            ),
+        )
     except (LlmError, ValueError, RuntimeError) as exc:
         console.print(f"[red]error:[/red] {exc}")
         return ChatState()
+    if isinstance(step, Done):
+        return ChatState()
+    return _enter_confirmation(step)
 
 
 async def _run_command(engine: CoachEngine, name: str, args: list[str]) -> ChatState | None:
