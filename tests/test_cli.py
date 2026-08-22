@@ -10,6 +10,8 @@ from open_endurance_coach.cli import main as cli_main
 from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
@@ -496,3 +498,15 @@ def test_approve_gate_exit_command_cancels(patched: Any) -> None:
     assert "Cancelled. Nothing changed." in result.output
     assert store.get_draft(1).status is DraftStatus.PENDING
     assert store.list_decisions() == []
+
+
+def test_review_listing_escapes_summaries(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider())
+    store.save_draft(
+        focus="f",
+        report=DecisionReport(summary="Weird [bold]summary[/bold]."),
+        context=CoachContext(focus="f"),
+    )
+    result = runner.invoke(cli_main.app, ["review"])
+    assert result.exit_code == 0
+    assert "Weird [bold]summary[/bold]." in result.output

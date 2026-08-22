@@ -49,7 +49,10 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
     kept = [turn for pair in pairs for turn in pair]
     if kept and sum(_tokens_of(turn) for turn in kept) > max_tokens:
         if _tokens_of(kept[0]) > max_tokens - 1:
-            kept[0] = LlmMessage(role=kept[0].role, content=kept[0].content[: (max_tokens - 1) * 4])
+            kept[0] = LlmMessage(
+                role=kept[0].role,
+                content=kept[0].content[: max(1, (max_tokens - 1) * 4)],
+            )
         head = sum(_tokens_of(turn) for turn in kept[:-1])
         kept[-1] = LlmMessage(
             role=kept[-1].role,

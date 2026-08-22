@@ -190,3 +190,12 @@ def test_session_append_without_cap_keeps_everything() -> None:
     session = ChatSession()
     session.append("x" * 400, "y" * 4000)
     assert len(session.history) == 2
+
+
+def test_trim_history_clamps_at_minimum_cap() -> None:
+    turns = [
+        LlmMessage(role="user", content="hello"),
+        LlmMessage(role="assistant", content="hi"),
+    ]
+    trimmed = trim_history(turns, 1)
+    assert all(turn.content for turn in trimmed)

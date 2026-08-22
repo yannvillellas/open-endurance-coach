@@ -15,7 +15,7 @@ from open_endurance_coach.chat.dispatch import (
     UnknownCommand,
     dispatch,
 )
-from open_endurance_coach.chat.gate import PlanSnapshot
+from open_endurance_coach.chat.gate import PlanSnapshot, is_exit_command
 from open_endurance_coach.chat.history import ChatSession, assistant_turn
 from open_endurance_coach.chat.state import ChatState
 from open_endurance_coach.cli.confirmation import Done, prompt_plan, respond
@@ -131,7 +131,7 @@ async def _handle_proposal(
     if draft_id is None:
         console.print("[red]error:[/red] confirmation state has no draft")
         return ChatState()
-    if line.strip().casefold().split()[0] in {"/exit", "/quit"}:
+    if is_exit_command(line):
         console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
         return ExitChat()
 

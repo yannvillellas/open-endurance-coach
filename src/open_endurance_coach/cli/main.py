@@ -14,6 +14,7 @@ from open_endurance_coach.cli.confirmation import run_confirmation
 from open_endurance_coach.cli.rendering import (
     apply_plan_text,
     console,
+    escape,
     mutations_plan_text,
     reject_plan_text,
     render_apply,
@@ -173,7 +174,8 @@ def review(
                 return
             for draft in drafts:
                 console.print(
-                    f"Draft #{draft.id} ([cyan]{draft.status.value}[/cyan]): {draft.report.summary}"
+                    f"Draft #{draft.id} ([cyan]{draft.status.value}[/cyan]):"
+                    f" {escape(draft.report.summary)}"
                 )
             return
         render_review(engine.review(draft_id))

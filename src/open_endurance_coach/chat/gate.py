@@ -46,6 +46,11 @@ class Discuss:
 ConfirmationResult = Proceed | Declined | Cancelled | Ignored | Feedback | Discuss
 
 
+def is_exit_command(line: str) -> bool:
+    words = line.strip().casefold().split()
+    return bool(words) and words[0] in {"/exit", "/quit"}
+
+
 def handle(line: str, snapshot: PlanSnapshot) -> ConfirmationResult:
     stripped = line.strip()
     if not stripped:

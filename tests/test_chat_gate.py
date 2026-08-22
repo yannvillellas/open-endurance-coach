@@ -66,3 +66,22 @@ def test_fallback_preserves_interior_whitespace_and_strips_ends() -> None:
 
 def test_cancel_with_extra_text_is_a_fallback_not_a_cancel() -> None:
     assert handle("cancel it", APPROVE) == Feedback("cancel it")
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("/exit", True),
+        ("/quit", True),
+        ("/EXIT", True),
+        ("  /quit now  ", True),
+        ("exit", False),
+        ("", False),
+        ("   ", False),
+        ("yes", False),
+    ],
+)
+def test_is_exit_command(line: str, expected: bool) -> None:
+    from open_endurance_coach.chat.gate import is_exit_command
+
+    assert is_exit_command(line) is expected

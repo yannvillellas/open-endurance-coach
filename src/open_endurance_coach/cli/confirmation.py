@@ -12,6 +12,7 @@ from open_endurance_coach.chat.gate import (
     PlanSnapshot,
     Proceed,
     handle,
+    is_exit_command,
 )
 from open_endurance_coach.cli.rendering import (
     console,
@@ -99,8 +100,7 @@ async def run_confirmation(
         except (EOFError, KeyboardInterrupt):
             console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
             return
-        words = line.strip().casefold().split()
-        if words and words[0] in {"/exit", "/quit"}:
+        if is_exit_command(line):
             console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
             return
         step = await respond(
