@@ -350,11 +350,11 @@ def test_approve_gate_no_declines(patched: Any) -> None:
     assert store.list_decisions() == []
 
 
-def test_approve_gate_eof_aborts_without_writing(patched: Any) -> None:
+def test_approve_gate_eof_aborts_with_exit_one(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     result = runner.invoke(cli_main.app, ["approve", "1"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "Cancelled. Nothing changed." in result.output
     assert store.get_draft(1).status is DraftStatus.PENDING
     assert store.list_decisions() == []
@@ -508,4 +508,24 @@ def test_reject_gate_question_discusses_without_llm(patched: Any) -> None:
     assert result.exit_code == 0
     assert "coach chat" in result.output
     assert store.list_feedback(1) == []
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_approve_gate_ctrl_c_interrupts_with_exit_zero(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from open_endurance_coach.cli import confirmation as cli_confirmation
+
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+
+    def ask(prompt: str, *args: Any, **kwargs: Any) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_confirmation, "Prompt", SimpleNamespace(ask=ask))
+    result = runner.invoke(cli_main.app, ["approve", "1"])
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
     assert store.get_draft(1).status is DraftStatus.PENDING

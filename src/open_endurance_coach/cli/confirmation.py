@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
+import typer
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.gate import (
@@ -96,7 +97,12 @@ async def run_confirmation(
         prompt_plan(current)
         try:
             line = Prompt.ask("[bold cyan]you[/bold cyan]")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
+            console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+            if not console.is_terminal:
+                raise typer.Exit(code=1) from None
+            return
+        except KeyboardInterrupt:
             console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
             return
         if is_exit_command(line):
