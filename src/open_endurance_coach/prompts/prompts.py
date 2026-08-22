@@ -14,7 +14,9 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
             "action": "create",
             "name": "Tempo Session",
             "start_date_local": "2024-01-05",
-            "description": "3x10min sweet spot",
+            "description": (
+                "- 15m 55% Warmup\n\n3x\n- 1m 150%\n- 1m 50%\n\n- 5m 50%\n- 5m 120%\n- 15m 55%"
+            ),
             "type": "Ride",
             "moving_time": 3600,
             "icu_training_load": 84,
@@ -23,6 +25,31 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
         {"action": "delete", "event_id": 10002},
     ],
 }
+
+# Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
+# (forum topic 1163), distance-based workouts (9973) and absolute pace (115846). The
+# "verified live" items are not in the official docs but were confirmed by real API
+# write/read-back tests on 2026-08-22.
+WORKOUT_TEXT_FORMAT = (
+    "Workout descriptions must use the native Intervals.icu workout text format.\n"
+    "One step per line starting with '- '.\n"
+    "Durations: 30s, 10m, 1m30 (h hours, m minutes, s seconds).\n"
+    "Targets: 100w, 80% (of FTP), 60% HR (of max heart rate), 100% LTHR"
+    " (of threshold HR), 90rpm (cadence).\n"
+    "Ranges: 100-140w, 80-90%. Ramps: Ramp 100-200w, Ramp 60-80%.\n"
+    "Zones: - 60m Z2 (power zone), - 60m Z2 HR (heart rate zone), Pace.\n"
+    "Distance steps: - 2.5km Z2 HR, - 400mtr Z1 HR (units km, mi, mtr - never"
+    " plain m, m means minutes).\n"
+    "Pace steps: - 10m 7:15-7:00/km Pace, - 0.1km 1:45/100m Pace (units /km /mi"
+    " /100m /500m /250m /400m /100y).\n"
+    "Repeats: put 4x (or Main set 4x) on its own line before the repeated steps,"
+    " no '- ' prefix, with a blank line before and after the block. Verified live:"
+    " without the blank lines the repeat is dropped.\n"
+    "Verified live: 10m20s compound durations, HR zone ranges Z2-Z3 HR, distance"
+    " + pace steps 0.1km 1:45/100m Pace, and the blank-line repeat rule above.\n"
+    "Text before the number on a step line becomes the step prompt (Recovery 30s"
+    " 50%). Other prose lines are ignored for steps.\n"
+)
 
 METHODOLOGY = (
     "You are an elite endurance coach enforcing Joe Friel's periodization principles "
@@ -40,6 +67,8 @@ def _json_contract() -> str:
         "taken from the upcoming schedule - never copy the example dates.\n"
         "If current_proposal is present in the athlete data, revise that proposal "
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
+        "Copy the workout text format from the example, not the example's numbers.\n"
+        f"{WORKOUT_TEXT_FORMAT}"
         "Example json:\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )

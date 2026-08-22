@@ -119,3 +119,66 @@ Verified by recording real read-only payloads into anonymized test fixtures (`te
 - **Wellness:** `id` is the date string (`YYYY-MM-DD`); 46 fields including nested `sportInfo[]` (`type`, `eftp`, `wPrime`, `pMax`); `cols`/`fields` params select columns.
 - **Sport settings:** `id` is an int but `athlete_id` is a string; `power_zones`/`hr_zones` are 7-boundary numeric lists.
 - **Athlete summary:** returns a list of server-aggregated rows, not a single object.
+
+## 8. Workout description text format (structured workouts)
+
+Verified 2026-08-22 against official Intervals.icu forum documentation. The `description` field of WORKOUT events is parsed server-side into structured steps (`workout_doc`, time-in-zones, training load). Quoted statements:
+
+- API access guide (topic 609, david): "The workout description is now parsed. This means that workouts created or updated via the API have training load calculated and get 'time in zones' and so on."
+- Uploading planned workouts guide (topic 63624, david): "you can use 'description' and supply native Intervals.icu workout text".
+
+Server-rendered description of a parsed workout (topic 609, response to a `.zwo` upload — this is the format the server itself produces):
+
+```text
+- 20m 60% 90-100rpm
+
+Main set 4x
+- 8m 110%
+- 8m 50%
+
+- 10m 60%
+```
+
+Working API payload description (topic 63624, forum user example, Feb 2026 — posted with the event fields `"target": "POWER"` and `"workout_doc": {}`; the server fills `workout_doc`):
+
+```text
+- 15m 55% Warmup
+
+3x
+- 1m 150%
+- 1m 50%
+
+- 5m 50%
+- 5m 120%
+- 15m 55%
+```
+
+Format rules, from the official workout builder doc (topic 1163, david):
+
+> - Create workout steps by starting a line with a `-` and using the following constructs: a duration "30s", "10m", "1m30" etc.; "100w, 80% (of FTP), 60% HR (of max heart rate), 100% LTHR (of threshold HR), 90 rpm (cadence)"; ranges "100-140w, 80-90% (of FTP) etc."; ramps "Ramp 100-200w" or "Ramp 60-80% (of FTP)"; "and whatever additional text you like".
+> - "Create repeats by including '6x' or whatever in the line before a set of steps."
+> - Zones (15 April 2022 update): "`- 60m Z2`" for zone 2 power, "`- 60m Z2 HR`" using heart rate, "Pace also works".
+> - "Steps can have text prompts. All the text prior to the duration or power specification becomes the text for the step." (`Recovery 30s 50%` → prompt "Recovery").
+
+Distance units (topic 9973, david): km, mi, mtr, meters, yrd, yards, y, miles, mile; a space is allowed ("1km", "1 km"). "The minutes are denoted `m`'s in Intervals... impossible to use meters as a unit" — plain `m` is minutes, never meters.
+
+Absolute pace (topic 115846, david): `- 10m 7:15-7:00 Pace`, explicit units `/km`, `/mi`, `/100m`, `/500m`, `/100y`, `/400m`, `/250m`.
+
+Parsed structure (topic 93737, david): `workout_doc` steps carry `text`, `duration`, `distance`, `reps` (+ nested `steps`), `warmup`/`cooldown`, and `power`/`hr`/`pace`/`cadence` values (`value`/`start`/`end`/`units`); `target` = POWER/HR/PACE.
+
+### Live-verified additions (2026-08-22, real API write/read-back, not in the official docs)
+
+| Construct                                                                      | Observed parse                                                                                 |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `- 10m20s Z2-Z3 HR`                                                            | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}` (compound duration, HR zone range) |
+| `- 2.5km Z2 HR`                                                                | `distance: 2500`, `hr: {units: "hr_zone", value: 2}`                                           |
+| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR`                             | distance steps in meters                                                                       |
+| `- 0.1km 1:45/100m Pace`                                                       | `distance: 100`, `pace: {units: "secs/100m", value: 105}`                                      |
+| `Main set 4x` + indented steps **with blank lines before and after the block** | `{reps: 4, steps: [...]}`, multiplied distance/duration/zoneTimes                              |
+| Prose lines mixed with step lines                                              | prose ignored for steps (kept as `workout_doc.description`)                                    |
+
+Live-confirmed pitfalls:
+
+- Bare `100m` parses as **100 minutes** (6000s), not 100 meters — sub-km distances must be `mtr` or km fractions.
+- A repeat block without blank-line separation loses its `reps` (steps stay flat, load not multiplied).
+- A dash-prefixed repeat line (`- 4x`) is a step line, not a repeat header.

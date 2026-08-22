@@ -54,6 +54,46 @@ def test_output_example_validates_against_the_strict_contract() -> None:
     assert isinstance(report.mutations[2], DeleteWorkout)
 
 
+def test_output_example_description_is_documented_workout_text() -> None:
+    assert OUTPUT_EXAMPLE["mutations"][0]["description"] == (
+        "- 15m 55% Warmup\n\n3x\n- 1m 150%\n- 1m 50%\n\n- 5m 50%\n- 5m 120%\n- 15m 55%"
+    )
+
+
+def test_output_example_repeat_has_blank_line_separation() -> None:
+    description = OUTPUT_EXAMPLE["mutations"][0]["description"]
+    assert "\n\n3x\n" in description
+    assert "1m 50%\n\n- 5m 50%" in description
+
+
+def test_system_message_instructs_native_workout_text_format() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "native Intervals.icu workout text" in system
+    assert "One step per line starting with '- '" in system
+    assert "m means minutes" in system
+
+
+def test_format_rules_carry_official_constructs() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "1m30" in system
+    assert "80% (of FTP)" in system
+    assert "60% HR (of max heart rate)" in system
+    assert "100% LTHR" in system
+    assert "Ramp 100-200w" in system
+    assert "60m Z2 HR" in system
+
+
+def test_format_rules_carry_live_verified_constructs() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "2.5km Z2 HR" in system
+    assert "400mtr Z1 HR" in system
+    assert "Z2-Z3 HR" in system
+    assert "1:45/100m Pace" in system
+    assert "10m20s" in system
+    assert "blank line" in system
+    assert "without the blank lines the repeat is dropped" in system
+
+
 def test_system_message_contains_json_word_and_schema_example() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "json" in system.lower()

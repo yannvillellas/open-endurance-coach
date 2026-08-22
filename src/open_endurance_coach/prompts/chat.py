@@ -12,6 +12,9 @@ CHAT_DIRECTIVE = (
     "Training plans are proposed in conversation: when a plan is on the table, a literal"
     " yes applies it, and the athlete may describe changes - revise the current proposal"
     " minimally instead of starting over.\n"
+    "Workout descriptions in proposals use the native Intervals.icu workout text format"
+    " (one '-' step per line, durations, zones and power targets as documented by"
+    " Intervals.icu).\n"
 )
 
 

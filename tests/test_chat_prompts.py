@@ -42,6 +42,12 @@ def test_chat_system_has_no_json_contract(settings: Settings) -> None:
     assert "json" not in system.casefold()
 
 
+def test_chat_directive_points_to_workout_text_format(settings: Settings) -> None:
+    messages = build_chat_messages(CoachContext(focus="f"), settings, text="hi")
+    system = messages[0].content
+    assert "native Intervals.icu workout text" in system
+
+
 def test_chat_data_message_contains_context_sections(settings: Settings) -> None:
     context = CoachContext(
         focus="how was my week",
