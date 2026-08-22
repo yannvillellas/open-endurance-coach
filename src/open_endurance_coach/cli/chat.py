@@ -59,11 +59,13 @@ _CHANGE_RE = re.compile(
 
 
 def _analysis_due(session: ChatSession, text: str) -> bool:
-    return (
-        session.context is None
-        or detect_deep_query(text) is not None
-        or _ANALYZE_RE.search(text) is not None
-    )
+    if session.context is None:
+        return True
+    if detect_deep_query(text) is not None:
+        return True
+    if _QUESTION_START_RE.search(text) is not None:
+        return False
+    return _ANALYZE_RE.search(text) is not None
 
 
 def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:

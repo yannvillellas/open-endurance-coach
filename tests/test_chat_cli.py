@@ -799,3 +799,53 @@ def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> Non
     assert "Unknown command." in result.output
     assert len(provider.calls) == 1
     assert store.list_feedback(1) == []
+
+
+def test_chat_leading_question_on_cached_snapshot_is_prose(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion("Prose reply.")])
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="how was my week?\nwhat should I ride tomorrow?\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Prose reply." in result.output
+    assert provider.calls[1]["json_mode"] is False
+    assert len(store.list_drafts()) == 1
+
+
+def test_chat_mid_sentence_analysis_keyword_still_analyzes(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json("Second."))])
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="how was my week?\nlet me check my plan for the weekend\n"
+    )
+    assert result.exit_code == 0
+    assert provider.calls[1]["json_mode"] is True
+    assert len(store.list_drafts()) == 2
+
+
+def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input=(
+            "how was my week?\nhow much did my heart rate improve on hills over the last 3 months\n"
+        ),
+    )
+    assert result.exit_code == 0
+    assert "activity_detail" in provider.calls[1]["messages"][1].content
+    assert len(store.list_drafts()) == 2
+
+
+def test_chat_leading_question_with_analysis_keyword_is_prose(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion("Prose reply.")])
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="how was my week?\nwhat does my plan look like?\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Prose reply." in result.output
+    assert provider.calls[1]["json_mode"] is False
+    assert len(store.list_drafts()) == 1
