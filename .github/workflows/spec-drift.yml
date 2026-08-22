@@ -42,7 +42,14 @@ jobs:
           git checkout -b spec-drift
           git add tests/spec/openapi.json
           git commit -m "test: refresh Intervals.icu OpenAPI snapshot"
-          git push origin spec-drift
+          # spec-drift is bot-owned and rebuilt from main each run; force-push is safe
+          # and keeps re-runs working while a previous drift PR is still open.
+          git push --force origin spec-drift
+          open_pr=$(gh pr list --head spec-drift --state open --json number --jq length)
+          if [ "$open_pr" != "0" ]; then
+            echo "drift PR already open; branch updated"
+            exit 0
+          fi
           gh pr create \
             --title "Intervals.icu API spec changed" \
             --body "The vendored OpenAPI snapshot drifted from the live spec. Review the diff; if consumed endpoints or parameters changed, run \`record-fixtures\` and adapt the code." \
