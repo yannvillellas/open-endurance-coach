@@ -18218,16 +18218,16 @@
           "strava_authorized": {
             "type": "boolean"
           },
-          "custom_items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CustomItem"
-            }
-          },
           "sportSettings": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SportSettings"
+            }
+          },
+          "custom_items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomItem"
             }
           }
         }
