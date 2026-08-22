@@ -172,13 +172,13 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        context = CoachContext.model_validate(
-            {
-                **draft.context.model_dump(),
-                "user_feedback": feedback,
-                "current_proposal": draft.report,
-            }
-        )
+        base = draft.context.model_dump()
+        try:
+            context = CoachContext.model_validate(
+                {**base, "user_feedback": feedback, "current_proposal": draft.report}
+            )
+        except ValidationError:
+            context = CoachContext.model_validate({**base, "user_feedback": feedback})
         self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context)
         self._store.update_draft_report(

@@ -622,6 +622,30 @@ def test_chat_proposal_question_budget_overflow_falls_back_to_context(
     assert provider.calls[0]["json_mode"] is False
 
 
+async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.chat.history import ChatSession
+    from open_endurance_coach.chat.state import ChatState
+    from open_endurance_coach.cli import chat as cli_chat
+
+    provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider)
+    big_report = DecisionReport(summary="x" * 400)
+    draft_id = store.save_draft(
+        focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
+    )
+    state = ChatState(plan=PlanSnapshot(action="approve", plan_text="plan", draft_id=draft_id))
+    session = ChatSession()
+    session.context = CoachContext(focus="f", max_tokens=100)
+    result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
+    assert isinstance(result, ChatState)
+    assert result.plan is not None
+    assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.context.current_proposal is None
+
+
 def test_chat_proposal_without_draft_errors_gracefully(patched: Any) -> None:
     from open_endurance_coach.chat.gate import PlanSnapshot
     from open_endurance_coach.chat.history import ChatSession

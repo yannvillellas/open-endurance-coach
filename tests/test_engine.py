@@ -238,6 +238,23 @@ async def test_submit_feedback_over_budget_raises_before_llm(
     assert stored.context.user_feedback is None
 
 
+async def test_submit_feedback_falls_back_without_current_proposal_on_budget_overflow(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    big_report = DecisionReport(summary="x" * 400)
+    draft_id = store.save_draft(
+        focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
+    )
+    provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    updated = await engine.submit_feedback(draft_id, "make it easier")
+    assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
+    assert updated.context.current_proposal is None
+    assert updated.context.user_feedback == "make it easier"
+    assert updated.report.summary == "Revised."
+
+
 async def test_surface_unseen_falls_back_when_listing_overflows_budget(
     settings: Settings, tmp_path: Path
 ) -> None:
