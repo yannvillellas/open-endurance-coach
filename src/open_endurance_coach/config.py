@@ -1,7 +1,7 @@
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     athlete_profile: str = ""
     coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
 
-    chat_history_turns: int = 10
-    chat_history_max_tokens: int = 2048
+    chat_history_turns: int = Field(default=10, ge=1)
+    chat_history_max_tokens: int = Field(default=2048, ge=1)
 
     requests_per_second: float = 8.0
     max_retries: int = 3

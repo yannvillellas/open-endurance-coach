@@ -47,3 +47,10 @@ def test_chat_history_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(intervals_api_key="k", deepseek_api_key="k")
     assert settings.chat_history_turns == 20
     assert settings.chat_history_max_tokens == 4096
+
+
+def test_chat_history_settings_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        Settings(intervals_api_key="k", deepseek_api_key="k", chat_history_turns=0)
+    with pytest.raises(ValidationError):
+        Settings(intervals_api_key="k", deepseek_api_key="k", chat_history_max_tokens=0)

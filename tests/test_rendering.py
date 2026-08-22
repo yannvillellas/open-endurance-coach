@@ -123,9 +123,7 @@ def test_render_apply_dry_run_banner_and_outcomes(capsys: pytest.CaptureFixture[
         decisions=[
             AppliedDecision(
                 decision_id=1,
-                outcomes=[
-                    MutationOutcome(action="create", target="Tempo Session", name="Tempo Session")
-                ],
+                outcomes=[MutationOutcome(action="create", target="created", name="Tempo Session")],
             )
         ]
     )
@@ -133,7 +131,7 @@ def test_render_apply_dry_run_banner_and_outcomes(capsys: pytest.CaptureFixture[
     out = capsys.readouterr().out
     assert "DRY RUN - no changes written" in out
     assert "Decision #1:" in out
-    assert "- create Tempo Session: Tempo Session" in out
+    assert "- create -> created: Tempo Session" in out
 
 
 def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
@@ -141,7 +139,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
         decisions=[
             AppliedDecision(
                 decision_id=1,
-                outcomes=[MutationOutcome(action="update", target="event", event_id=10001)],
+                outcomes=[MutationOutcome(action="update", target="updated", event_id=10001)],
             )
         ]
     )
@@ -149,7 +147,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "Applied:" in out
     assert "DRY RUN" not in out
-    assert "- update event: 10001" in out
+    assert "- update -> updated event 10001" in out
 
 
 def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
@@ -166,7 +164,7 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
     assert "- create Tempo Session on 2024-02-05" in text
-    assert "- update event 10001" in text
+    assert "- update event 10001: moving_time=4200" in text
 
 
 def test_mutations_plan_text_empty_mutations() -> None:
@@ -188,5 +186,14 @@ def test_apply_plan_text_lists_decisions_and_outcomes() -> None:
     )
     text = apply_plan_text(report)
     assert "Decision #1:" in text
-    assert "- create created: Tempo Session" in text
-    assert "- update updated: 10001" in text
+    assert "- create -> created: Tempo Session" in text
+    assert "- update -> updated event 10001" in text
+
+
+def test_render_report_escapes_llm_markup(capsys: pytest.CaptureFixture[str]) -> None:
+    from open_endurance_coach.cli.rendering import render_report
+
+    report = DecisionReport(summary="Weird [bold]summary[/bold].")
+    render_report(report)
+    captured = capsys.readouterr().out
+    assert "Weird [bold]summary[/bold]." in captured

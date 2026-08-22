@@ -2,11 +2,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from rich.console import Console
+from rich.markup import escape
 
 from open_endurance_coach.engine.coach import ReviewView
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
+    UpdateWorkout,
     WorkoutMutation,
 )
 from open_endurance_coach.store.records import Draft, DraftStatus
@@ -26,11 +28,11 @@ async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
 
 
 def render_report(report: DecisionReport) -> None:
-    console.print(f"[bold green]Coach:[/bold green] {report.summary}")
+    console.print(f"[bold green]Coach:[/bold green] {escape(report.summary)}")
     for finding in report.findings:
-        console.print(f"  [dim]- {finding}[/dim]")
+        console.print(f"  [dim]- {escape(finding)}[/dim]")
     for question in report.questions:
-        console.print(f"  [yellow]? {question}[/yellow]")
+        console.print(f"  [yellow]? {escape(question)}[/yellow]")
 
 
 def render_draft(draft: Draft, *, updated: bool = False, chat: bool = False) -> None:
@@ -60,6 +62,20 @@ def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
             if mutation.description:
                 line += f": {mutation.description}"
             lines.append(line)
+        elif isinstance(mutation, UpdateWorkout):
+            fields = []
+            if mutation.name is not None:
+                fields.append(f"name={mutation.name}")
+            if mutation.start_date_local is not None:
+                fields.append(f"date={mutation.start_date_local.isoformat()}")
+            if mutation.moving_time is not None:
+                fields.append(f"moving_time={mutation.moving_time}")
+            if mutation.description is not None:
+                fields.append(f"description={mutation.description}")
+            if mutation.icu_training_load is not None:
+                fields.append(f"load={mutation.icu_training_load}")
+            detail = ", ".join(fields) if fields else "no changes"
+            lines.append(f"  - update event {mutation.event_id}: {detail}")
         else:
             lines.append(f"  - {mutation.action} event {mutation.event_id}")
     return "\n".join(lines)
@@ -77,8 +93,12 @@ def apply_plan_text(report: ApplyReport) -> str:
     for applied in report.decisions:
         lines.append(f"Decision #{applied.decision_id}:")
         for outcome in applied.outcomes:
-            target = str(outcome.event_id) if outcome.event_id is not None else outcome.name or ""
-            lines.append(f"  - {outcome.action} {outcome.target}: {target}")
+            if outcome.event_id is not None:
+                lines.append(f"  - {outcome.action} -> {outcome.target} event {outcome.event_id}")
+            elif outcome.name:
+                lines.append(f"  - {outcome.action} -> {outcome.target}: {outcome.name}")
+            else:
+                lines.append(f"  - {outcome.action} -> {outcome.target}")
     return "\n".join(lines)
 
 

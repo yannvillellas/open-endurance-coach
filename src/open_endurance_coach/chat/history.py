@@ -34,13 +34,17 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
     if max_tokens < 1:
         raise ValueError(f"max_tokens must be positive: {max_tokens}")
     remaining = list(turns)
-    while len(remaining) > 1 and sum(_tokens_of(turn) for turn in remaining) > max_tokens:
-        remaining.pop(0)
-    if remaining and _tokens_of(remaining[0]) > max_tokens:
-        remaining[0] = LlmMessage(
-            role=remaining[0].role, content=remaining[0].content[: max_tokens * 4]
+    pairs = [remaining[i : i + 2] for i in range(0, len(remaining), 2)]
+    while len(pairs) > 1 and sum(_tokens_of(turn) for pair in pairs for turn in pair) > max_tokens:
+        pairs.pop(0)
+    kept = [turn for pair in pairs for turn in pair]
+    if kept and sum(_tokens_of(turn) for turn in kept) > max_tokens:
+        head = sum(_tokens_of(turn) for turn in kept[:-1])
+        kept[-1] = LlmMessage(
+            role=kept[-1].role,
+            content=kept[-1].content[: max(1, (max_tokens - head) * 4)],
         )
-    return remaining
+    return kept
 
 
 @dataclass

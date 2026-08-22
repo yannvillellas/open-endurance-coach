@@ -104,7 +104,7 @@ def test_trim_history_drops_oldest_until_fit() -> None:
         LlmMessage(role="user", content="x" * 200),
     ]
     trimmed = trim_history(turns, 200)
-    assert trimmed == turns[1:]
+    assert trimmed == turns[2:]
 
 
 def test_trim_history_truncates_single_oversized_turn() -> None:
@@ -138,8 +138,9 @@ def test_session_seed_replaces_and_trims_history() -> None:
 def test_session_seed_respects_token_cap() -> None:
     session = ChatSession()
     session.seed([entry(1, 10, "y" * 4000, REPORT_A)], max_tokens=100)
-    assert len(session.history) == 1
-    assert session.history[0].role == "assistant"
+    assert [turn.role for turn in session.history] == ["user", "assistant"]
+    assert session.history[0].content == "y" * 4000
+    assert session.history[1].content == "S"
 
 
 def test_session_append_extends_history_in_order() -> None:
@@ -157,9 +158,9 @@ def test_session_append_extends_history_in_order() -> None:
 def test_session_append_trims_to_cap() -> None:
     session = ChatSession(cap=100)
     session.append("x" * 40, "y" * 4000)
-    assert len(session.history) == 1
-    assert session.history[0].role == "assistant"
-    assert session.history[0].content == "y" * 400
+    assert [turn.role for turn in session.history] == ["user", "assistant"]
+    assert session.history[0].content == "x" * 40
+    assert session.history[1].content == "y" * 360
 
 
 def test_session_append_without_cap_keeps_everything() -> None:

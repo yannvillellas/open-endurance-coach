@@ -1,4 +1,5 @@
 import re
+import sqlite3
 from dataclasses import dataclass
 
 import typer
@@ -99,14 +100,21 @@ async def _handle_converse(
         console.print(reply, markup=False)
         session.append(text, reply)
         return None
-    except (LlmError, ValueError, RuntimeError) as exc:
+    except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
         console.print(f"[red]error:[/red] {exc}")
         return None
 
 
 async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
     decision = engine.approve(draft_id)
-    render_apply(await engine.apply(decision.id), write=True)
+    try:
+        render_apply(await engine.apply(decision.id), write=True)
+    except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        console.print(f"[red]error:[/red] {exc}")
+        console.print(
+            f"[yellow]Decision #{decision.id} was recorded but not applied;"
+            " retry with: coach apply[/yellow]"
+        )
 
 
 @dataclass(frozen=True)
@@ -146,7 +154,7 @@ async def _handle_proposal(
             console.print("[bold green]Coach:[/bold green]", end=" ")
             console.print(reply, markup=False)
             session.append(line, reply)
-        except (LlmError, ValueError, RuntimeError) as exc:
+        except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
             console.print(f"[red]error:[/red] {exc}")
         console.print(
             '[dim]Note: to revise the plan, describe the change (e.g. "make it 45 minutes").[/dim]'
@@ -177,7 +185,7 @@ async def _handle_proposal(
             on_feedback=feedback,
             restate=restate,
         )
-    except (LlmError, ValueError, RuntimeError) as exc:
+    except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
         console.print(f"[red]error:[/red] {exc}")
         return ChatState()
     if isinstance(step, Done):
@@ -202,7 +210,7 @@ async def _run_command(
         focus = " ".join(args) if args else cli_main.DEFAULT_ANALYZE_FOCUS
         try:
             return await _analyze_line(engine, session, focus)
-        except (LlmError, ValueError, RuntimeError) as exc:
+        except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
             console.print(f"[red]error:[/red] {exc}")
     return None
 

@@ -447,8 +447,9 @@ def test_chat_session_trims_to_cap(
     result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nfirst\nsecond\nthird\n")
     assert result.exit_code == 0
     history = provider.calls[3]["messages"][2:-1]
-    assert len(history) == 1
-    assert history[0].content == "B" * 400
+    assert [message.role for message in history] == ["user", "assistant"]
+    assert history[0].content == "second"
+    assert history[1].content == "B" * 396
 
 
 def test_chat_shows_thinking_indicator(patched: Any) -> None:
@@ -641,3 +642,48 @@ def test_chat_proposal_without_draft_errors_gracefully(patched: Any) -> None:
     result = asyncio.run(cli_chat._handle_proposal(engine, state, "make it easier", ChatSession()))
     assert isinstance(result, ChatState)
     assert result.plan is None
+
+
+def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+
+    async def broken_apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
+        if not dry_run:
+            raise RuntimeError("writer exploded")
+        return await engine.apply(decision_id, dry_run=True)
+
+    import asyncio
+
+    async def noop() -> None:
+        pass
+
+    engine.apply = broken_apply
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\nyes\n")
+    assert result.exit_code == 0
+    assert "writer exploded" in result.output
+    assert "not applied" in result.output
+    assert "coach apply" in result.output
+    decision = store.get_decision(1)
+    assert decision is not None
+    assert decision.applied_at is None
+    asyncio.run(noop())
+
+
+def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
+    import sqlite3
+
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    engine, _ = patched(provider)
+
+    async def broken_converse(
+        text: str, *, history: Any = None, context: Any = None, today: Any = None
+    ) -> str:
+        raise sqlite3.OperationalError("database is locked")
+
+    engine.converse = broken_converse
+    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nand today?\n/help\n")
+    assert result.exit_code == 0
+    assert "error:" in result.output
+    assert "/analyze" in result.output

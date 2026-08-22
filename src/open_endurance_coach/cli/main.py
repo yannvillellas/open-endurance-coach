@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -65,7 +66,7 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
 def _run(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
     try:
         asyncio.run(_with_engine(callback))
-    except (LlmError, ValueError, RuntimeError) as exc:
+    except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
         console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
