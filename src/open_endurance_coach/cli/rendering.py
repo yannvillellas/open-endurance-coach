@@ -46,7 +46,7 @@ def render_review(view: ReviewView, *, chat: bool = False) -> None:
     render_report(view.draft.report)
     if view.draft.status is DraftStatus.PENDING:
         for line in view.requested_feedback:
-            console.print(f"  [yellow]? {line}[/yellow]")
+            console.print(f"  [yellow]? {escape(line)}[/yellow]")
         if view.requested_feedback:
             hint = f"/feedback {view.draft.id}" if chat else f"coach feedback {view.draft.id}"
             console.print(f'Answer the coach: {hint} "your RPE and notes"')
@@ -58,20 +58,20 @@ def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
         lines.append("  (no calendar changes)")
     for mutation in mutations:
         if isinstance(mutation, CreateWorkout):
-            line = f"  - create {mutation.name} on {mutation.start_date_local.isoformat()}"
+            line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
             if mutation.description:
-                line += f": {mutation.description}"
+                line += f": {escape(mutation.description)}"
             lines.append(line)
         elif isinstance(mutation, UpdateWorkout):
             fields = []
             if mutation.name is not None:
-                fields.append(f"name={mutation.name}")
+                fields.append(f"name={escape(mutation.name)}")
             if mutation.start_date_local is not None:
                 fields.append(f"date={mutation.start_date_local.isoformat()}")
             if mutation.moving_time is not None:
                 fields.append(f"moving_time={mutation.moving_time}")
             if mutation.description is not None:
-                fields.append(f"description={mutation.description}")
+                fields.append(f"description={escape(mutation.description)}")
             if mutation.icu_training_load is not None:
                 fields.append(f"load={mutation.icu_training_load}")
             detail = ", ".join(fields) if fields else "no changes"
@@ -96,7 +96,7 @@ def apply_plan_text(report: ApplyReport) -> str:
             if outcome.event_id is not None:
                 lines.append(f"  - {outcome.action} -> {outcome.target} event {outcome.event_id}")
             elif outcome.name:
-                lines.append(f"  - {outcome.action} -> {outcome.target}: {outcome.name}")
+                lines.append(f"  - {outcome.action} -> {outcome.target}: {escape(outcome.name)}")
             else:
                 lines.append(f"  - {outcome.action} -> {outcome.target}")
     return "\n".join(lines)

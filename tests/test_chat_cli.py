@@ -687,3 +687,19 @@ def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
     assert result.exit_code == 0
     assert "error:" in result.output
     assert "/analyze" in result.output
+
+
+def test_chat_pure_question_with_digits_stays_a_question(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\nhow long is the 2000m swim?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Explanation." in result.output
+    assert len(provider.calls) == 2
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.user_feedback is None

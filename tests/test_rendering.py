@@ -197,3 +197,28 @@ def test_render_report_escapes_llm_markup(capsys: pytest.CaptureFixture[str]) ->
     render_report(report)
     captured = capsys.readouterr().out
     assert "Weird [bold]summary[/bold]." in captured
+
+
+def test_plan_texts_escape_llm_markup() -> None:
+    from open_endurance_coach.cli.rendering import apply_plan_text, mutations_plan_text
+    from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
+
+    mutations: list[WorkoutMutation] = [
+        CreateWorkout(
+            action="create",
+            name="Weird [bold]Session[/bold]",
+            start_date_local=date(2026, 8, 23),
+        ),
+    ]
+    text = mutations_plan_text(mutations)
+    assert "Weird \\[bold]Session\\[/bold]" in text
+    report = ApplyReport(
+        decisions=[
+            AppliedDecision(
+                decision_id=1,
+                outcomes=[MutationOutcome(action="create", target="created", name="Weird [x]")],
+            )
+        ]
+    )
+    apply = apply_plan_text(report)
+    assert "Weird \\[x]" in apply

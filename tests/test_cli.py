@@ -486,3 +486,13 @@ def test_apply_write_gate_discuss_re_prompts_same_plan(patched: Any) -> None:
     assert "coach chat" in result.output
     assert len(calendar.created) == 1
     assert decision_of(store, 1).applied_at is not None
+
+
+def test_approve_gate_exit_command_cancels(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="/exit\n")
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
