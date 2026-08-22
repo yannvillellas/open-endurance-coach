@@ -446,6 +446,37 @@ def test_chat_session_trims_to_cap(
     assert history[0].content == "B" * 400
 
 
+def test_chat_fresh_skips_seeding(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Fresh reply.")])
+    _, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=CoachContext(focus="f"),
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    result = runner.invoke(cli_main.app, ["chat", "--fresh"], input="how is it going?\n")
+    assert result.exit_code == 0
+    messages = provider.calls[0]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "user"]
+    assert messages[-1].content == "how is it going?"
+
+
+def test_chat_clear_wipes_session_memory(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion("Answer one."), completion("Answer two."), completion("Answer three.")]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="first question\nsecond question\n/clear\nthird\n"
+    )
+    assert result.exit_code == 0
+    assert "Memory cleared." in result.output
+    third = provider.calls[2]["messages"]
+    assert [message.role for message in third] == ["system", "user", "user"]
+    assert third[-1].content == "third"
+
+
 def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     patched(FakeLlmProvider())
     result = runner.invoke(cli_main.app, ["chat"], input="\n   \n/help\n")

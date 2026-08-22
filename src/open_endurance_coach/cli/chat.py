@@ -38,6 +38,7 @@ HELP_TEXT = (
     "/approve <id>          approve a draft (yes/no confirmation)\n"
     "/reject <id>           reject a draft (yes/no confirmation)\n"
     "/apply [id] [--write]  apply decisions (dry-run; --write needs yes)\n"
+    "/clear                 forget this session's memory\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
     "Any other line is a conversation turn."
@@ -179,6 +180,11 @@ async def _run_command(
     if name == "help":
         console.print(HELP_TEXT, markup=False)
         return None
+    if name == "clear":
+        session.history = []
+        session.context = None
+        console.print("Memory cleared.")
+        return None
     try:
         if name == "analyze":
             from open_endurance_coach.cli import main as cli_main
@@ -244,12 +250,13 @@ async def _run_command(
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
-    session.seed(
-        engine.recent_history(settings.chat_history_turns),
-        max_tokens=settings.chat_history_max_tokens,
-    )
+    if not fresh:
+        session.seed(
+            engine.recent_history(settings.chat_history_turns),
+            max_tokens=settings.chat_history_max_tokens,
+        )
     state = ChatState()
     console.print("Chat with the coach. /help lists commands.")
     while True:
@@ -285,10 +292,12 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
 
 
 @chat_app.command()
-def chat() -> None:
+def chat(
+    fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
+) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings())
+        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
 
     cli_main._run(run)
