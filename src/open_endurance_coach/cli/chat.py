@@ -1,6 +1,8 @@
 import re
+from dataclasses import dataclass
 
 import typer
+from pydantic import ValidationError
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.dispatch import (
@@ -35,7 +37,8 @@ chat_app = typer.Typer()
 
 HELP_TEXT = (
     "Just talk to the coach. When he proposes calendar changes, answer with\n"
-    "exactly yes or no (anything else is a change request and nothing is written).\n"
+    "exactly yes or no (cancel abandons it; anything else is a change request\n"
+    "and nothing is written).\n"
     "/analyze [focus]       force a fresh analysis\n"
     "/clear                 forget this session's memory\n"
     "/help                  show this help\n"
@@ -106,24 +109,38 @@ async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
     render_apply(await engine.apply(decision.id), write=True)
 
 
+@dataclass(frozen=True)
+class ExitChat:
+    pass
+
+
 async def _handle_proposal(
     engine: CoachEngine, state: ChatState, line: str, session: ChatSession
-) -> ChatState:
+) -> ChatState | ExitChat:
     assert state.plan is not None
     snapshot = state.plan
     draft_id = snapshot.draft_id
-    assert draft_id is not None
+    if draft_id is None:
+        console.print("[red]error:[/red] confirmation state has no draft")
+        return ChatState()
+    if line.strip().casefold().split()[0] in {"/exit", "/quit"}:
+        console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+        return ExitChat()
 
     if _QUESTION_RE.search(line) and not _CHANGE_RE.search(line):
         try:
             view = engine.review(draft_id)
-            assert session.context is not None
-            context = CoachContext.model_validate(
-                {
-                    **session.context.model_dump(),
-                    "current_proposal": view.draft.report,
-                }
-            )
+            if session.context is None:
+                raise RuntimeError("no cached context to answer against")
+            try:
+                context = CoachContext.model_validate(
+                    {
+                        **session.context.model_dump(),
+                        "current_proposal": view.draft.report,
+                    }
+                )
+            except ValidationError:
+                context = session.context
             async with thinking():
                 reply = await engine.converse(line, history=session.history, context=context)
             console.print("[bold green]Coach:[/bold green]", end=" ")
@@ -229,7 +246,11 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
                 console.print("[red]Unknown command.[/red]")
                 console.print(HELP_TEXT, markup=False)
             case Confirmation(line=line):
-                state = await _handle_proposal(engine, state, line, session)
+                step = await _handle_proposal(engine, state, line, session)
+                if isinstance(step, ExitChat):
+                    console.print("bye")
+                    return
+                state = step
             case Command(name=name, args=args):
                 state = await _run_command(engine, name, args, session) or state
 

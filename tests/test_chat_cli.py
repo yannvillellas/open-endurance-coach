@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from .fakes import FakeCalendarClient, FakeLlmProvider, completion, report_json
 from .test_cli import CREATE_MUTATION, FakeRunner, decision_of, make_engine
 
 runner = CliRunner()
+
+TODAY = date(2024, 2, 1)
 
 
 @pytest.fixture
@@ -566,3 +569,75 @@ def test_chat_revision_sees_current_proposal(patched: Any) -> None:
     user_message = provider.calls[1]["messages"][1].content
     assert "current_proposal" in user_message
     assert "Tempo Session" in user_message
+
+
+def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/exit\n")
+    assert result.exit_code == 0
+    assert "bye" in result.output
+    assert len(provider.calls) == 1
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_chat_help_mentions_cancel(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/help\n")
+    assert result.exit_code == 0
+    assert "cancel" in result.output
+
+
+def test_chat_proposal_question_budget_overflow_falls_back_to_context(
+    patched: Any,
+) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.chat.history import ChatSession
+    from open_endurance_coach.chat.state import ChatState
+    from open_endurance_coach.cli import chat as cli_chat
+
+    provider = FakeLlmProvider([completion("Explanation.")])
+    engine, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="tight",
+        report=DecisionReport.model_validate(json.loads(report_json(mutations=[CREATE_MUTATION]))),
+        context=CoachContext(focus="tight", max_tokens=4096),
+    )
+    session = ChatSession()
+    session.context = CoachContext(focus="tight", today=TODAY, max_tokens=25)
+    state = ChatState(
+        plan=PlanSnapshot(
+            action="approve",
+            plan_text="Apply this to Intervals.icu:\nProposed changes:\n  - create Tempo Session",
+            draft_id=draft_id,
+        )
+    )
+    import asyncio
+
+    asyncio.run(cli_chat._handle_proposal(engine, state, "what is this?", session))
+    user_message = provider.calls[0]["messages"][1].content
+    assert "current_proposal" not in user_message
+    assert provider.calls[0]["json_mode"] is False
+
+
+def test_chat_proposal_without_draft_errors_gracefully(patched: Any) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.chat.history import ChatSession
+    from open_endurance_coach.chat.state import ChatState
+    from open_endurance_coach.cli import chat as cli_chat
+
+    provider = FakeLlmProvider()
+    engine, _ = patched(provider)
+    state = ChatState(
+        plan=PlanSnapshot(
+            action="approve",
+            plan_text="Apply this to Intervals.icu:",
+            draft_id=None,
+        )
+    )
+    import asyncio
+
+    result = asyncio.run(cli_chat._handle_proposal(engine, state, "make it easier", ChatSession()))
+    assert isinstance(result, ChatState)
+    assert result.plan is None
