@@ -83,15 +83,25 @@ def test_format_rules_carry_official_constructs() -> None:
     assert "60m Z2 HR" in system
 
 
-def test_format_rules_carry_live_verified_constructs() -> None:
+def test_format_rules_carry_distance_zone_and_pace_forms() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "2.5km Z2 HR" in system
     assert "400mtr Z1 HR" in system
     assert "Z2-Z3 HR" in system
     assert "1:45/100m Pace" in system
-    assert "10m20s" in system
-    assert "blank line" in system
-    assert "without the blank lines the repeat is dropped" in system
+    assert "blank line before and after" in system
+
+
+def test_format_rules_carry_quick_guide_constructs() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "5m30s" in system
+    assert "1h2m30s" in system
+    assert "1'30\"" in system
+    assert "Z2 Pace" in system
+    assert "60% MMP 5m" in system
+    assert "CZ1" in system
+    assert "Nested repeats are not supported" in system
+    assert "3:00/100m-4:00/100m Pace" in system
 
 
 def test_format_rules_carry_step_type_forms() -> None:

@@ -166,21 +166,37 @@ Absolute pace (topic 115846, david): `- 10m 7:15-7:00 Pace`, explicit units `/km
 
 Parsed structure (topic 93737, david): `workout_doc` steps carry `text`, `duration`, `distance`, `reps` (+ nested `steps`), `warmup`/`cooldown`, and `power`/`hr`/`pace`/`cadence` values (`value`/`start`/`end`/`units`); `target` = POWER/HR/PACE.
 
-### Live-verified additions (2026-08-22, real API write/read-back, not in the official docs)
+Workout builder syntax quick guide (topic 123701, R2Tom — Guide category cheat sheet):
 
-| Construct                                                                      | Observed parse                                                                                 |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `- 10m20s Z2-Z3 HR`                                                            | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}` (compound duration, HR zone range) |
-| `- 2.5km Z2 HR`                                                                | `distance: 2500`, `hr: {units: "hr_zone", value: 2}`                                           |
-| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR`                             | distance steps in meters                                                                       |
-| `- 0.1km 1:45/100m Pace`                                                       | `distance: 100`, `pace: {units: "secs/100m", value: 105}`                                      |
-| `Main set 4x` + indented steps **with blank lines before and after the block** | `{reps: 4, steps: [...]}`, multiplied distance/duration/zoneTimes                              |
-| Prose lines mixed with step lines                                              | prose ignored for steps (kept as `workout_doc.description`)                                    |
+> - Basic line: `- [duration OR distance] [target] [optional cadence]` — e.g. `- 5m30s 60% 90rpm`, `- 1km 70% HR`, `- 500mtr 5:00/km Pace`.
+> - Time: `1h`, `10m`, `30s`, combined `1h2m30s`/`5m30s`, short form `5'`, `30"`, `1'30"`.
+> - Distance: `500mtr`, `2km`, `10km`, `1mi`, `4.5mi`. "`m` means minutes (not meters). For meters, use `mtr`."
+> - Power: `75%`, `95-105%`, `220w`, `200-240w`, zones `Z2`/`Z3-Z4`, MMP `60% MMP 5m`, custom zones `CZ1`/`CZ2-CZ3`.
+> - Heart rate: `70% HR`, `75-80% HR`, `95% LTHR`, `90-95% LTHR`, zones `Z2 HR`/`Z2-Z3 HR`.
+> - Pace: `60% Pace`, `78-82% Pace`, zones `Z2 Pace`/`Z2-Z3 Pace`, absolute `5:00 Pace`, `5:00/km Pace`, `3:00/100m-4:00/100m Pace` (units `/100m` `/100y` `/km` `/mi` `/500m` `/400m` `/250m`).
+> - Ramps (case-insensitive): `- 10m ramp 50%-75%`, `- 10m ramp 60-80% Pace`. Freeride: `- 20m freeride` = ERG off.
+> - Repeats: header line `Main Set 5x` or standalone `5x`; "Leave one empty line before and after every repeat block"; "Nested repeats are not supported."
+> - Text prompts: text before the first duration becomes the cue; repeat blocks append `k/N`.
+> - Timed prompts (`<!>`): `- First prompt at 0s 33^2nd prompt at 33s <!> 10m ramp 25-75%`.
+> - Markdown formatting is ignored by the parser.
+
+### Live cross-check (2026-08-22, real API write/read-back)
+
+Constructs verified against the live API on event 130897354 — all consistent with the documented syntax above:
+
+| Construct | Observed parse |
+| --- | --- |
+| `- 2.5km Z2 HR` | `distance: 2500`, `hr: {units: "hr_zone", value: 2}` |
+| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR` | distance steps in meters |
+| `- 10m20s Z2-Z3 HR` | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}` |
+| `- 0.1km 1:45/100m Pace` | `distance: 100`, `pace: {units: "secs/100m", value: 105}` |
+| `Main set 4x` + steps with blank lines around the block | `{reps: 4, steps: [...]}`, multiplied distance/duration/zoneTimes |
+| Prose lines mixed with step lines | prose ignored for steps (kept as `workout_doc.description`) |
 
 Live-confirmed pitfalls:
 
 - Bare `100m` parses as **100 minutes** (6000s), not 100 meters — sub-km distances must be `mtr` or km fractions.
-- A repeat block without blank-line separation loses its `reps` (steps stay flat, load not multiplied).
+- A repeat block without blank-line separation loses its `reps` (steps stay flat, load not multiplied) — matches the quick guide's empty-line rule.
 - A dash-prefixed repeat line (`- 4x`) is a step line, not a repeat header.
 - A bare trailing `ramp` (`- 1km ramp`, as the workout builder UI writes it) sets **no** ramp flag — the range form (`- 1km ramp 60-50% HR`) is required.
 

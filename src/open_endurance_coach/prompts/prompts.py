@@ -27,26 +27,28 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
 }
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
-# (forum topic 1163), distance-based workouts (9973) and absolute pace (115846). The
-# "verified live" items are not in the official docs but were confirmed by real API
-# write/read-back tests on 2026-08-22.
+# (forum topic 1163), the workout builder syntax quick guide (123701), distance-based
+# workouts (9973) and absolute pace (115846). Only the Warmup/Cooldown label lines, the
+# MaxEffort keyword and the bare-ramp warning are not in the official docs - they were
+# confirmed by real API write/read-back tests on 2026-08-22.
 WORKOUT_TEXT_FORMAT = (
     "Workout descriptions must use the native Intervals.icu workout text format.\n"
     "One step per line starting with '- '.\n"
-    "Durations: 30s, 10m, 1m30 (h hours, m minutes, s seconds).\n"
+    "Durations: 30s, 10m, 1m30, 5m30s, 1h2m30s (h hours, m minutes, s seconds;"
+    " short forms 5', 30\", 1'30\").\n"
     "Targets: 100w, 80% (of FTP), 60% HR (of max heart rate), 100% LTHR"
     " (of threshold HR), 90rpm (cadence).\n"
     "Ranges: 100-140w, 80-90%. Ramps: Ramp 100-200w, Ramp 60-80%.\n"
-    "Zones: - 60m Z2 (power zone), - 60m Z2 HR (heart rate zone), Pace.\n"
+    "Zones: - 60m Z2 (power zone), - 60m Z2 HR (heart rate zone), - 10m Z2 Pace;"
+    " zone ranges work too (Z2-Z3 HR, Z3-Z4).\n"
+    "MMP targets: 60% MMP 5m. Custom zones: CZ1, CZ2-CZ3.\n"
     "Distance steps: - 2.5km Z2 HR, - 400mtr Z1 HR (units km, mi, mtr - never"
     " plain m, m means minutes).\n"
     "Pace steps: - 10m 7:15-7:00/km Pace, - 0.1km 1:45/100m Pace (units /km /mi"
-    " /100m /500m /250m /400m /100y).\n"
+    " /100m /500m /250m /400m /100y; ranges like 3:00/100m-4:00/100m Pace work).\n"
     "Repeats: put 4x (or Main set 4x) on its own line before the repeated steps,"
-    " no '- ' prefix, with a blank line before and after the block. Verified live:"
-    " without the blank lines the repeat is dropped.\n"
-    "Verified live: 10m20s compound durations, HR zone ranges Z2-Z3 HR, distance"
-    " + pace steps 0.1km 1:45/100m Pace, and the blank-line repeat rule above.\n"
+    " no '- ' prefix, with a blank line before and after the block. Nested repeats"
+    " are not supported.\n"
     "Step types: 'Warmup' or 'Cooldown' on its own line directly above a step"
     " marks that one step (repeat the label for each step). 'freeride' and"
     " 'MaxEffort' are keywords inside the step line (- 20m freeride, - 100mtr Z5"
