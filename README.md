@@ -12,7 +12,32 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 - **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and a WORKOUT-only category guard — updates and deletes never touch race or non-workout events. Applying defaults to a dry-run.
 - **Manual-First Triggers:** The CLI drives the loop today. Webhook triggers (activity uploaded/analyzed, calendar updated) and a wellness poller are on the roadmap behind the same engine; an Intervals.icu OAuth app has been created for that step.
 
-## CLI
+## Chat mode (the main interface)
+
+`coach chat` is a single conversation with the coach. You just talk:
+
+- **Free text runs the right thing automatically.** When fresh data is needed (first message, trend questions, or requests like "analyze/review/check my week"), the coach runs a full analysis and answers with the report. Otherwise he answers conversationally from the same data snapshot.
+- **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes.
+- **Memory**: sessions remember recent exchanges (last 10 feedback rows, up to 2048 tokens, self-trimmed). Start fresh with `coach chat --fresh`, or say `/clear` at any time.
+- Commands are optional: `/analyze` forces a fresh analysis, `/help`, `/exit` — everything else is conversation.
+
+```text
+$ coach chat
+Chat with the coach. Remembering 2 past exchanges.
+
+you: how was my week?
+Coach: (full report — summary, findings, questions)
+Coach: Apply this to Intervals.icu:
+        - create Tempo Session on 2026-08-25
+you: make it 45 minutes instead
+Coach: (re-analyzes, shows the updated proposal)
+you: yes
+Coach: Applied: create created: 130130106
+```
+
+## One-shot CLI (automation API)
+
+The commands below are the scriptable surface — the chat above is the daily interface. Approve and apply stay two separate steps here because automation needs record-then-write.
 
 ```text
 coach ask <question>          Ask the coach anything (trend queries supported)
@@ -22,30 +47,15 @@ coach feedback <id> <text>    Answer the coach's questions on a draft
 coach approve <id>            Approve a draft (yes/no confirmation; --yes to skip)
 coach reject <id>             Discard a draft (yes/no confirmation; --yes to skip)
 coach apply [decision_id]     Dry-run by default; --write applies (needs confirmation)
-coach chat                    Interactive conversation mode
 ```
 
 Options: `--feedback` (inject subjective context into ask/analyze), `--mutations-file` (approve with your own workout mutations), `--write`/`--yes` (apply).
 
-### Modes
+## Modes
 
-- **Analysis mode** (`ask`, `analyze`): extracts a fresh data snapshot (recent activities, wellness, upcoming events, sport settings — or a 90-day filtered window for trend questions), runs the strict JSON analysis, saves a **draft**, and marks the analyzed activities as seen so they surface as "New activities since last review" only once. Nothing is written to the calendar here.
-- **Chat mode** (`coach chat`): free-text lines are **conversation turns** — the coach answers in prose from one cached data snapshot (re-verified only for trend-shaped questions), never creates drafts, and never marks activities seen. The `/`-prefixed commands run the classic operations inside the session:
-
-```text
-/analyze [focus]       run a full analysis and save a draft
-/review [id]           list pending drafts, or inspect one
-/feedback <id> <text>  answer the coach's questions on a draft
-/approve <id>          approve a draft (yes/no confirmation)
-/reject <id>           reject a draft (yes/no confirmation)
-/apply [id] [--write]  apply decisions (dry-run; --write needs yes)
-/help                  show this help
-/exit, /quit           leave the chat
-```
-
-- **Confirmation gate:** nothing changes on Intervals.icu unless the last input was literally `yes` (or `no` to decline). The exact plan is restated before asking; any other answer is treated as discussion and never writes. Mid-confirmation Ctrl-C cancels safely; `--yes` on the one-shot commands bypasses the prompt for scripts.
-
-- **Chat memory:** a session starts with the last N feedback exchanges (10 turns, up to 2048 tokens) reconstructed from the feedback table, and trims itself to that cap as the conversation grows. Memory is per-session: quitting forgets the in-memory turns, but the feedback table persists as the audit trail.
+- **Analysis** (free text in chat when data is needed, or `analyze` one-shot): extracts a fresh data snapshot (recent activities, wellness, upcoming events, sport settings — or a 90-day filtered window for trend questions), runs the strict JSON analysis, saves the report internally as a draft, and marks the analyzed activities as seen so they surface as "New activities since last review" only once. Nothing is written to the calendar here.
+- **Conversation** (free text in chat otherwise): prose answers from the cached snapshot; never creates plans, never marks activities seen.
+- **Proposal gate**: every calendar change is proposed with the exact plan and requires a literal `yes`; any other answer is treated as a change request or discussion and writes nothing. Mid-confirmation Ctrl-C cancels safely.
 
 ## Configuration
 
@@ -66,7 +76,7 @@ All settings come from environment variables or a `.env` file (see `.env.example
 
 ## Safety model
 
-Approved decisions are applied to Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only draft approval, and an explicit yes/no confirmation restating the exact plan. The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event. Applying defaults to a dry-run.
+Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes` (or explicit `--yes` in scripts). The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event. Applying defaults to a dry-run.
 
 ## Coaching Methodology
 
