@@ -490,6 +490,40 @@ def test_chat_proposal_question_line_gets_prose_answer_without_replan(
     assert draft.user_feedback is None
 
 
+def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app,
+        ["chat"],
+        input="/analyze\nmake it 45 minutes, why did you pick 60?\nyes\n",
+    )
+    assert result.exit_code == 0
+    assert len(provider.calls) == 2
+    assert "Coach: Revised." in result.output
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.user_feedback == "make it 45 minutes, why did you pick 60?"
+    assert draft.status is DraftStatus.APPROVED
+
+
+def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\nwhat would this train exactly?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "describe the change" in result.output
+
+
 def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> None:
     provider = FakeLlmProvider(
         [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]

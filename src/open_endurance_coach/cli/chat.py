@@ -44,6 +44,10 @@ HELP_TEXT = (
 
 _ANALYZE_RE = re.compile(r"\b(analy[sz]e|review|assess|check|plan)\b", re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
+_CHANGE_RE = re.compile(
+    r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b|\d",
+    re.IGNORECASE,
+)
 
 
 def _analysis_due(session: ChatSession, text: str) -> bool:
@@ -110,7 +114,7 @@ async def _handle_proposal(
     draft_id = snapshot.draft_id
     assert draft_id is not None
 
-    if _QUESTION_RE.search(line):
+    if _QUESTION_RE.search(line) and not _CHANGE_RE.search(line):
         try:
             view = engine.review(draft_id)
             assert session.context is not None
@@ -127,6 +131,9 @@ async def _handle_proposal(
             session.append(line, reply)
         except (LlmError, ValueError, RuntimeError) as exc:
             console.print(f"[red]error:[/red] {exc}")
+        console.print(
+            '[dim]Note: to revise the plan, describe the change (e.g. "make it 45 minutes").[/dim]'
+        )
         prompt_plan(snapshot)
         return state
 
