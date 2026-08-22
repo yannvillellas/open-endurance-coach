@@ -50,13 +50,18 @@ def render_review(view: ReviewView, *, chat: bool = False) -> None:
             console.print(f'Answer the coach: {hint} "your RPE and notes"')
 
 
-def mutations_plan_text(draft_id: int, mutations: list[WorkoutMutation]) -> str:
-    lines = [f"Draft #{draft_id} - approve these mutations:"]
+def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
+    lines = ["Proposed changes:"]
     if not mutations:
-        lines.append("  (no calendar mutations)")
+        lines.append("  (no calendar changes)")
     for mutation in mutations:
-        target = mutation.name if isinstance(mutation, CreateWorkout) else str(mutation.event_id)
-        lines.append(f"  - {mutation.action} {target}")
+        if isinstance(mutation, CreateWorkout):
+            line = f"  - create {mutation.name} on {mutation.start_date_local.isoformat()}"
+            if mutation.description:
+                line += f": {mutation.description}"
+            lines.append(line)
+        else:
+            lines.append(f"  - {mutation.action} event {mutation.event_id}")
     return "\n".join(lines)
 
 

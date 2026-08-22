@@ -103,6 +103,7 @@ def test_section_tokens_reports_per_section() -> None:
     assert set(sections) == {
         "focus",
         "today",
+        "current_proposal",
         "recent_activities",
         "activity_detail",
         "wellness",

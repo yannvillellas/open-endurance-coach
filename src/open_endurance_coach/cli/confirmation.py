@@ -17,6 +17,7 @@ from open_endurance_coach.cli.rendering import (
     console,
     mutations_plan_text,
     render_draft,
+    render_report,
     thinking,
 )
 from open_endurance_coach.engine.coach import CoachEngine
@@ -31,7 +32,7 @@ class Done:
 
 
 def restate_mutations(draft: Draft) -> str:
-    return mutations_plan_text(draft.id, draft.report.mutations)
+    return mutations_plan_text(draft.report.mutations)
 
 
 def prompt_plan(snapshot: PlanSnapshot) -> None:
@@ -68,7 +69,10 @@ async def respond(
             assert snapshot.draft_id is not None
             async with thinking():
                 updated = await engine.submit_feedback(snapshot.draft_id, feedback)
-            render_draft(updated, updated=True, chat=chat)
+            if chat:
+                render_report(updated.report)
+            else:
+                render_draft(updated, updated=True, chat=False)
             if on_feedback is not None and await on_feedback(feedback, updated):
                 return Done()
             return replace(snapshot, plan_text=restate(updated))

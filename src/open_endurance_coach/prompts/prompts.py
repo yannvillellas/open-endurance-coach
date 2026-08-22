@@ -38,6 +38,8 @@ def _json_contract() -> str:
         "schema. The word json in this instruction is required for strict JSON mode.\n"
         "Every start_date_local must be on or after today (the athlete's local date), "
         "taken from the upcoming schedule - never copy the example dates.\n"
+        "If current_proposal is present in the athlete data, revise that proposal "
+        "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         "Example json:\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )
@@ -72,6 +74,10 @@ def context_sections(context: CoachContext) -> dict[str, Any]:
     }
     if context.today:
         sections["today"] = f"Today's date (athlete local): {context.today.isoformat()}"
+    if context.current_proposal:
+        sections["current_proposal"] = context.current_proposal.model_dump(
+            mode="json", exclude_none=True
+        )
     if context.user_feedback:
         sections["user_feedback"] = context.user_feedback
     return sections

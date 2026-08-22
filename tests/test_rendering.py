@@ -95,6 +95,29 @@ def test_render_review_skips_solicitations_when_not_pending(
     assert "Answer the coach" not in out
 
 
+def test_mutations_plan_text_shows_dates_and_descriptions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from datetime import date
+
+    from open_endurance_coach.cli.rendering import mutations_plan_text
+    from open_endurance_coach.schemas.decisions import CreateWorkout, WorkoutMutation
+
+    mutations: list[WorkoutMutation] = [
+        CreateWorkout(
+            action="create",
+            name="Aerobic Swim",
+            start_date_local=date(2026, 8, 23),
+            description="2000m easy",
+        ),
+        CreateWorkout(action="create", name="Bare Session", start_date_local=date(2026, 8, 24)),
+    ]
+    text = mutations_plan_text(mutations)
+    assert "Proposed changes:" in text
+    assert "- create Aerobic Swim on 2026-08-23: 2000m easy" in text
+    assert "- create Bare Session on 2026-08-24" in text
+
+
 def test_render_apply_dry_run_banner_and_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
         decisions=[
@@ -140,15 +163,15 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
         CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)),
         UpdateWorkout(action="update", event_id=10001, moving_time=4200),
     ]
-    text = mutations_plan_text(3, mutations)
-    assert "Draft #3 - approve these mutations:" in text
-    assert "- create Tempo Session" in text
-    assert "- update 10001" in text
+    text = mutations_plan_text(mutations)
+    assert "Proposed changes:" in text
+    assert "- create Tempo Session on 2024-02-05" in text
+    assert "- update event 10001" in text
 
 
 def test_mutations_plan_text_empty_mutations() -> None:
-    text = mutations_plan_text(3, [])
-    assert "(no calendar mutations)" in text
+    text = mutations_plan_text([])
+    assert "(no calendar changes)" in text
 
 
 def test_apply_plan_text_lists_decisions_and_outcomes() -> None:

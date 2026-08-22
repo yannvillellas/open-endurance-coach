@@ -27,6 +27,7 @@ from open_endurance_coach.clients.llm import LlmError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.extractors.deep import detect_deep_query
+from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import WorkoutMutation
 from open_endurance_coach.store.records import Draft
 
@@ -42,6 +43,7 @@ HELP_TEXT = (
 )
 
 _ANALYZE_RE = re.compile(r"\b(analy[sz]e|review|assess|check|plan)\b", re.IGNORECASE)
+_QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
 
 
 def _analysis_due(session: ChatSession, text: str) -> bool:
@@ -55,7 +57,7 @@ def _analysis_due(session: ChatSession, text: str) -> bool:
 def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:
     snapshot = PlanSnapshot(
         action="approve",
-        plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(draft_id, mutations),
+        plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
         draft_id=draft_id,
     )
     return _enter_confirmation(snapshot)
@@ -108,6 +110,26 @@ async def _handle_proposal(
     draft_id = snapshot.draft_id
     assert draft_id is not None
 
+    if _QUESTION_RE.search(line):
+        try:
+            view = engine.review(draft_id)
+            assert session.context is not None
+            context = CoachContext.model_validate(
+                {
+                    **session.context.model_dump(),
+                    "current_proposal": view.draft.report,
+                }
+            )
+            async with thinking():
+                reply = await engine.converse(line, history=session.history, context=context)
+            console.print("[bold green]Coach:[/bold green]", end=" ")
+            console.print(reply, markup=False)
+            session.append(line, reply)
+        except (LlmError, ValueError, RuntimeError) as exc:
+            console.print(f"[red]error:[/red] {exc}")
+        prompt_plan(snapshot)
+        return state
+
     async def execute(current: CoachEngine) -> None:
         await _apply_proposal(current, draft_id)
 
@@ -119,9 +141,7 @@ async def _handle_proposal(
         return None
 
     def restate(draft: Draft) -> str:
-        return "Apply this to Intervals.icu:\n" + mutations_plan_text(
-            draft.id, draft.report.mutations
-        )
+        return "Apply this to Intervals.icu:\n" + mutations_plan_text(draft.report.mutations)
 
     try:
         step = await respond(

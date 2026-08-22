@@ -173,7 +173,11 @@ class CoachEngine:
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
         context = CoachContext.model_validate(
-            {**draft.context.model_dump(), "user_feedback": feedback}
+            {
+                **draft.context.model_dump(),
+                "user_feedback": feedback,
+                "current_proposal": draft.report,
+            }
         )
         self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context)

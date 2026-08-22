@@ -81,7 +81,7 @@ def _approve_snapshot(
     mutations = override if override is not None else view.draft.report.mutations
     return PlanSnapshot(
         action="approve",
-        plan_text=mutations_plan_text(draft_id, mutations),
+        plan_text=mutations_plan_text(mutations),
         draft_id=draft_id,
     )
 
@@ -131,7 +131,7 @@ async def _execute_apply(engine: CoachEngine, decision_id: int | None, write: bo
 def _approve_restate(override: list[WorkoutMutation] | None) -> Callable[[Draft], str]:
     def restate(draft: Draft) -> str:
         mutations = override if override is not None else draft.report.mutations
-        return mutations_plan_text(draft.id, mutations)
+        return mutations_plan_text(mutations)
 
     return restate
 

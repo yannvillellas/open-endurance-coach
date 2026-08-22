@@ -381,7 +381,7 @@ def test_approve_gate_feedback_fallback_restates_plan(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["approve", "1"], input="wait, explain\nyes\n")
     assert result.exit_code == 0
     assert [row.content for row in store.list_feedback(1)] == ["wait, explain"]
-    assert result.output.count("approve these mutations") == 2
+    assert result.output.count("Proposed changes:") == 2
     assert "Decision #1 recorded" in result.output
 
 

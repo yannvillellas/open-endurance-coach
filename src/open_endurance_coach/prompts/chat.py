@@ -9,9 +9,9 @@ CHAT_DIRECTIVE = (
     "You are in a continuing conversation with the athlete.\n"
     "Answer directly and concisely, grounding every claim in the data provided."
     " Do not fabricate numbers.\n"
-    "Calendar changes are never made in conversation: propose them in prose and point to"
-    " /analyze, then the athlete approves or rejects through the review flow with explicit"
-    " confirmation. Formal answers to your earlier questions go through /feedback.\n"
+    "Training plans are proposed in conversation: when a plan is on the table, a literal"
+    " yes applies it, and the athlete may describe changes - revise the current proposal"
+    " minimally instead of starting over.\n"
 )
 
 

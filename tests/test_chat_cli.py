@@ -320,12 +320,12 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
     result = runner.invoke(
         cli_main.app,
         ["chat"],
-        input="/analyze\nwait, explain\nyes\nhow is it going?\n",
+        input="/analyze\nmake it easier\nyes\nhow is it going?\n",
     )
     assert result.exit_code == 0
     third = provider.calls[2]["messages"]
     assert third[2].content == cli_main.DEFAULT_ANALYZE_FOCUS
-    assert third[4].content == "wait, explain"
+    assert third[4].content == "make it easier"
     assert "Reconsidered." in third[5].content
     assert third[6].content == "how is it going?"
 
@@ -468,3 +468,67 @@ def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     assert result.exit_code == 0
     assert "error" not in result.output
     assert "/analyze" in result.output
+
+
+def test_chat_proposal_question_line_gets_prose_answer_without_replan(
+    patched: Any,
+) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\nwhat would this train exactly?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Explanation." in result.output
+    assert result.output.count("Apply this to Intervals.icu") == 2
+    assert len(provider.calls) == 2
+    assert len(store.list_drafts()) == 1
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.user_feedback is None
+
+
+def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\nwhat would this train exactly?\nno\n"
+    )
+    assert result.exit_code == 0
+    user_message = provider.calls[1]["messages"][1].content
+    assert "current_proposal" in user_message
+    assert "Tempo Session" in user_message
+
+
+def test_chat_proposal_modification_reshows_report_without_draft_line(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised plan.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\nmake it 4 series instead\nno\n")
+    assert result.exit_code == 0
+    assert "Coach: Revised plan." in result.output
+    assert "Draft #" not in result.output
+    assert "Review it" not in result.output
+
+
+def test_chat_revision_sees_current_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised plan.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\nmake it 4 series instead\nno\n")
+    assert result.exit_code == 0
+    user_message = provider.calls[1]["messages"][1].content
+    assert "current_proposal" in user_message
+    assert "Tempo Session" in user_message

@@ -4,6 +4,7 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 
@@ -17,6 +18,7 @@ class CoachContext(BaseModel):
 
     focus: str = Field(min_length=1)
     today: date | None = None
+    current_proposal: DecisionReport | None = None
     recent_activities: list[Activity] = Field(default_factory=list)
     activity_detail: Activity | None = None
     wellness: list[Wellness] = Field(default_factory=list)
@@ -29,6 +31,11 @@ class CoachContext(BaseModel):
         return {
             "focus": self.focus,
             "today": self.today.isoformat() if self.today else 0,
+            "current_proposal": (
+                self.current_proposal.model_dump(mode="json", exclude_none=True)
+                if self.current_proposal
+                else 0
+            ),
             "recent_activities": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.recent_activities
             ],
