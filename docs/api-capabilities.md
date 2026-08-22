@@ -182,3 +182,20 @@ Live-confirmed pitfalls:
 - Bare `100m` parses as **100 minutes** (6000s), not 100 meters — sub-km distances must be `mtr` or km fractions.
 - A repeat block without blank-line separation loses its `reps` (steps stay flat, load not multiplied).
 - A dash-prefixed repeat line (`- 4x`) is a step line, not a repeat header.
+- A bare trailing `ramp` (`- 1km ramp`, as the workout builder UI writes it) sets **no** ramp flag — the range form (`- 1km ramp 60-50% HR`) is required.
+
+### Step types (Add Step dialog → text form)
+
+The dialog offers Normal, Repeats, Ramp, Warmup, Cooldown, Freeride, MaxEffort. Their `workout_doc` flags are documented (topic 93737: `warmup`, `cooldown`, `ramp`, `freeride`, `maxeffort` booleans), and the `ramp`/`freeride` keywords are documented (1163, 123701) — but the **Warmup/Cooldown/MaxEffort text forms are documented nowhere**. Live-verified 2026-08-22 on event 130897354:
+
+| Type      | Text form                                                          | Observed flag                          |
+| --------- | ------------------------------------------------------------------ | -------------------------------------- |
+| Normal    | plain step line                                                    | —                                      |
+| Repeats   | `Main set 4x` / `4x` line (blank lines around the block)           | `reps: 4` + nested `steps`             |
+| Ramp      | `- 1km ramp 60-50% HR` (range required)                            | `ramp: true` + start/end target        |
+| Warmup    | `Warmup` label line directly above the step                        | `warmup: true` on that one step only   |
+| Cooldown  | `Cooldown` label line directly above the step                      | `cooldown: true` on that one step only |
+| Freeride  | `freeride` keyword in the step line (`- 20m freeride`)             | `freeride: true`                       |
+| MaxEffort | `MaxEffort` keyword in the step line (before or after the numbers) | `maxeffort: true`                      |
+
+The Warmup/Cooldown label applies to the immediately following step only — one label line per step.

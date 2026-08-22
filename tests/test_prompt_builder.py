@@ -94,6 +94,16 @@ def test_format_rules_carry_live_verified_constructs() -> None:
     assert "without the blank lines the repeat is dropped" in system
 
 
+def test_format_rules_carry_step_type_forms() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "on its own line directly above a step" in system
+    assert "repeat the label for each step" in system
+    assert "- 20m freeride" in system
+    assert "- 100mtr Z5 HR MaxEffort" in system
+    assert "- 1km ramp 60-50% HR" in system
+    assert "bare trailing" in system
+
+
 def test_system_message_contains_json_word_and_schema_example() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "json" in system.lower()

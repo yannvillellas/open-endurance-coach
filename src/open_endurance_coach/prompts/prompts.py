@@ -47,6 +47,11 @@ WORKOUT_TEXT_FORMAT = (
     " without the blank lines the repeat is dropped.\n"
     "Verified live: 10m20s compound durations, HR zone ranges Z2-Z3 HR, distance"
     " + pace steps 0.1km 1:45/100m Pace, and the blank-line repeat rule above.\n"
+    "Step types: 'Warmup' or 'Cooldown' on its own line directly above a step"
+    " marks that one step (repeat the label for each step). 'freeride' and"
+    " 'MaxEffort' are keywords inside the step line (- 20m freeride, - 100mtr Z5"
+    " HR MaxEffort). 'ramp' needs a range (- 1km ramp 60-50% HR); a bare trailing"
+    " 'ramp' does not create a ramp step.\n"
     "Text before the number on a step line becomes the step prompt (Recovery 30s"
     " 50%). Other prose lines are ignored for steps.\n"
 )
