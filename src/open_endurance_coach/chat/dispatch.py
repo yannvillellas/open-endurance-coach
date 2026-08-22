@@ -2,9 +2,7 @@ from dataclasses import dataclass
 
 from open_endurance_coach.chat.state import ChatMode, ChatState
 
-_COMMANDS = frozenset(
-    {"help", "analyze", "review", "feedback", "approve", "reject", "apply", "clear"}
-)
+_COMMANDS = frozenset({"help", "analyze", "clear"})
 _EXIT_NAMES = frozenset({"exit", "quit"})
 
 
