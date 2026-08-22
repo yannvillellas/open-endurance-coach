@@ -258,7 +258,10 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
             max_tokens=settings.chat_history_max_tokens,
         )
     state = ChatState()
+    remembered = sum(1 for turn in session.history if turn.role == "user")
     console.print("Chat with the coach. /help lists commands.")
+    if remembered:
+        console.print(f"[dim]Remembering {remembered} past exchanges.[/dim]")
     while True:
         try:
             line = Prompt.ask("[bold cyan]you[/bold cyan]")

@@ -460,6 +460,22 @@ def test_chat_fresh_skips_seeding(patched: Any) -> None:
     messages = provider.calls[0]["messages"]
     assert [message.role for message in messages] == ["system", "user", "user"]
     assert messages[-1].content == "how is it going?"
+    assert "Remembering" not in result.output
+
+
+def test_chat_shows_seeded_memory_count(patched: Any) -> None:
+    provider = FakeLlmProvider([completion("Chat reply.")])
+    _, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=CoachContext(focus="f"),
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    store.add_feedback(draft_id, "slept badly")
+    result = runner.invoke(cli_main.app, ["chat"], input="how is it going?\n")
+    assert result.exit_code == 0
+    assert "Remembering 2 past exchanges." in result.output
 
 
 def test_chat_clear_wipes_session_memory(patched: Any) -> None:
