@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -414,3 +414,19 @@ def test_recent_feedback_uses_the_drafts_current_report(tmp_path: Path) -> None:
     rows = store.recent_feedback(10)
     assert len(rows) == 1
     assert rows[0].report.summary == "Revised."
+
+
+def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "old row")
+    clock.now = NOW + timedelta(days=10)
+    store.add_feedback(draft_id, "recent row")
+    recent = store.recent_feedback(10, max_age_days=5)
+    assert [row.feedback.content for row in recent] == ["recent row"]
+    assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
+    unfiltered = store.recent_feedback(10)
+    assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]

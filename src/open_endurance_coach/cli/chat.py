@@ -245,7 +245,10 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
     session = ChatSession(cap=settings.chat_history_max_tokens)
     if not fresh:
         session.seed(
-            engine.recent_history(settings.chat_history_turns),
+            engine.recent_history(
+                settings.chat_history_turns,
+                max_age_days=settings.chat_history_max_age_days,
+            ),
             max_tokens=settings.chat_history_max_tokens,
         )
     state = ChatState()

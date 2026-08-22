@@ -18,7 +18,7 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 - **Free text runs the right thing automatically.** When fresh data is needed (first message, trend questions, or requests like "analyze/review/check my week"), the coach runs a full analysis and answers with the report. Otherwise he answers conversationally from the same data snapshot.
 - **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes.
-- **Memory**: sessions remember recent exchanges (last 10 feedback rows, up to 2048 tokens, self-trimmed). Start fresh with `coach chat --fresh`, or say `/clear` at any time.
+- **Memory**: sessions remember recent exchanges (last 10 feedback rows from the last 90 days, up to 2048 tokens, self-trimmed). Start fresh with `coach chat --fresh`, or say `/clear` at any time.
 - Commands are optional: `/analyze` forces a fresh analysis, `/help`, `/exit` — everything else is conversation.
 
 ```text
@@ -71,8 +71,9 @@ All settings come from environment variables or a `.env` file (see `.env.example
 | `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`                  | HTTP retry policy                                                      |
 | `REQUESTS_PER_SECOND`              | `8`                        | Intervals.icu rate-limit throttle                                      |
 | `ATHLETE_PROFILE` / `COACH_TONE`   | configurable               | Persona injected into every prompt                                     |
-| `CHAT_HISTORY_TURNS`               | `10`                       | Feedback rows loaded as chat memory                                    |
-| `CHAT_HISTORY_MAX_TOKENS`          | `2048`                     | Chat memory budget (self-trimmed)                                      |
+| `CHAT_HISTORY_TURNS`               | `10`                       | Feedback rows loaded as chat memory (>= 1)                             |
+| `CHAT_HISTORY_MAX_TOKENS`          | `2048`                     | Chat memory budget (self-trimmed) (>= 1)                               |
+| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`                       | Cutoff age for feedback rows loaded as chat memory (>= 1)              |
 
 ## Safety model
 

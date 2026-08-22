@@ -143,8 +143,10 @@ class CoachEngine:
     def pending_drafts(self) -> list[Draft]:
         return self._store.list_drafts(DraftStatus.PENDING)
 
-    def recent_history(self, limit: int) -> list[FeedbackWithReport]:
-        return self._store.recent_feedback(limit)
+    def recent_history(
+        self, limit: int, *, max_age_days: int | None = None
+    ) -> list[FeedbackWithReport]:
+        return self._store.recent_feedback(limit, max_age_days=max_age_days)
 
     @staticmethod
     def _solicitations(context: CoachContext) -> list[str]:

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
     FakeCalendarClient,
+    FakeClock,
     FakeIntervalsClient,
     FakeLlmProvider,
     RecordingSleep,
@@ -537,6 +538,20 @@ async def test_recent_history_reads_feedback_from_store(settings: Settings, tmp_
     assert rows[0].feedback.content == "legs heavy"
     assert rows[0].report.summary == "ok"
     assert engine.recent_history(0) == []
+
+
+def test_recent_history_applies_max_age_cutoff(settings: Settings, tmp_path: Path) -> None:
+    clock = FakeClock(datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC))
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    engine = make_engine(settings, store, FakeLlmProvider())
+    draft_id = store.save_draft(
+        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
+    )
+    store.add_feedback(draft_id, "old")
+    clock.now = clock.now + timedelta(days=10)
+    store.add_feedback(draft_id, "new")
+    rows = engine.recent_history(10, max_age_days=5)
+    assert [row.feedback.content for row in rows] == ["new"]
 
 
 async def test_build_context_surfaces_unseen_without_marking(

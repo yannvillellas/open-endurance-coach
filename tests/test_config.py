@@ -54,3 +54,13 @@ def test_chat_history_settings_must_be_positive() -> None:
         Settings(intervals_api_key="k", deepseek_api_key="k", chat_history_turns=0)
     with pytest.raises(ValidationError):
         Settings(intervals_api_key="k", deepseek_api_key="k", chat_history_max_tokens=0)
+    with pytest.raises(ValidationError):
+        Settings(intervals_api_key="k", deepseek_api_key="k", chat_history_max_age_days=0)
+
+
+def test_chat_history_max_age_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    assert settings.chat_history_max_age_days == 90
+    monkeypatch.setenv("CHAT_HISTORY_MAX_AGE_DAYS", "30")
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    assert settings.chat_history_max_age_days == 30

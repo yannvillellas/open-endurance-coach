@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from open_endurance_coach.schemas.context import CoachContext
@@ -196,16 +196,24 @@ class CoachStore:
             for row in rows
         ]
 
-    def recent_feedback(self, limit: int) -> list[FeedbackWithReport]:
+    def recent_feedback(
+        self, limit: int, *, max_age_days: int | None = None
+    ) -> list[FeedbackWithReport]:
         if limit <= 0:
             return []
-        rows = self._connection.execute(
+        query = (
             "SELECT f.id AS id, f.draft_id AS draft_id, f.created_at AS created_at,"
             " f.content AS content, d.report_json AS report_json"
             " FROM feedback f JOIN drafts d ON d.id = f.draft_id"
-            " ORDER BY f.id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        )
+        params: tuple[object, ...] = ()
+        if max_age_days is not None:
+            cutoff = (self._clock() - timedelta(days=max_age_days)).isoformat()
+            query += " WHERE f.created_at >= ?"
+            params += (cutoff,)
+        query += " ORDER BY f.id DESC LIMIT ?"
+        params += (limit,)
+        rows = self._connection.execute(query, params).fetchall()
         return [
             FeedbackWithReport(
                 feedback=Feedback(

@@ -294,6 +294,29 @@ def test_chat_seeds_history_from_feedback(patched: Any) -> None:
     assert second[6].content == "and today?"
 
 
+def test_chat_seed_passes_max_age_from_settings(
+    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
+    engine, _ = patched(provider)
+    monkeypatch.setattr(
+        cli_main,
+        "get_settings",
+        lambda: settings.model_copy(update={"chat_history_max_age_days": 30}),
+    )
+    seen: list[Any] = []
+    original = engine.recent_history
+
+    def spy(limit: int, *, max_age_days: int | None = None) -> Any:
+        seen.append((limit, max_age_days))
+        return original(limit, max_age_days=max_age_days)
+
+    monkeypatch.setattr(engine, "recent_history", spy)
+    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    assert result.exit_code == 0
+    assert seen == [(10, 30)]
+
+
 def test_chat_session_memory_appends_turns(patched: Any) -> None:
     provider = FakeLlmProvider(
         [completion(report_json()), completion("Answer one."), completion("Answer two.")]

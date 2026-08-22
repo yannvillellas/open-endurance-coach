@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     chat_history_turns: int = Field(default=10, ge=1)
     chat_history_max_tokens: int = Field(default=2048, ge=1)
+    chat_history_max_age_days: int = Field(default=90, ge=1)
 
     requests_per_second: float = 8.0
     max_retries: int = 3
