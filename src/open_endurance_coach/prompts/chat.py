@@ -2,7 +2,7 @@ import json
 
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.config import Settings
-from open_endurance_coach.prompts.prompts import METHODOLOGY, context_sections
+from open_endurance_coach.prompts.prompts import METHODOLOGY
 from open_endurance_coach.schemas.context import CoachContext
 
 CHAT_DIRECTIVE = (
@@ -35,8 +35,7 @@ def build_chat_messages(
         LlmMessage(
             role="user",
             content=(
-                "Athlete data:\n"
-                + json.dumps(context_sections(context), indent=2, ensure_ascii=False)
+                "Athlete data:\n" + json.dumps(context.sections(), indent=2, ensure_ascii=False)
             ),
         ),
     ]

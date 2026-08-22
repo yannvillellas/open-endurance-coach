@@ -13,6 +13,19 @@ def _tokens_of(payload: Any) -> int:
     return len(serialized) // 4
 
 
+_SECTION_KEYS = (
+    "focus",
+    "today",
+    "current_proposal",
+    "recent_activities",
+    "activity_detail",
+    "wellness",
+    "upcoming_events",
+    "sport_settings",
+    "user_feedback",
+)
+
+
 class CoachContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -27,22 +40,16 @@ class CoachContext(BaseModel):
     user_feedback: str | None = None
     max_tokens: int = Field(default=4096, gt=0)
 
-    def _section_payloads(self) -> dict[str, Any]:
-        return {
+    def sections(self) -> dict[str, Any]:
+        sections: dict[str, Any] = {
             "focus": self.focus,
-            "today": self.today.isoformat() if self.today else 0,
-            "current_proposal": (
-                self.current_proposal.model_dump(mode="json", exclude_none=True)
-                if self.current_proposal
-                else 0
-            ),
             "recent_activities": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.recent_activities
             ],
             "activity_detail": (
                 self.activity_detail.model_dump(mode="json", exclude_none=True)
                 if self.activity_detail
-                else 0
+                else None
             ),
             "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
             "upcoming_events": [
@@ -51,11 +58,20 @@ class CoachContext(BaseModel):
             "sport_settings": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings
             ],
-            "user_feedback": self.user_feedback if self.user_feedback else 0,
         }
+        if self.today:
+            sections["today"] = f"Today's date (athlete local): {self.today.isoformat()}"
+        if self.current_proposal:
+            sections["current_proposal"] = self.current_proposal.model_dump(
+                mode="json", exclude_none=True
+            )
+        if self.user_feedback:
+            sections["user_feedback"] = self.user_feedback
+        return sections
 
     def section_tokens(self) -> dict[str, int]:
-        return {name: _tokens_of(payload) for name, payload in self._section_payloads().items()}
+        sections = self.sections()
+        return {key: _tokens_of(sections[key]) if key in sections else 0 for key in _SECTION_KEYS}
 
     def estimated_tokens(self) -> int:
         return max(1, sum(self.section_tokens().values()))

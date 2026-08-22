@@ -53,40 +53,10 @@ def _system_message(settings: Settings) -> str:
     return "".join(parts)
 
 
-def context_sections(context: CoachContext) -> dict[str, Any]:
-    sections: dict[str, Any] = {
-        "focus": context.focus,
-        "recent_activities": [
-            item.model_dump(mode="json", exclude_none=True) for item in context.recent_activities
-        ],
-        "activity_detail": (
-            context.activity_detail.model_dump(mode="json", exclude_none=True)
-            if context.activity_detail
-            else None
-        ),
-        "wellness": [item.model_dump(mode="json", exclude_none=True) for item in context.wellness],
-        "upcoming_events": [
-            item.model_dump(mode="json", exclude_none=True) for item in context.upcoming_events
-        ],
-        "sport_settings": [
-            item.model_dump(mode="json", exclude_none=True) for item in context.sport_settings
-        ],
-    }
-    if context.today:
-        sections["today"] = f"Today's date (athlete local): {context.today.isoformat()}"
-    if context.current_proposal:
-        sections["current_proposal"] = context.current_proposal.model_dump(
-            mode="json", exclude_none=True
-        )
-    if context.user_feedback:
-        sections["user_feedback"] = context.user_feedback
-    return sections
-
-
 def _user_message(context: CoachContext) -> str:
     return (
         "Athlete data:\n"
-        f"{json.dumps(context_sections(context), indent=2, ensure_ascii=False)}\n"
+        f"{json.dumps(context.sections(), indent=2, ensure_ascii=False)}\n"
         "Produce your analysis as json per the contract.\n"
     )
 
