@@ -17,6 +17,10 @@ from open_endurance_coach.writer.records import ApplyReport
 console = Console()
 
 
+def print_error(exc: Exception) -> None:
+    console.print(f"[red]error:[/red] {escape(str(exc))}")
+
+
 @asynccontextmanager
 async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
     if console.is_terminal:
@@ -75,9 +79,9 @@ def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
             if mutation.icu_training_load is not None:
                 fields.append(f"load={mutation.icu_training_load}")
             detail = ", ".join(fields) if fields else "no changes"
-            lines.append(f"  - update event {mutation.event_id}: {detail}")
+            lines.append(f"  - update event {escape(str(mutation.event_id))}: {detail}")
         else:
-            lines.append(f"  - {mutation.action} event {mutation.event_id}")
+            lines.append(f"  - {mutation.action} event {escape(str(mutation.event_id))}")
     return "\n".join(lines)
 
 
@@ -94,7 +98,10 @@ def apply_plan_text(report: ApplyReport) -> str:
         lines.append(f"Decision #{applied.decision_id}:")
         for outcome in applied.outcomes:
             if outcome.event_id is not None:
-                lines.append(f"  - {outcome.action} -> {outcome.target} event {outcome.event_id}")
+                lines.append(
+                    f"  - {outcome.action} -> {outcome.target}"
+                    f" event {escape(str(outcome.event_id))}"
+                )
             elif outcome.name:
                 lines.append(f"  - {outcome.action} -> {outcome.target}: {escape(outcome.name)}")
             else:

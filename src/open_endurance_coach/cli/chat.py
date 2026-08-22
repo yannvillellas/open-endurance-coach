@@ -22,6 +22,7 @@ from open_endurance_coach.cli.confirmation import Done, prompt_plan, respond
 from open_endurance_coach.cli.rendering import (
     console,
     mutations_plan_text,
+    print_error,
     render_apply,
     render_report,
     thinking,
@@ -104,7 +105,7 @@ async def _handle_converse(
         session.append(text, reply)
         return None
     except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]error:[/red] {exc}")
+        print_error(exc)
         return None
 
 
@@ -113,7 +114,7 @@ async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
     try:
         render_apply(await engine.apply(decision.id), write=True)
     except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]error:[/red] {exc}")
+        print_error(exc)
         console.print(
             f"[yellow]Decision #{decision.id} was recorded but not applied;"
             " retry with: coach apply[/yellow]"
@@ -178,7 +179,7 @@ async def _handle_proposal(
             console.print(reply, markup=False)
             session.append(line, reply)
         except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            console.print(f"[red]error:[/red] {exc}")
+            print_error(exc)
         console.print(
             '[dim]Note: to revise the plan, describe the change (e.g. "make it 45 minutes").[/dim]'
         )
@@ -209,7 +210,7 @@ async def _handle_proposal(
             restate=restate,
         )
     except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]error:[/red] {exc}")
+        print_error(exc)
         return ChatState()
     if isinstance(step, Done):
         return ChatState()
@@ -234,7 +235,7 @@ async def _run_command(
         try:
             return await _analyze_line(engine, session, focus)
         except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-            console.print(f"[red]error:[/red] {exc}")
+            print_error(exc)
     return None
 
 

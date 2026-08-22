@@ -6,7 +6,9 @@ import pytest
 
 from open_endurance_coach.cli.rendering import (
     apply_plan_text,
+    console,
     mutations_plan_text,
+    print_error,
     render_apply,
     render_draft,
     render_report,
@@ -222,3 +224,34 @@ def test_plan_texts_escape_llm_markup() -> None:
     )
     apply = apply_plan_text(report)
     assert "Weird \\[x]" in apply
+
+
+def test_mutations_plan_text_escapes_update_event_id() -> None:
+    mutation = UpdateWorkout(action="update", event_id="[bold]10001[/bold]", moving_time=4200)
+    text = mutations_plan_text([mutation])
+    assert "[bold]10001[/bold]" not in text
+    assert "\\[bold]10001\\[/bold]" in text
+
+
+def test_apply_plan_text_escapes_event_id(capsys: pytest.CaptureFixture[str]) -> None:
+    report = ApplyReport(
+        decisions=[
+            AppliedDecision(
+                decision_id=1,
+                outcomes=[
+                    MutationOutcome(action="update", target="updated", event_id="[red]9[/red]")
+                ],
+            )
+        ]
+    )
+    console.print(apply_plan_text(report))
+    out = capsys.readouterr().out
+    assert "[red]9[/red]" in out
+    assert "\\[red]9\\[/red]" not in out
+
+
+def test_print_error_escapes_exception_text(capsys: pytest.CaptureFixture[str]) -> None:
+    print_error(ValueError("bad [bold]payload[/bold]"))
+    out = capsys.readouterr().out
+    assert "error:" in out
+    assert "bad [bold]payload[/bold]" in out

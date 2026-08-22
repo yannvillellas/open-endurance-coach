@@ -16,6 +16,7 @@ from open_endurance_coach.cli.rendering import (
     console,
     escape,
     mutations_plan_text,
+    print_error,
     reject_plan_text,
     render_apply,
     render_draft,
@@ -68,7 +69,7 @@ def _run(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
     try:
         asyncio.run(_with_engine(callback))
     except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]error:[/red] {exc}")
+        print_error(exc)
         raise typer.Exit(code=1) from exc
 
 
