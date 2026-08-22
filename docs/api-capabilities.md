@@ -8,7 +8,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 - Basic auth for personal use: username `API_KEY`, password = the API key (generated in Settings → Developer Settings).
 - Athlete id `0` in path = the athlete owning the key. Recommended to always use `0`.
-- OAuth + Bearer tokens only needed for multi-user apps. Not in scope.
+- OAuth + Bearer tokens are required for webhooks (single-user included, per Manage App configuration); OAuth client 749 exists for that purpose and iteration 6 adds the Bearer auth mode + token refresh. Basic auth with `API_KEY` remains the default for all API-key operation.
 
 ### Rate limits (API-key callers)
 
@@ -184,14 +184,14 @@ Workout builder syntax quick guide (topic 123701, R2Tom — Guide category cheat
 
 Constructs verified against the live API on event 130897354 — all consistent with the documented syntax above:
 
-| Construct | Observed parse |
-| --- | --- |
-| `- 2.5km Z2 HR` | `distance: 2500`, `hr: {units: "hr_zone", value: 2}` |
-| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR` | distance steps in meters |
-| `- 10m20s Z2-Z3 HR` | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}` |
-| `- 0.1km 1:45/100m Pace` | `distance: 100`, `pace: {units: "secs/100m", value: 105}` |
+| Construct                                               | Observed parse                                                    |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `- 2.5km Z2 HR`                                         | `distance: 2500`, `hr: {units: "hr_zone", value: 2}`              |
+| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR`      | distance steps in meters                                          |
+| `- 10m20s Z2-Z3 HR`                                     | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}`       |
+| `- 0.1km 1:45/100m Pace`                                | `distance: 100`, `pace: {units: "secs/100m", value: 105}`         |
 | `Main set 4x` + steps with blank lines around the block | `{reps: 4, steps: [...]}`, multiplied distance/duration/zoneTimes |
-| Prose lines mixed with step lines | prose ignored for steps (kept as `workout_doc.description`) |
+| Prose lines mixed with step lines                       | prose ignored for steps (kept as `workout_doc.description`)       |
 
 Live-confirmed pitfalls:
 
