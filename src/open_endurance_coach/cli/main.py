@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sqlite3
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -8,7 +7,7 @@ import typer
 from pydantic import TypeAdapter, ValidationError
 
 # imported before app.add_typer below; cli.chat reaches cli.main lazily to avoid a cycle
-from open_endurance_coach.chat.gate import PlanSnapshot
+from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS, PlanSnapshot
 from open_endurance_coach.cli.chat import chat_app
 from open_endurance_coach.cli.confirmation import run_confirmation
 from open_endurance_coach.cli.rendering import (
@@ -24,7 +23,7 @@ from open_endurance_coach.cli.rendering import (
     thinking,
 )
 from open_endurance_coach.clients.intervals import IntervalsClient
-from open_endurance_coach.clients.llm import LlmClient, LlmError
+from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.clients.providers import build_registry
 from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
@@ -68,7 +67,7 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
 def _run(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
     try:
         asyncio.run(_with_engine(callback))
-    except (LlmError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         raise typer.Exit(code=1) from exc
 

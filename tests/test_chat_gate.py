@@ -85,3 +85,27 @@ def test_is_exit_command(line: str, expected: bool) -> None:
     from open_endurance_coach.chat.gate import is_exit_command
 
     assert is_exit_command(line) is expected
+
+
+def test_recoverable_exceptions_include_expected_types() -> None:
+    import sqlite3
+
+    from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS
+    from open_endurance_coach.clients.llm import LlmError
+
+    assert LlmError in RECOVERABLE_EXCEPTIONS
+    assert ValueError in RECOVERABLE_EXCEPTIONS
+    assert RuntimeError in RECOVERABLE_EXCEPTIONS
+    assert sqlite3.Error in RECOVERABLE_EXCEPTIONS
+
+
+def test_exit_aliases_shared_between_dispatch_and_gate() -> None:
+    from open_endurance_coach.chat.dispatch import Exit, dispatch
+    from open_endurance_coach.chat.gate import EXIT_NAMES, is_exit_command
+    from open_endurance_coach.chat.state import ChatState
+
+    assert {"exit", "quit"} == EXIT_NAMES
+    for name in EXIT_NAMES:
+        assert is_exit_command(f"/{name}") is True
+        assert isinstance(dispatch(f"/{name}", ChatState()), Exit)
+    assert is_exit_command("/bogus") is False

@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
+from open_endurance_coach.chat.gate import EXIT_NAMES
 from open_endurance_coach.chat.state import ChatMode, ChatState
 
 _COMMANDS = frozenset({"help", "analyze", "clear"})
-_EXIT_NAMES = frozenset({"exit", "quit"})
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ def dispatch(line: str, state: ChatState) -> Action:
         return Converse(stripped)
     tokens = stripped[1:].split()
     name = tokens[0].casefold() if tokens else ""
-    if name in _EXIT_NAMES:
+    if name in EXIT_NAMES:
         return Exit()
     if name in _COMMANDS:
         return Command(name, tokens[1:])

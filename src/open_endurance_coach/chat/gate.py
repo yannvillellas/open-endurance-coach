@@ -1,5 +1,12 @@
+import sqlite3
 from dataclasses import dataclass
 from typing import Literal
+
+from open_endurance_coach.clients.llm import LlmError
+
+RECOVERABLE_EXCEPTIONS = (LlmError, ValueError, RuntimeError, sqlite3.Error)
+
+EXIT_NAMES = frozenset({"exit", "quit"})
 
 ConfirmationAction = Literal["approve", "apply", "reject"]
 
@@ -48,7 +55,7 @@ ConfirmationResult = Proceed | Declined | Cancelled | Ignored | Feedback | Discu
 
 def is_exit_command(line: str) -> bool:
     words = line.strip().casefold().split()
-    return bool(words) and words[0] in {"/exit", "/quit"}
+    return bool(words) and words[0] in {f"/{name}" for name in EXIT_NAMES}
 
 
 def handle(line: str, snapshot: PlanSnapshot) -> ConfirmationResult:
