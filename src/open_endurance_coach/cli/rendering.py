@@ -39,20 +39,20 @@ def render_report(report: DecisionReport) -> None:
         console.print(f"  [yellow]? {escape(question)}[/yellow]")
 
 
-def render_draft(draft: Draft, *, updated: bool = False, chat: bool = False) -> None:
+def render_draft(draft: Draft, *, updated: bool = False) -> None:
     render_report(draft.report)
     verb = "updated" if updated else "saved"
-    review_hint = f"/review {draft.id}" if chat else f"coach review {draft.id}"
+    review_hint = f"coach review {draft.id}"
     console.print(f"Draft #{draft.id} {verb} (pending). Review it: {review_hint}")
 
 
-def render_review(view: ReviewView, *, chat: bool = False) -> None:
+def render_review(view: ReviewView) -> None:
     render_report(view.draft.report)
     if view.draft.status is DraftStatus.PENDING:
         for line in view.requested_feedback:
             console.print(f"  [yellow]? {escape(line)}[/yellow]")
         if view.requested_feedback:
-            hint = f"/feedback {view.draft.id}" if chat else f"coach feedback {view.draft.id}"
+            hint = f"coach feedback {view.draft.id}"
             console.print(f'Answer the coach: {hint} "your RPE and notes"')
 
 

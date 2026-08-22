@@ -529,3 +529,14 @@ def test_approve_gate_ctrl_c_interrupts_with_exit_zero(
     assert result.exit_code == 0
     assert "Cancelled. Nothing changed." in result.output
     assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_confirmation_plumbing_is_chat_only() -> None:
+    import inspect
+
+    from open_endurance_coach.cli import confirmation as cli_confirmation
+    from open_endurance_coach.cli import main as cli_main
+
+    assert "on_discuss" not in inspect.signature(cli_confirmation.respond).parameters
+    assert "restate" not in inspect.signature(cli_confirmation.run_confirmation).parameters
+    assert not hasattr(cli_main, "_approve_restate")

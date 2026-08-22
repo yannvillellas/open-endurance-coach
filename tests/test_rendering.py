@@ -1,3 +1,4 @@
+import inspect
 import json
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -62,11 +63,11 @@ def test_render_draft_updated_verb(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Draft #1 updated (pending)" in out
 
 
-def test_render_draft_chat_hint(capsys: pytest.CaptureFixture[str]) -> None:
-    render_draft(make_draft(), chat=True)
+def test_render_draft_hint_is_one_shot(capsys: pytest.CaptureFixture[str]) -> None:
+    render_draft(make_draft())
     out = capsys.readouterr().out
-    assert "Review it: /review 1" in out
-    assert "coach review 1" not in out
+    assert "Review it: coach review 1" in out
+    assert "/review 1" not in out
 
 
 def test_render_review_one_shot_hint(capsys: pytest.CaptureFixture[str]) -> None:
@@ -77,12 +78,12 @@ def test_render_review_one_shot_hint(capsys: pytest.CaptureFixture[str]) -> None
     assert 'Answer the coach: coach feedback 1 "your RPE and notes"' in out
 
 
-def test_render_review_chat_hint(capsys: pytest.CaptureFixture[str]) -> None:
+def test_render_review_hint_is_one_shot(capsys: pytest.CaptureFixture[str]) -> None:
     view = ReviewView(draft=make_draft(), requested_feedback=["RPE missing for Ride:"])
-    render_review(view, chat=True)
+    render_review(view)
     out = capsys.readouterr().out
-    assert 'Answer the coach: /feedback 1 "your RPE and notes"' in out
-    assert "coach feedback 1" not in out
+    assert 'Answer the coach: coach feedback 1 "your RPE and notes"' in out
+    assert "/feedback 1" not in out
 
 
 def test_render_review_skips_solicitations_when_not_pending(
@@ -255,3 +256,11 @@ def test_print_error_escapes_exception_text(capsys: pytest.CaptureFixture[str]) 
     out = capsys.readouterr().out
     assert "error:" in out
     assert "bad [bold]payload[/bold]" in out
+
+
+def test_render_draft_has_no_chat_parameter() -> None:
+    assert "chat" not in inspect.signature(render_draft).parameters
+
+
+def test_render_review_has_no_chat_parameter() -> None:
+    assert "chat" not in inspect.signature(render_review).parameters

@@ -51,7 +51,6 @@ async def respond(
     chat: bool,
     discuss_message: str | None = None,
     restate: Callable[[Draft], str] = restate_mutations,
-    on_discuss: Callable[[str], Awaitable[None]] | None = None,
     on_feedback: Callable[[str, Draft], Awaitable[bool | None]] | None = None,
 ) -> Done | PlanSnapshot:
     match handle(line, snapshot):
@@ -78,10 +77,8 @@ async def respond(
             if on_feedback is not None and await on_feedback(feedback, updated):
                 return Done()
             return replace(snapshot, plan_text=restate(updated))
-        case Discuss(line):
-            if on_discuss is not None:
-                await on_discuss(line)
-            elif discuss_message is not None:
+        case Discuss():
+            if discuss_message is not None:
                 console.print(discuss_message)
             return snapshot
 
