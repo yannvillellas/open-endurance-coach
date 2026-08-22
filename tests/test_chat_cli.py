@@ -448,6 +448,20 @@ def test_chat_session_trims_to_cap(
     assert history[0].content == "B" * 400
 
 
+def test_chat_shows_thinking_indicator(patched: Any) -> None:
+    patched(FakeLlmProvider([completion(report_json())]))
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n")
+    assert result.exit_code == 0
+    assert "Thinking…" in result.output
+
+
+def test_chat_prose_turn_shows_thinking_indicator(patched: Any) -> None:
+    patched(FakeLlmProvider([completion(report_json()), completion("Prose reply.")]))
+    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nand today?\n")
+    assert result.exit_code == 0
+    assert "Thinking…" in result.output
+
+
 def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     patched(FakeLlmProvider())
     result = runner.invoke(cli_main.app, ["chat"], input="\n   \n/help\n")

@@ -18,6 +18,7 @@ from open_endurance_coach.cli.rendering import (
     render_apply,
     render_draft,
     render_review,
+    thinking,
 )
 from open_endurance_coach.clients.intervals import IntervalsClient
 from open_endurance_coach.clients.llm import LlmClient, LlmError
@@ -141,7 +142,8 @@ def ask(
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        render_draft(await engine.analyze(focus, user_feedback=feedback))
+        async with thinking():
+            render_draft(await engine.analyze(focus, user_feedback=feedback))
 
     _run(run)
 
@@ -152,7 +154,8 @@ def analyze(
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        render_draft(await engine.analyze(focus, user_feedback=feedback))
+        async with thinking():
+            render_draft(await engine.analyze(focus, user_feedback=feedback))
 
     _run(run)
 
@@ -183,7 +186,8 @@ def feedback(
     text: str = typer.Argument(...),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        render_draft(await engine.submit_feedback(draft_id, text), updated=True)
+        async with thinking():
+            render_draft(await engine.submit_feedback(draft_id, text), updated=True)
 
     _run(run)
 

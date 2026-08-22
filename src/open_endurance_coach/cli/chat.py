@@ -21,6 +21,7 @@ from open_endurance_coach.cli.rendering import (
     mutations_plan_text,
     render_apply,
     render_report,
+    thinking,
 )
 from open_endurance_coach.clients.llm import LlmError
 from open_endurance_coach.config import Settings
@@ -66,7 +67,8 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
-    draft = await engine.analyze(focus)
+    async with thinking():
+        draft = await engine.analyze(focus)
     render_report(draft.report)
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
@@ -82,7 +84,8 @@ async def _handle_converse(
     try:
         if _analysis_due(session, text):
             return await _analyze_line(engine, session, text)
-        reply = await engine.converse(text, history=session.history, context=session.context)
+        async with thinking():
+            reply = await engine.converse(text, history=session.history, context=session.context)
         console.print("[bold green]Coach:[/bold green]", end=" ")
         console.print(reply, markup=False)
         session.append(text, reply)

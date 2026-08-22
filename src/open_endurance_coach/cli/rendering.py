@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from rich.console import Console
 
 from open_endurance_coach.engine.coach import ReviewView
@@ -10,6 +13,16 @@ from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import ApplyReport
 
 console = Console()
+
+
+@asynccontextmanager
+async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
+    if console.is_terminal:
+        with console.status(f"[bold cyan]{message}…[/bold cyan]", spinner="dots"):
+            yield
+    else:
+        console.print(f"[dim]{message}…[/dim]")
+        yield
 
 
 def render_report(report: DecisionReport) -> None:

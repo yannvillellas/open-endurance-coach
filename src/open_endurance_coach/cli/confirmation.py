@@ -13,7 +13,12 @@ from open_endurance_coach.chat.gate import (
     Proceed,
     handle,
 )
-from open_endurance_coach.cli.rendering import console, mutations_plan_text, render_draft
+from open_endurance_coach.cli.rendering import (
+    console,
+    mutations_plan_text,
+    render_draft,
+    thinking,
+)
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.store.records import Draft
 
@@ -61,7 +66,8 @@ async def respond(
             return snapshot
         case Feedback(feedback):
             assert snapshot.draft_id is not None
-            updated = await engine.submit_feedback(snapshot.draft_id, feedback)
+            async with thinking():
+                updated = await engine.submit_feedback(snapshot.draft_id, feedback)
             render_draft(updated, updated=True, chat=chat)
             if on_feedback is not None and await on_feedback(feedback, updated):
                 return Done()
