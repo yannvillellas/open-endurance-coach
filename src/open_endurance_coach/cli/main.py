@@ -29,7 +29,7 @@ from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.decisions import WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import Draft, DraftStatus
+from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 app = typer.Typer(no_args_is_help=True)
@@ -130,14 +130,6 @@ async def _execute_apply(engine: CoachEngine, decision_id: int | None, write: bo
     render_apply(await engine.apply(decision_id, dry_run=not write), write=write)
 
 
-def _approve_restate(override: list[WorkoutMutation] | None) -> Callable[[Draft], str]:
-    def restate(draft: Draft) -> str:
-        mutations = override if override is not None else draft.report.mutations
-        return mutations_plan_text(mutations)
-
-    return restate
-
-
 @app.command()
 def ask(
     focus: str = typer.Argument(..., help="Your question or analysis focus"),
@@ -216,9 +208,7 @@ def approve(
         async def execute(current: CoachEngine) -> None:
             await _execute_approve(current, draft_id, override)
 
-        await run_confirmation(
-            engine, snapshot, executor=execute, restate=_approve_restate(override)
-        )
+        await run_confirmation(engine, snapshot, executor=execute)
 
     _run(run)
 
@@ -237,7 +227,6 @@ def reject(
             engine,
             snapshot,
             executor=lambda current: _execute_reject(current, draft_id),
-            restate=lambda draft: reject_plan_text(draft.id),
         )
 
     _run(run)

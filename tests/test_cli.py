@@ -370,32 +370,20 @@ def test_approve_gate_blank_line_re_prompts(patched: Any) -> None:
     assert store.get_draft(1).status is DraftStatus.APPROVED
 
 
-def test_approve_gate_feedback_fallback_restates_plan(patched: Any) -> None:
-    _, store = patched(
-        FakeLlmProvider(
-            [
-                completion(report_json(mutations=[CREATE_MUTATION])),
-                completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
-            ]
-        )
-    )
+def test_approve_gate_non_literal_answer_discusses_without_revision(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     result = runner.invoke(cli_main.app, ["approve", "1"], input="wait, explain\nyes\n")
     assert result.exit_code == 0
-    assert [row.content for row in store.list_feedback(1)] == ["wait, explain"]
-    assert result.output.count("Proposed changes:") == 2
+    assert "coach chat" in result.output
+    assert result.output.count("Confirm?") == 2
+    assert store.list_feedback(1) == []
     assert "Decision #1 recorded" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
 
 
-def test_approve_gate_restates_override_plan_after_fallback(patched: Any, tmp_path: Path) -> None:
-    _, store = patched(
-        FakeLlmProvider(
-            [
-                completion(report_json(mutations=[CREATE_MUTATION])),
-                completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
-            ]
-        )
-    )
+def test_approve_gate_override_plan_survives_discussion(patched: Any, tmp_path: Path) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     mutations_path = tmp_path / "mutations.json"
     mutations_path.write_text(
@@ -411,6 +399,7 @@ def test_approve_gate_restates_override_plan_after_fallback(patched: Any, tmp_pa
     assert result.exit_code == 0
     assert "Custom Session" in result.output
     assert "Tempo Session" not in result.output
+    assert store.list_feedback(1) == []
     decision = store.list_decisions()[0]
     assert decision.report.mutations[0].name == "Custom Session"
 
@@ -510,3 +499,13 @@ def test_review_listing_escapes_summaries(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["review"])
     assert result.exit_code == 0
     assert "Weird [bold]summary[/bold]." in result.output
+
+
+def test_reject_gate_question_discusses_without_llm(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["reject", "1"], input="why?\nno\n")
+    assert result.exit_code == 0
+    assert "coach chat" in result.output
+    assert store.list_feedback(1) == []
+    assert store.get_draft(1).status is DraftStatus.PENDING

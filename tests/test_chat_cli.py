@@ -703,3 +703,75 @@ def test_chat_pure_question_with_digits_stays_a_question(patched: Any) -> None:
     draft = store.get_draft(1)
     assert draft is not None
     assert draft.user_feedback is None
+
+
+def test_chat_leading_question_with_change_word_stays_a_question(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\nwhy did you add intervals?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Explanation." in result.output
+    assert len(provider.calls) == 2
+    assert store.list_feedback(1) == []
+    draft = store.get_draft(1)
+    assert draft is not None
+    assert draft.user_feedback is None
+
+
+def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/help\ncancel\n")
+    assert result.exit_code == 0
+    assert "/analyze" in result.output
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []
+
+
+def test_chat_clear_during_confirmation_clears_without_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/clear\ncancel\n")
+    assert result.exit_code == 0
+    assert "Memory cleared." in result.output
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []
+
+
+def test_chat_question_after_clear_mid_gate_still_answered(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/analyze\n/clear\nwhat does this train?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "Coach: Explanation." in result.output
+    assert "no cached context" not in result.output
+    assert len(provider.calls) == 2
+    assert store.list_feedback(1) == []
+
+
+def test_chat_analyze_during_confirmation_declined_without_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/analyze\nno\n")
+    assert result.exit_code == 0
+    assert "unavailable while a proposal is open" in result.output
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []
+
+
+def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/bogus\ncancel\n")
+    assert result.exit_code == 0
+    assert "Unknown command." in result.output
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []

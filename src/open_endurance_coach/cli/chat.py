@@ -48,6 +48,9 @@ HELP_TEXT = (
 
 _ANALYZE_RE = re.compile(r"\b(analy[sz]e|review|assess|check|plan)\b", re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
+_QUESTION_START_RE = re.compile(
+    r"^\s*(?:what|why|how|which|when|who|explain|detail\w*)\b", re.IGNORECASE
+)
 _CHANGE_RE = re.compile(
     r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b",
     re.IGNORECASE,
@@ -135,20 +138,40 @@ async def _handle_proposal(
         console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
         return ExitChat()
 
-    if _QUESTION_RE.search(line) and not _CHANGE_RE.search(line):
+    if line.startswith("/"):
+        name = line[1:].split()[0].casefold() if line[1:].split() else ""
+        if name == "help":
+            console.print(HELP_TEXT, markup=False)
+        elif name == "clear":
+            session.history = []
+            session.context = None
+            console.print("Memory cleared.")
+        elif name == "analyze":
+            console.print(
+                "[yellow]/analyze is unavailable while a proposal is open;"
+                " reply yes, no, or cancel.[/yellow]"
+            )
+        else:
+            console.print("[red]Unknown command.[/red]")
+            console.print(HELP_TEXT, markup=False)
+        prompt_plan(snapshot)
+        return state
+
+    if _QUESTION_START_RE.search(line) or (
+        _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
+    ):
         try:
             view = engine.review(draft_id)
-            if session.context is None:
-                raise RuntimeError("no cached context to answer against")
+            context_base = session.context if session.context is not None else view.draft.context
             try:
                 context = CoachContext.model_validate(
                     {
-                        **session.context.model_dump(),
+                        **context_base.model_dump(),
                         "current_proposal": view.draft.report,
                     }
                 )
             except ValidationError:
-                context = session.context
+                context = context_base
             async with thinking():
                 reply = await engine.converse(line, history=session.history, context=context)
             console.print("[bold green]Coach:[/bold green]", end=" ")

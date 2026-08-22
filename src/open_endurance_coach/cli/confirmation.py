@@ -17,7 +17,6 @@ from open_endurance_coach.chat.gate import (
 from open_endurance_coach.cli.rendering import (
     console,
     mutations_plan_text,
-    render_draft,
     render_report,
     thinking,
 )
@@ -67,13 +66,14 @@ async def respond(
         case Ignored():
             return snapshot
         case Feedback(feedback):
+            if not chat:
+                if discuss_message is not None:
+                    console.print(discuss_message)
+                return snapshot
             assert snapshot.draft_id is not None
             async with thinking():
                 updated = await engine.submit_feedback(snapshot.draft_id, feedback)
-            if chat:
-                render_report(updated.report)
-            else:
-                render_draft(updated, updated=True, chat=False)
+            render_report(updated.report)
             if on_feedback is not None and await on_feedback(feedback, updated):
                 return Done()
             return replace(snapshot, plan_text=restate(updated))
@@ -90,7 +90,6 @@ async def run_confirmation(
     snapshot: PlanSnapshot,
     *,
     executor: Executor,
-    restate: Callable[[Draft], str] = restate_mutations,
 ) -> None:
     current = snapshot
     while True:
@@ -112,7 +111,6 @@ async def run_confirmation(
             discuss_message=(
                 "[yellow]Discussion lives in `coach chat`; reply yes/no/cancel here.[/yellow]"
             ),
-            restate=restate,
         )
         if isinstance(step, Done):
             return
