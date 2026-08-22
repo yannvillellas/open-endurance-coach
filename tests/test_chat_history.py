@@ -112,7 +112,30 @@ def test_trim_history_truncates_single_oversized_turn() -> None:
     trimmed = trim_history(turns, 10)
     assert len(trimmed) == 1
     assert trimmed[0].role == "user"
-    assert trimmed[0].content == "x" * 40
+    assert trimmed[0].content == "x" * 36
+
+
+def test_trim_history_cap_holds_even_when_head_turn_is_oversized() -> None:
+    turns = [
+        LlmMessage(role="user", content="y" * 4000),
+        LlmMessage(role="assistant", content="Summary A."),
+    ]
+    trimmed = trim_history(turns, 100)
+    assert sum(max(1, len(turn.content) // 4) for turn in trimmed) <= 100
+    assert trimmed[0].content == "y" * 396
+    assert trimmed[1].content == "Summ"
+
+
+def test_trim_history_never_starts_with_assistant_turn() -> None:
+    turns = [
+        LlmMessage(role="user", content="a" * 100),
+        LlmMessage(role="user", content="b" * 100),
+        LlmMessage(role="assistant", content="c" * 100),
+    ]
+    trimmed = trim_history(turns, 60)
+    assert trimmed[0].role == "user"
+    assert trimmed[0].content == "b" * 100
+    assert trimmed[1].role == "assistant"
 
 
 def test_trim_history_rejects_non_positive_budget() -> None:
@@ -139,8 +162,8 @@ def test_session_seed_respects_token_cap() -> None:
     session = ChatSession()
     session.seed([entry(1, 10, "y" * 4000, REPORT_A)], max_tokens=100)
     assert [turn.role for turn in session.history] == ["user", "assistant"]
-    assert session.history[0].content == "y" * 4000
-    assert session.history[1].content == "S"
+    assert session.history[0].content == "y" * 396
+    assert session.history[1].content == "Summ"
 
 
 def test_session_append_extends_history_in_order() -> None:

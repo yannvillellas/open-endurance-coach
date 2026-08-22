@@ -34,11 +34,22 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
     if max_tokens < 1:
         raise ValueError(f"max_tokens must be positive: {max_tokens}")
     remaining = list(turns)
-    pairs = [remaining[i : i + 2] for i in range(0, len(remaining), 2)]
+    pairs: list[list[LlmMessage]] = []
+    index = len(remaining)
+    while index > 0:
+        if remaining[index - 1].role == "assistant" and index - 2 >= 0:
+            pairs.append([remaining[index - 2], remaining[index - 1]])
+            index -= 2
+        else:
+            pairs.append([remaining[index - 1]])
+            index -= 1
+    pairs.reverse()
     while len(pairs) > 1 and sum(_tokens_of(turn) for pair in pairs for turn in pair) > max_tokens:
         pairs.pop(0)
     kept = [turn for pair in pairs for turn in pair]
     if kept and sum(_tokens_of(turn) for turn in kept) > max_tokens:
+        if _tokens_of(kept[0]) > max_tokens - 1:
+            kept[0] = LlmMessage(role=kept[0].role, content=kept[0].content[: (max_tokens - 1) * 4])
         head = sum(_tokens_of(turn) for turn in kept[:-1])
         kept[-1] = LlmMessage(
             role=kept[-1].role,
