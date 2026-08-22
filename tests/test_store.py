@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -359,3 +359,74 @@ def test_store_migrates_old_schema_without_applied_at(tmp_path: Path) -> None:
     assert decisions[0].applied_at is None
     store.mark_decision_applied(decisions[0].id)
     assert store.list_unapplied_decisions() == []
+
+
+def test_recent_feedback_empty_store(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    assert store.recent_feedback(10) == []
+
+
+def test_recent_feedback_zero_or_negative_limit_returns_empty(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "RPE was 7")
+    assert store.recent_feedback(0) == []
+    assert store.recent_feedback(-3) == []
+
+
+def test_recent_feedback_pairs_rows_with_draft_report(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "RPE was 7")
+    rows = store.recent_feedback(10)
+    assert len(rows) == 1
+    assert rows[0].feedback.content == "RPE was 7"
+    assert rows[0].feedback.draft_id == draft_id
+    assert rows[0].report == make_report()
+
+
+def test_recent_feedback_orders_newest_first_across_drafts(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    first_draft = store.save_draft(focus="first", report=make_report(), context=make_context())
+    second_draft = store.save_draft(focus="second", report=make_report(), context=make_context())
+    store.add_feedback(first_draft, "one")
+    store.add_feedback(second_draft, "two")
+    store.add_feedback(first_draft, "three")
+    rows = store.recent_feedback(10)
+    assert [row.feedback.content for row in rows] == ["three", "two", "one"]
+
+
+def test_recent_feedback_limit_caps_the_window(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    for index in range(5):
+        store.add_feedback(draft_id, f"note {index}")
+    rows = store.recent_feedback(2)
+    assert [row.feedback.content for row in rows] == ["note 4", "note 3"]
+
+
+def test_recent_feedback_uses_the_drafts_current_report(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "first answer")
+    replacement = DecisionReport(summary="Revised.")
+    store.update_draft_report(draft_id, report=replacement, user_feedback="first answer")
+    rows = store.recent_feedback(10)
+    assert len(rows) == 1
+    assert rows[0].report.summary == "Revised."
+
+
+def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "old row")
+    clock.now = NOW + timedelta(days=10)
+    store.add_feedback(draft_id, "recent row")
+    recent = store.recent_feedback(10, max_age_days=5)
+    assert [row.feedback.content for row in recent] == ["recent row"]
+    assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
+    unfiltered = store.recent_feedback(10)
+    assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]

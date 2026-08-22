@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient, LlmError
+from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
@@ -16,6 +16,7 @@ from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
     FakeCalendarClient,
+    FakeClock,
     FakeIntervalsClient,
     FakeLlmProvider,
     RecordingSleep,
@@ -238,6 +239,23 @@ async def test_submit_feedback_over_budget_raises_before_llm(
     assert stored.context.user_feedback is None
 
 
+async def test_submit_feedback_falls_back_without_current_proposal_on_budget_overflow(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    big_report = DecisionReport(summary="x" * 400)
+    draft_id = store.save_draft(
+        focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
+    )
+    provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    updated = await engine.submit_feedback(draft_id, "make it easier")
+    assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
+    assert updated.context.current_proposal is None
+    assert updated.context.user_feedback == "make it easier"
+    assert updated.report.summary == "Revised."
+
+
 async def test_surface_unseen_falls_back_when_listing_overflows_budget(
     settings: Settings, tmp_path: Path
 ) -> None:
@@ -421,3 +439,127 @@ async def test_apply_marks_empty_decision_applied(settings: Settings, tmp_path: 
     assert report.decisions[0].outcomes == []
     assert calendar.created == []
     assert applied_decision(store, 1).applied_at is not None
+
+
+async def test_converse_reuses_context_without_extraction(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    client = FakeIntervalsClient([], [], [], [])
+    provider = FakeLlmProvider([completion("Keep load stable.")])
+    engine = make_engine(settings, store, provider, client=client)
+    context = CoachContext(focus="how was my week", today=TODAY)
+    reply = await engine.converse("what do you think?", context=context, today=TODAY)
+    assert reply == "Keep load stable."
+    assert client.calls == []
+    assert store.list_drafts() == []
+    recorded = provider.calls[0]
+    assert recorded["json_mode"] is False
+    assert recorded["thinking"] is True
+    messages = recorded["messages"]
+    assert [message.role for message in messages] == ["system", "user", "user"]
+    assert messages[-1].content == "what do you think?"
+    assert "how was my week" in messages[1].content
+
+
+async def test_converse_extracts_and_surfaces_unseen_without_marking_seen(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion("Trend looks fine.")])
+    engine = make_engine(settings, store, provider)
+    reply = await engine.converse("how was my week?", today=TODAY)
+    assert reply == "Trend looks fine."
+    messages = provider.calls[0]["messages"]
+    assert "New activities since last review" in messages[1].content
+    assert store.is_activity_seen("fx-a") is False
+    assert store.list_drafts() == []
+
+
+async def test_converse_deep_query_uses_deep_extractor(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    client = make_intervals_client()
+    provider = FakeLlmProvider([completion("Hills improving.")])
+    engine = make_engine(settings, store, provider, client=client)
+    reply = await engine.converse(
+        "how much did my heart rate improve on hilly sections over the last 3 months",
+        today=TODAY,
+    )
+    assert reply == "Hills improving."
+    assert any(call[0] == "detail" for call in client.calls)
+
+
+async def test_converse_includes_history_between_data_and_turn(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion("Good point.")])
+    engine = make_engine(settings, store, provider)
+    history = [
+        LlmMessage(role="user", content="past question"),
+        LlmMessage(role="assistant", content="past answer"),
+    ]
+    await engine.converse("follow up", context=CoachContext(focus="f"), history=history)
+    messages = provider.calls[0]["messages"]
+    assert messages[2] == history[0]
+    assert messages[3] == history[1]
+    assert messages[4].content == "follow up"
+
+
+async def test_converse_today_anchor_reaches_prompt(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion("ok")])
+    engine = make_engine(settings, store, provider)
+    await engine.converse("hi", context=CoachContext(focus="f", today=TODAY))
+    messages = provider.calls[0]["messages"]
+    assert "Today's date (athlete local): 2024-02-01" in messages[1].content
+
+
+async def test_converse_empty_content_raises_without_writes(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion("")])
+    engine = make_engine(settings, store, provider)
+    with pytest.raises(LlmError, match="empty content"):
+        await engine.converse("hi", context=CoachContext(focus="f"))
+    assert store.list_drafts() == []
+
+
+async def test_recent_history_reads_feedback_from_store(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    draft_id = store.save_draft(
+        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    rows = engine.recent_history(10)
+    assert len(rows) == 1
+    assert rows[0].feedback.content == "legs heavy"
+    assert rows[0].report.summary == "ok"
+    assert engine.recent_history(0) == []
+
+
+def test_recent_history_applies_max_age_cutoff(settings: Settings, tmp_path: Path) -> None:
+    clock = FakeClock(datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC))
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    engine = make_engine(settings, store, FakeLlmProvider())
+    draft_id = store.save_draft(
+        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
+    )
+    store.add_feedback(draft_id, "old")
+    clock.now = clock.now + timedelta(days=10)
+    store.add_feedback(draft_id, "new")
+    rows = engine.recent_history(10, max_age_days=5)
+    assert [row.feedback.content for row in rows] == ["new"]
+
+
+async def test_build_context_surfaces_unseen_without_marking(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    context = await engine.build_context("how was my week?", today=TODAY)
+    assert "New activities since last review" in context.focus
+    assert store.is_activity_seen("fx-a") is False
+    assert store.list_drafts() == []

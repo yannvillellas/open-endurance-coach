@@ -63,15 +63,34 @@ def test_estimated_tokens_match_indented_prompt_format() -> None:
         {"focus": "status check", "recent_activities": [ACTIVITY], "max_tokens": 4096}
     )
     compact = sum(
-        len(json.dumps(payload, ensure_ascii=False)) // 4
-        for payload in context._section_payloads().values()
+        len(json.dumps(payload, ensure_ascii=False)) // 4 for payload in context.sections().values()
     )
     indented = sum(
         len(json.dumps(payload, ensure_ascii=False, indent=2)) // 4
-        for payload in context._section_payloads().values()
+        for payload in context.sections().values()
     )
     assert context.estimated_tokens() == indented
     assert indented > compact
+
+
+def test_sections_match_the_prompt_payload() -> None:
+    from open_endurance_coach.config import Settings
+    from open_endurance_coach.prompts.prompts import build_messages
+
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "today": "2024-02-01",
+            "recent_activities": [ACTIVITY],
+            "user_feedback": "legs heavy",
+            "max_tokens": 4096,
+        }
+    )
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    user = build_messages(context, settings)[1].content
+    payload = json.loads(user.split("\n", 1)[1].rsplit("\nProduce", 1)[0])
+    assert payload == context.sections()
+    assert "Today's date (athlete local): 2024-02-01" in user
 
 
 def test_estimated_tokens_grow_with_content() -> None:
@@ -103,6 +122,7 @@ def test_section_tokens_reports_per_section() -> None:
     assert set(sections) == {
         "focus",
         "today",
+        "current_proposal",
         "recent_activities",
         "activity_detail",
         "wellness",
@@ -112,7 +132,7 @@ def test_section_tokens_reports_per_section() -> None:
     }
     assert sections["recent_activities"] > 0
     assert sections["wellness"] > 0
-    assert sections["activity_detail"] == 0
+    assert sections["activity_detail"] == 1
     assert sections["user_feedback"] == 0
     assert sections["focus"] > 0
 

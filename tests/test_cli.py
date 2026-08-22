@@ -10,6 +10,8 @@ from open_endurance_coach.cli import main as cli_main
 from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
@@ -122,7 +124,7 @@ def test_review_missing_draft_fails_gracefully(patched: Any) -> None:
 def test_approve_records_decision(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    result = runner.invoke(cli_main.app, ["approve", "1"])
+    result = runner.invoke(cli_main.app, ["approve", "1", "--yes"])
     assert result.exit_code == 0
     assert "Decision #1" in result.output
     assert store.get_draft(1) is not None
@@ -139,7 +141,9 @@ def test_approve_with_mutations_file(patched: Any, tmp_path: Path) -> None:
             [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
         )
     )
-    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path)])
+    result = runner.invoke(
+        cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path), "--yes"]
+    )
     assert result.exit_code == 0
     decision = store.list_decisions()[0]
     assert decision.report.mutations[0].name == "Custom Session"
@@ -150,7 +154,9 @@ def test_approve_invalid_mutations_file_fails(patched: Any, tmp_path: Path) -> N
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     mutations_path = tmp_path / "mutations.json"
     mutations_path.write_text("not json")
-    result = runner.invoke(cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path)])
+    result = runner.invoke(
+        cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path), "--yes"]
+    )
     assert result.exit_code == 2
     assert "invalid mutations file" in result.output
 
@@ -159,7 +165,7 @@ def test_approve_missing_mutations_file_fails(patched: Any, tmp_path: Path) -> N
     patched(FakeLlmProvider([completion(report_json())]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     result = runner.invoke(
-        cli_main.app, ["approve", "1", "--mutations-file", str(tmp_path / "missing.json")]
+        cli_main.app, ["approve", "1", "--mutations-file", str(tmp_path / "missing.json"), "--yes"]
     )
     assert result.exit_code == 2
     assert "invalid mutations file" in result.output
@@ -168,7 +174,7 @@ def test_approve_missing_mutations_file_fails(patched: Any, tmp_path: Path) -> N
 def test_reject_flips_status(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    result = runner.invoke(cli_main.app, ["reject", "1"])
+    result = runner.invoke(cli_main.app, ["reject", "1", "--yes"])
     assert result.exit_code == 0
     assert "rejected" in result.output
     assert store.get_draft(1).status is DraftStatus.REJECTED
@@ -218,7 +224,7 @@ def test_review_suggests_feedback_command(patched: Any) -> None:
 def test_review_no_suggestion_after_approve(patched: Any) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
     result = runner.invoke(cli_main.app, ["review", "1"])
     assert result.exit_code == 0
     assert "coach feedback 1" not in result.output
@@ -237,7 +243,7 @@ def approve_draft(patched: Any) -> tuple[FakeCalendarClient, CoachStore]:
         calendar=calendar,
     )
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
     return calendar, store
 
 
@@ -253,7 +259,7 @@ def test_apply_dry_run_by_default(patched: Any) -> None:
 
 def test_apply_write_flag_writes(patched: Any) -> None:
     calendar, store = approve_draft(patched)
-    result = runner.invoke(cli_main.app, ["apply", "--write"])
+    result = runner.invoke(cli_main.app, ["apply", "--write", "--yes"])
     assert result.exit_code == 0
     assert "created" in result.output
     assert "DRY RUN" not in result.output
@@ -273,9 +279,9 @@ def test_apply_specific_decision_only(patched: Any) -> None:
         calendar=calendar,
     )
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    runner.invoke(cli_main.app, ["approve", "2"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "2", "--yes"], catch_exceptions=False)
     result = runner.invoke(cli_main.app, ["apply", "2"])
     assert result.exit_code == 0
     assert "Decision #2" in result.output
@@ -306,8 +312,8 @@ def test_apply_error_propagates(patched: Any) -> None:
         calendar=calendar,
     )
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
-    runner.invoke(cli_main.app, ["approve", "1"], catch_exceptions=False)
-    result = runner.invoke(cli_main.app, ["apply", "--write"])
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "--write", "--yes"])
     assert result.exit_code == 1
     assert "non-WORKOUT" in result.output
     assert decision_of(store, 1).applied_at is None
@@ -322,3 +328,215 @@ def test_missing_env_shows_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.exit_code == 1
     assert "configuration missing" in result.output
     assert ".env" in result.output
+
+
+def test_approve_gate_proceeds_on_yes(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="yes\n")
+    assert result.exit_code == 0
+    assert "Confirm?" in result.output
+    assert "Decision #1 recorded" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
+def test_approve_gate_no_declines(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="no\n")
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_approve_gate_eof_aborts_with_exit_one(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"])
+    assert result.exit_code == 1
+    assert "Cancelled. Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_approve_gate_blank_line_re_prompts(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="\nyes\n")
+    assert result.exit_code == 0
+    assert result.output.count("Confirm?") == 2
+    assert "Decision #1 recorded" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
+def test_approve_gate_non_literal_answer_discusses_without_revision(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="wait, explain\nyes\n")
+    assert result.exit_code == 0
+    assert "coach chat" in result.output
+    assert result.output.count("Confirm?") == 2
+    assert store.list_feedback(1) == []
+    assert "Decision #1 recorded" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
+def test_approve_gate_override_plan_survives_discussion(patched: Any, tmp_path: Path) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text(
+        json.dumps(
+            [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
+        )
+    )
+    result = runner.invoke(
+        cli_main.app,
+        ["approve", "1", "--mutations-file", str(mutations_path)],
+        input="hmm\nyes\n",
+    )
+    assert result.exit_code == 0
+    assert "Custom Session" in result.output
+    assert "Tempo Session" not in result.output
+    assert store.list_feedback(1) == []
+    decision = store.list_decisions()[0]
+    assert decision.report.mutations[0].name == "Custom Session"
+
+
+def test_approve_gate_rejects_non_pending_before_prompt(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"])
+    assert result.exit_code == 1
+    assert "only pending drafts can be approved" in result.output
+    assert "Confirm?" not in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
+def test_reject_gate_proceeds_on_yes(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["reject", "1"], input="yes\n")
+    assert result.exit_code == 0
+    assert "Draft #1 rejected." in result.output
+    assert store.get_draft(1).status is DraftStatus.REJECTED
+
+
+def test_reject_gate_no_keeps_draft_pending(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["reject", "1"], input="no\n")
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_apply_write_gate_proceeds_on_yes(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "--write"], input="yes\n")
+    assert result.exit_code == 0
+    assert "Confirm?" in result.output
+    assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
+
+
+def test_apply_write_gate_no_writes_nothing(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "--write"], input="no\n")
+    assert result.exit_code == 0
+    assert "Nothing changed." in result.output
+    assert calendar.created == []
+    assert decision_of(store, 1).applied_at is None
+
+
+def test_apply_write_gate_discuss_re_prompts_same_plan(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(
+        FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]),
+        calendar=calendar,
+    )
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    runner.invoke(cli_main.app, ["approve", "1", "--yes"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["apply", "--write"], input="explain first?\nyes\n")
+    assert result.exit_code == 0
+    assert result.output.count("Confirm?") == 2
+    assert "coach chat" in result.output
+    assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
+
+
+def test_approve_gate_exit_command_cancels(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="/exit\n")
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+
+
+def test_review_listing_escapes_summaries(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider())
+    store.save_draft(
+        focus="f",
+        report=DecisionReport(summary="Weird [bold]summary[/bold]."),
+        context=CoachContext(focus="f"),
+    )
+    result = runner.invoke(cli_main.app, ["review"])
+    assert result.exit_code == 0
+    assert "Weird [bold]summary[/bold]." in result.output
+
+
+def test_reject_gate_question_discusses_without_llm(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["reject", "1"], input="why?\nno\n")
+    assert result.exit_code == 0
+    assert "coach chat" in result.output
+    assert store.list_feedback(1) == []
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_approve_gate_ctrl_c_interrupts_with_exit_zero(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from open_endurance_coach.cli import confirmation as cli_confirmation
+
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+
+    def ask(prompt: str, *args: Any, **kwargs: Any) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_confirmation, "Prompt", SimpleNamespace(ask=ask))
+    result = runner.invoke(cli_main.app, ["approve", "1"])
+    assert result.exit_code == 0
+    assert "Cancelled. Nothing changed." in result.output
+    assert store.get_draft(1).status is DraftStatus.PENDING
+
+
+def test_confirmation_plumbing_is_chat_only() -> None:
+    import inspect
+
+    from open_endurance_coach.cli import confirmation as cli_confirmation
+    from open_endurance_coach.cli import main as cli_main
+
+    assert "on_discuss" not in inspect.signature(cli_confirmation.respond).parameters
+    assert "restate" not in inspect.signature(cli_confirmation.run_confirmation).parameters
+    assert not hasattr(cli_main, "_approve_restate")

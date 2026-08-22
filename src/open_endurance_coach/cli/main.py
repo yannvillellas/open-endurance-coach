@@ -5,20 +5,35 @@ from typing import Any
 
 import typer
 from pydantic import TypeAdapter, ValidationError
-from rich.console import Console
 
+# imported before app.add_typer below; cli.chat reaches cli.main lazily to avoid a cycle
+from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS, PlanSnapshot
+from open_endurance_coach.cli.chat import chat_app
+from open_endurance_coach.cli.confirmation import run_confirmation
+from open_endurance_coach.cli.rendering import (
+    apply_plan_text,
+    console,
+    escape,
+    mutations_plan_text,
+    print_error,
+    reject_plan_text,
+    render_apply,
+    render_draft,
+    render_review,
+    thinking,
+)
 from open_endurance_coach.clients.intervals import IntervalsClient
-from open_endurance_coach.clients.llm import LlmClient, LlmError
+from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.clients.providers import build_registry
 from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
-from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import Draft, DraftStatus
+from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 app = typer.Typer(no_args_is_help=True)
-console = Console()
+app.add_typer(chat_app)
 _mutations_adapter = TypeAdapter(list[WorkoutMutation])
 
 DEFAULT_ANALYZE_FOCUS = "Analyze my recent training"
@@ -52,23 +67,67 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
 def _run(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
     try:
         asyncio.run(_with_engine(callback))
-    except (LlmError, ValueError, RuntimeError) as exc:
-        console.print(f"[red]error:[/red] {exc}")
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
         raise typer.Exit(code=1) from exc
 
 
-def _render_report(report: DecisionReport) -> None:
-    console.print(f"[bold green]Coach:[/bold green] {report.summary}")
-    for finding in report.findings:
-        console.print(f"  [dim]- {finding}[/dim]")
-    for question in report.questions:
-        console.print(f"  [yellow]? {question}[/yellow]")
+def _approve_snapshot(
+    engine: CoachEngine, draft_id: int, override: list[WorkoutMutation] | None
+) -> PlanSnapshot:
+    view = engine.review(draft_id)
+    if view.draft.status is not DraftStatus.PENDING:
+        raise ValueError(
+            f"draft {draft_id} is {view.draft.status.value}; only pending drafts can be approved"
+        )
+    mutations = override if override is not None else view.draft.report.mutations
+    return PlanSnapshot(
+        action="approve",
+        plan_text=mutations_plan_text(mutations),
+        draft_id=draft_id,
+    )
 
 
-def _render_draft(draft: Draft, *, updated: bool = False) -> None:
-    _render_report(draft.report)
-    verb = "updated" if updated else "saved"
-    console.print(f"Draft #{draft.id} {verb} (pending). Review it: coach review {draft.id}")
+def _reject_snapshot(engine: CoachEngine, draft_id: int) -> PlanSnapshot:
+    view = engine.review(draft_id)
+    if view.draft.status is not DraftStatus.PENDING:
+        raise ValueError(
+            f"draft {draft_id} is {view.draft.status.value}; only pending drafts can be rejected"
+        )
+    return PlanSnapshot(action="reject", plan_text=reject_plan_text(draft_id), draft_id=draft_id)
+
+
+async def _apply_snapshot(engine: CoachEngine, decision_id: int | None) -> PlanSnapshot | None:
+    report = await engine.apply(decision_id, dry_run=True)
+    if not report.decisions:
+        console.print("No unapplied decisions.")
+        return None
+    return PlanSnapshot(
+        action="apply",
+        plan_text=f"Decision(s) - write to calendar:\n{apply_plan_text(report)}",
+        draft_id=None,
+        decision_id=decision_id,
+        write=True,
+    )
+
+
+async def _execute_approve(
+    engine: CoachEngine, draft_id: int, override: list[WorkoutMutation] | None
+) -> None:
+    decision = engine.approve(draft_id, mutations=override)
+    console.print(
+        f"Decision #{decision.id} recorded from draft #{draft_id}"
+        f" ({len(decision.report.mutations)} mutations)."
+    )
+
+
+async def _execute_reject(engine: CoachEngine, draft_id: int) -> None:
+    engine.reject(draft_id)
+    console.print(f"Draft #{draft_id} rejected.")
+
+
+async def _execute_apply(engine: CoachEngine, decision_id: int | None, write: bool) -> None:
+    render_apply(await engine.apply(decision_id, dry_run=not write), write=write)
 
 
 @app.command()
@@ -77,7 +136,8 @@ def ask(
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        _render_draft(await engine.analyze(focus, user_feedback=feedback))
+        async with thinking():
+            render_draft(await engine.analyze(focus, user_feedback=feedback))
 
     _run(run)
 
@@ -88,7 +148,8 @@ def analyze(
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        _render_draft(await engine.analyze(focus, user_feedback=feedback))
+        async with thinking():
+            render_draft(await engine.analyze(focus, user_feedback=feedback))
 
     _run(run)
 
@@ -105,16 +166,11 @@ def review(
                 return
             for draft in drafts:
                 console.print(
-                    f"Draft #{draft.id} ([cyan]{draft.status.value}[/cyan]): {draft.report.summary}"
+                    f"Draft #{draft.id} ([cyan]{draft.status.value}[/cyan]):"
+                    f" {escape(draft.report.summary)}"
                 )
             return
-        view = engine.review(draft_id)
-        _render_report(view.draft.report)
-        if view.draft.status is DraftStatus.PENDING:
-            for line in view.requested_feedback:
-                console.print(f"  [yellow]? {line}[/yellow]")
-            if view.requested_feedback:
-                console.print(f'Answer the coach: coach feedback {draft_id} "your RPE and notes"')
+        render_review(engine.review(draft_id))
 
     _run(run)
 
@@ -125,7 +181,8 @@ def feedback(
     text: str = typer.Argument(...),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        _render_draft(await engine.submit_feedback(draft_id, text), updated=True)
+        async with thinking():
+            render_draft(await engine.submit_feedback(draft_id, text), updated=True)
 
     _run(run)
 
@@ -138,24 +195,39 @@ def approve(
         "--mutations-file",
         help="JSON file with workout mutations replacing the coach's proposals",
     ),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt"),
 ) -> None:
     override = _read_mutations(mutations_file) if mutations_file is not None else None
 
     async def run(engine: CoachEngine) -> None:
-        decision = engine.approve(draft_id, mutations=override)
-        console.print(
-            f"Decision #{decision.id} recorded from draft #{draft_id}"
-            f" ({len(decision.report.mutations)} mutations)."
-        )
+        if yes:
+            await _execute_approve(engine, draft_id, override)
+            return
+        snapshot = _approve_snapshot(engine, draft_id, override)
+
+        async def execute(current: CoachEngine) -> None:
+            await _execute_approve(current, draft_id, override)
+
+        await run_confirmation(engine, snapshot, executor=execute)
 
     _run(run)
 
 
 @app.command()
-def reject(draft_id: int = typer.Argument(...)) -> None:
+def reject(
+    draft_id: int = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt"),
+) -> None:
     async def run(engine: CoachEngine) -> None:
-        engine.reject(draft_id)
-        console.print(f"Draft #{draft_id} rejected.")
+        if yes:
+            await _execute_reject(engine, draft_id)
+            return
+        snapshot = _reject_snapshot(engine, draft_id)
+        await run_confirmation(
+            engine,
+            snapshot,
+            executor=lambda current: _execute_reject(current, draft_id),
+        )
 
     _run(run)
 
@@ -166,23 +238,20 @@ def apply(
     write: bool = typer.Option(
         False, "--write", help="Write to the calendar (default is a dry-run)"
     ),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
-        report = await engine.apply(decision_id, dry_run=not write)
-        if not report.decisions:
-            console.print("No unapplied decisions.")
+        if not write or yes:
+            await _execute_apply(engine, decision_id, write)
             return
-        if write:
-            console.print("[green]Applied:[/green]")
-        else:
-            console.print("[yellow]DRY RUN - no changes written[/yellow]")
-        for applied in report.decisions:
-            console.print(f"Decision #{applied.decision_id}:")
-            for outcome in applied.outcomes:
-                target = (
-                    str(outcome.event_id) if outcome.event_id is not None else outcome.name or ""
-                )
-                console.print(f"  - {outcome.action} {outcome.target}: {target}")
+        snapshot = await _apply_snapshot(engine, decision_id)
+        if snapshot is None:
+            return
+        await run_confirmation(
+            engine,
+            snapshot,
+            executor=lambda current: _execute_apply(current, decision_id, write),
+        )
 
     _run(run)
 

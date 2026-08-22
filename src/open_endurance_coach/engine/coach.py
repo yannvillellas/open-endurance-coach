@@ -4,16 +4,22 @@ from datetime import date
 
 from pydantic import ValidationError
 
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
+from open_endurance_coach.prompts.chat import build_chat_messages
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import Decision, Draft, DraftStatus
+from open_endurance_coach.store.records import (
+    Decision,
+    Draft,
+    DraftStatus,
+    FeedbackWithReport,
+)
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
@@ -82,6 +88,17 @@ class CoachEngine:
         )
         return DecisionReport.model_validate(json.loads(content))
 
+    async def build_context(
+        self,
+        focus: str,
+        *,
+        user_feedback: str | None = None,
+        today: date | None = None,
+    ) -> CoachContext:
+        return self._surface_unseen(
+            await self._extract(focus, user_feedback=user_feedback, today=today)
+        )
+
     async def analyze(
         self,
         focus: str,
@@ -89,9 +106,7 @@ class CoachEngine:
         user_feedback: str | None = None,
         today: date | None = None,
     ) -> Draft:
-        context = self._surface_unseen(
-            await self._extract(focus, user_feedback=user_feedback, today=today)
-        )
+        context = await self.build_context(focus, user_feedback=user_feedback, today=today)
         report = await self._run_llm(context)
         draft_id = self._store.save_draft(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
@@ -101,6 +116,24 @@ class CoachEngine:
         assert draft is not None
         return draft
 
+    async def converse(
+        self,
+        text: str,
+        *,
+        history: list[LlmMessage] | None = None,
+        context: CoachContext | None = None,
+        today: date | None = None,
+    ) -> str:
+        if context is None:
+            context = self._surface_unseen(
+                await self._extract(text, user_feedback=None, today=today)
+            )
+        messages = build_chat_messages(context, self._settings, history=history, text=text)
+        completion = await self._llm_client.complete(messages, json_mode=False)
+        if not completion.content.strip():
+            raise LlmError("empty content returned")
+        return completion.content
+
     def review(self, draft_id: int) -> ReviewView:
         draft = self._store.get_draft(draft_id)
         if draft is None:
@@ -109,6 +142,11 @@ class CoachEngine:
 
     def pending_drafts(self) -> list[Draft]:
         return self._store.list_drafts(DraftStatus.PENDING)
+
+    def recent_history(
+        self, limit: int, *, max_age_days: int | None = None
+    ) -> list[FeedbackWithReport]:
+        return self._store.recent_feedback(limit, max_age_days=max_age_days)
 
     @staticmethod
     def _solicitations(context: CoachContext) -> list[str]:
@@ -136,9 +174,13 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        context = CoachContext.model_validate(
-            {**draft.context.model_dump(), "user_feedback": feedback}
-        )
+        base = draft.context.model_dump()
+        try:
+            context = CoachContext.model_validate(
+                {**base, "user_feedback": feedback, "current_proposal": draft.report}
+            )
+        except ValidationError:
+            context = CoachContext.model_validate({**base, "user_feedback": feedback})
         self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context)
         self._store.update_draft_report(

@@ -119,3 +119,99 @@ Verified by recording real read-only payloads into anonymized test fixtures (`te
 - **Wellness:** `id` is the date string (`YYYY-MM-DD`); 46 fields including nested `sportInfo[]` (`type`, `eftp`, `wPrime`, `pMax`); `cols`/`fields` params select columns.
 - **Sport settings:** `id` is an int but `athlete_id` is a string; `power_zones`/`hr_zones` are 7-boundary numeric lists.
 - **Athlete summary:** returns a list of server-aggregated rows, not a single object.
+
+## 8. Workout description text format (structured workouts)
+
+Verified 2026-08-22 against official Intervals.icu forum documentation. The `description` field of WORKOUT events is parsed server-side into structured steps (`workout_doc`, time-in-zones, training load). Quoted statements:
+
+- API access guide (topic 609, david): "The workout description is now parsed. This means that workouts created or updated via the API have training load calculated and get 'time in zones' and so on."
+- Uploading planned workouts guide (topic 63624, david): "you can use 'description' and supply native Intervals.icu workout text".
+
+Server-rendered description of a parsed workout (topic 609, response to a `.zwo` upload — this is the format the server itself produces):
+
+```text
+- 20m 60% 90-100rpm
+
+Main set 4x
+- 8m 110%
+- 8m 50%
+
+- 10m 60%
+```
+
+Working API payload description (topic 63624, forum user example, Feb 2026 — posted with the event fields `"target": "POWER"` and `"workout_doc": {}`; the server fills `workout_doc`):
+
+```text
+- 15m 55% Warmup
+
+3x
+- 1m 150%
+- 1m 50%
+
+- 5m 50%
+- 5m 120%
+- 15m 55%
+```
+
+Format rules, from the official workout builder doc (topic 1163, david):
+
+> - Create workout steps by starting a line with a `-` and using the following constructs: a duration "30s", "10m", "1m30" etc.; "100w, 80% (of FTP), 60% HR (of max heart rate), 100% LTHR (of threshold HR), 90 rpm (cadence)"; ranges "100-140w, 80-90% (of FTP) etc."; ramps "Ramp 100-200w" or "Ramp 60-80% (of FTP)"; "and whatever additional text you like".
+> - "Create repeats by including '6x' or whatever in the line before a set of steps."
+> - Zones (15 April 2022 update): "`- 60m Z2`" for zone 2 power, "`- 60m Z2 HR`" using heart rate, "Pace also works".
+> - "Steps can have text prompts. All the text prior to the duration or power specification becomes the text for the step." (`Recovery 30s 50%` → prompt "Recovery").
+
+Distance units (topic 9973, david): km, mi, mtr, meters, yrd, yards, y, miles, mile; a space is allowed ("1km", "1 km"). "The minutes are denoted `m`'s in Intervals... impossible to use meters as a unit" — plain `m` is minutes, never meters.
+
+Absolute pace (topic 115846, david): `- 10m 7:15-7:00 Pace`, explicit units `/km`, `/mi`, `/100m`, `/500m`, `/100y`, `/400m`, `/250m`.
+
+Parsed structure (topic 93737, david): `workout_doc` steps carry `text`, `duration`, `distance`, `reps` (+ nested `steps`), `warmup`/`cooldown`, and `power`/`hr`/`pace`/`cadence` values (`value`/`start`/`end`/`units`); `target` = POWER/HR/PACE.
+
+Workout builder syntax quick guide (topic 123701, R2Tom — Guide category cheat sheet):
+
+> - Basic line: `- [duration OR distance] [target] [optional cadence]` — e.g. `- 5m30s 60% 90rpm`, `- 1km 70% HR`, `- 500mtr 5:00/km Pace`.
+> - Time: `1h`, `10m`, `30s`, combined `1h2m30s`/`5m30s`, short form `5'`, `30"`, `1'30"`.
+> - Distance: `500mtr`, `2km`, `10km`, `1mi`, `4.5mi`. "`m` means minutes (not meters). For meters, use `mtr`."
+> - Power: `75%`, `95-105%`, `220w`, `200-240w`, zones `Z2`/`Z3-Z4`, MMP `60% MMP 5m`, custom zones `CZ1`/`CZ2-CZ3`.
+> - Heart rate: `70% HR`, `75-80% HR`, `95% LTHR`, `90-95% LTHR`, zones `Z2 HR`/`Z2-Z3 HR`.
+> - Pace: `60% Pace`, `78-82% Pace`, zones `Z2 Pace`/`Z2-Z3 Pace`, absolute `5:00 Pace`, `5:00/km Pace`, `3:00/100m-4:00/100m Pace` (units `/100m` `/100y` `/km` `/mi` `/500m` `/400m` `/250m`).
+> - Ramps (case-insensitive): `- 10m ramp 50%-75%`, `- 10m ramp 60-80% Pace`. Freeride: `- 20m freeride` = ERG off.
+> - Repeats: header line `Main Set 5x` or standalone `5x`; "Leave one empty line before and after every repeat block"; "Nested repeats are not supported."
+> - Text prompts: text before the first duration becomes the cue; repeat blocks append `k/N`.
+> - Timed prompts (`<!>`): `- First prompt at 0s 33^2nd prompt at 33s <!> 10m ramp 25-75%`.
+> - Markdown formatting is ignored by the parser.
+
+### Live cross-check (2026-08-22, real API write/read-back)
+
+Constructs verified against the live API on event 130897354 — all consistent with the documented syntax above:
+
+| Construct | Observed parse |
+| --- | --- |
+| `- 2.5km Z2 HR` | `distance: 2500`, `hr: {units: "hr_zone", value: 2}` |
+| `- 400mtr Z1 HR`, `- 25mtr Z5 HR`, `- 0.1km Z2 HR` | distance steps in meters |
+| `- 10m20s Z2-Z3 HR` | `duration: 620`, `hr: {start: 2, end: 3, units: "hr_zone"}` |
+| `- 0.1km 1:45/100m Pace` | `distance: 100`, `pace: {units: "secs/100m", value: 105}` |
+| `Main set 4x` + steps with blank lines around the block | `{reps: 4, steps: [...]}`, multiplied distance/duration/zoneTimes |
+| Prose lines mixed with step lines | prose ignored for steps (kept as `workout_doc.description`) |
+
+Live-confirmed pitfalls:
+
+- Bare `100m` parses as **100 minutes** (6000s), not 100 meters — sub-km distances must be `mtr` or km fractions.
+- A repeat block without blank-line separation loses its `reps` (steps stay flat, load not multiplied) — matches the quick guide's empty-line rule.
+- A dash-prefixed repeat line (`- 4x`) is a step line, not a repeat header.
+- A bare trailing `ramp` (`- 1km ramp`, as the workout builder UI writes it) sets **no** ramp flag — the range form (`- 1km ramp 60-50% HR`) is required.
+
+### Step types (Add Step dialog → text form)
+
+The dialog offers Normal, Repeats, Ramp, Warmup, Cooldown, Freeride, MaxEffort. Their `workout_doc` flags are documented (topic 93737: `warmup`, `cooldown`, `ramp`, `freeride`, `maxeffort` booleans), and the `ramp`/`freeride` keywords are documented (1163, 123701) — but the **Warmup/Cooldown/MaxEffort text forms are documented nowhere**. Live-verified 2026-08-22 on event 130897354:
+
+| Type      | Text form                                                          | Observed flag                          |
+| --------- | ------------------------------------------------------------------ | -------------------------------------- |
+| Normal    | plain step line                                                    | —                                      |
+| Repeats   | `Main set 4x` / `4x` line (blank lines around the block)           | `reps: 4` + nested `steps`             |
+| Ramp      | `- 1km ramp 60-50% HR` (range required)                            | `ramp: true` + start/end target        |
+| Warmup    | `Warmup` label line directly above the step                        | `warmup: true` on that one step only   |
+| Cooldown  | `Cooldown` label line directly above the step                      | `cooldown: true` on that one step only |
+| Freeride  | `freeride` keyword in the step line (`- 20m freeride`)             | `freeride: true`                       |
+| MaxEffort | `MaxEffort` keyword in the step line (before or after the numbers) | `maxeffort: true`                      |
+
+The Warmup/Cooldown label applies to the immediately following step only — one label line per step.
