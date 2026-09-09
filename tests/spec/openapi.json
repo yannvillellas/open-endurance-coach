@@ -6700,7 +6700,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ActivityMini"
+                    "$ref": "#/components/schemas/ActivitySearchResult"
                   }
                 }
               }
@@ -13573,6 +13573,10 @@
           "power_field": {
             "type": "string"
           },
+          "p30s_exponent": {
+            "type": "number",
+            "format": "float"
+          },
           "lthr": {
             "type": "integer",
             "format": "int32"
@@ -18218,34 +18222,17 @@
           "strava_authorized": {
             "type": "boolean"
           },
-          "sportSettings": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SportSettings"
-            }
-          },
           "custom_items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CustomItem"
             }
-          }
-        }
-      },
-      "ActivityMini": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
           },
-          "start_date_local": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
+          "sportSettings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SportSettings"
+            }
           }
         }
       },
