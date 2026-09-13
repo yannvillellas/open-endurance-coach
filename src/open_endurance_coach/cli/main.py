@@ -39,7 +39,12 @@ _mutations_adapter = TypeAdapter(list[WorkoutMutation])
 DEFAULT_ANALYZE_FOCUS = "Analyze my recent training"
 
 
-async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
+async def _with_engine(
+    callback: Callable[[CoachEngine], Awaitable[None]],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
     try:
         settings = get_settings()
     except ValidationError as exc:
@@ -49,6 +54,7 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
         )
         console.print(f"[dim]{exc}[/dim]")
         raise typer.Exit(code=1) from None
+    settings = settings.with_llm_override(provider=provider, model=model)
     intervals = IntervalsClient(settings)
     providers = build_registry(settings)
     llm = LlmClient(settings, providers)
@@ -59,14 +65,19 @@ async def _with_engine(callback: Callable[[CoachEngine], Awaitable[None]]) -> No
         await callback(engine)
     finally:
         await intervals.aclose()
-        for provider in providers.values():
-            await provider.aclose()
+        for llm_provider in providers.values():
+            await llm_provider.aclose()
         store.close()
 
 
-def _run(callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
+def _run(
+    callback: Callable[[CoachEngine], Awaitable[None]],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
     try:
-        asyncio.run(_with_engine(callback))
+        asyncio.run(_with_engine(callback, provider=provider, model=model))
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         raise typer.Exit(code=1) from exc
@@ -134,24 +145,32 @@ async def _execute_apply(engine: CoachEngine, decision_id: int | None, write: bo
 def ask(
     focus: str = typer.Argument(..., help="Your question or analysis focus"),
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
         async with thinking():
             render_draft(await engine.analyze(focus, user_feedback=feedback))
 
-    _run(run)
+    _run(run, provider=provider, model=model)
 
 
 @app.command()
 def analyze(
     focus: str = typer.Argument(DEFAULT_ANALYZE_FOCUS),
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
         async with thinking():
             render_draft(await engine.analyze(focus, user_feedback=feedback))
 
-    _run(run)
+    _run(run, provider=provider, model=model)
 
 
 @app.command()
@@ -179,12 +198,16 @@ def review(
 def feedback(
     draft_id: int = typer.Argument(...),
     text: str = typer.Argument(...),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
 ) -> None:
     async def run(engine: CoachEngine) -> None:
         async with thinking():
             render_draft(await engine.submit_feedback(draft_id, text), updated=True)
 
-    _run(run)
+    _run(run, provider=provider, model=model)
 
 
 @app.command()

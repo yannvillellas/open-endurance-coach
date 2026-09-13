@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from open_endurance_coach.config import Settings
+from open_endurance_coach.config import Settings, describe_providers
 
 
 class LlmError(RuntimeError):
@@ -54,10 +54,25 @@ class LlmClient:
         self._providers = providers
         self._sleep = sleep or asyncio.sleep
         if settings.llm_provider not in providers:
+            available = describe_providers(providers, settings)
             raise LlmError(
-                f"Unknown LLM provider: {settings.llm_provider!r} "
-                f"(available: {', '.join(sorted(providers))})"
+                f"Unknown LLM provider: {settings.llm_provider!r}\n"
+                f"Available providers:\n{available}"
             )
+
+    @property
+    def provider_name(self) -> str:
+        return self._settings.llm_provider
+
+    @property
+    def model_name(self) -> str:
+        return self._settings.llm_model
+
+    def select(self, *, provider: str | None = None, model: str | None = None) -> None:
+        if provider is not None and provider not in self._providers:
+            available = describe_providers(self._providers, self._settings)
+            raise LlmError(f"Unknown LLM provider: {provider!r}\nAvailable providers:\n{available}")
+        self._settings = self._settings.with_llm_override(provider=provider, model=model)
 
     async def complete(
         self,

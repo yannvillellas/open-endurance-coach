@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -7,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from open_endurance_coach.cli import main as cli_main
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
@@ -57,7 +58,13 @@ class FakeRunner:
     def __init__(self, engine: CoachEngine) -> None:
         self.engine = engine
 
-    async def __call__(self, callback: Callable[[CoachEngine], Awaitable[None]]) -> None:
+    async def __call__(
+        self,
+        callback: Callable[[CoachEngine], Awaitable[None]],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
         await callback(self.engine)
 
 
@@ -93,6 +100,84 @@ def test_analyze_feedback_flag_injected(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["analyze", "--feedback", "legs heavy"])
     assert result.exit_code == 0
     assert store.list_drafts()[0].user_feedback == "legs heavy"
+
+
+def test_analyze_provider_option_threads_to_engine(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider([completion(report_json())]))
+    captured: dict[str, Any] = {}
+
+    async def fake_with_engine(
+        callback: Callable[[CoachEngine], Awaitable[None]],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        captured["provider"] = provider
+        captured["model"] = model
+        await callback(engine)
+
+    monkeypatch.setattr(cli_main, "_with_engine", fake_with_engine)
+    result = runner.invoke(cli_main.app, ["analyze", "--provider", "deepseek"])
+    assert result.exit_code == 0
+    assert captured == {"provider": "deepseek", "model": None}
+
+
+def test_with_engine_applies_provider_override(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    effective = settings.model_copy(update={"database_path": str(tmp_path / "coach.db")})
+    monkeypatch.setattr(cli_main, "get_settings", lambda: effective)
+    captured: dict[str, Settings] = {}
+
+    def fake_registry(effective_settings: Settings, transports: Any = None) -> dict[str, Any]:
+        captured["settings"] = effective_settings
+        return {"deepseek": FakeLlmProvider()}
+
+    monkeypatch.setattr(cli_main, "build_registry", fake_registry)
+
+    async def callback(engine: CoachEngine) -> None:
+        return None
+
+    asyncio.run(cli_main._with_engine(callback, provider="deepseek"))
+    assert captured["settings"].llm_provider == "deepseek"
+    assert captured["settings"].llm_model == "deepseek-v4-pro"
+
+
+def test_with_engine_unknown_provider_fails_clearly(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    effective = settings.model_copy(update={"database_path": str(tmp_path / "coach.db")})
+    monkeypatch.setattr(cli_main, "get_settings", lambda: effective)
+
+    async def callback(engine: CoachEngine) -> None:
+        return None
+
+    with pytest.raises(LlmError) as excinfo:
+        asyncio.run(cli_main._with_engine(callback, provider="ova"))
+    assert "Unknown LLM provider: 'ova'" in str(excinfo.value)
+    assert "deepseek  ready (API key set)" in str(excinfo.value)
+
+
+def test_with_engine_missing_key_fails_clearly(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    effective = settings.model_copy(
+        update={
+            "database_path": str(tmp_path / "coach.db"),
+            "llm_provider": "ovh",
+            "llm_model": "Qwen3.5-397B-A17B",
+            "deepseek_api_key": "",
+        }
+    )
+    monkeypatch.setattr(cli_main, "get_settings", lambda: effective)
+
+    async def callback(engine: CoachEngine) -> None:
+        return None
+
+    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
+        asyncio.run(cli_main._with_engine(callback, provider="deepseek"))
 
 
 def test_review_lists_pending_drafts(patched: Any) -> None:

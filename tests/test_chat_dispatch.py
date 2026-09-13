@@ -24,6 +24,10 @@ _CONFIRMING = ChatState(
         ("/analyze", "analyze", []),
         ("/analyze how was my week", "analyze", ["how", "was", "my", "week"]),
         ("/clear", "clear", []),
+        ("/provider", "provider", []),
+        ("/provider deepseek", "provider", ["deepseek"]),
+        ("/model", "model", []),
+        ("/model deepseek-chat", "model", ["deepseek-chat"]),
     ],
 )
 def test_slash_commands_dispatch_to_commands(line: str, name: str, args: list[str]) -> None:
