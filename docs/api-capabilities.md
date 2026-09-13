@@ -70,7 +70,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 ## 2. DeepSeek API
 
 - Endpoint: `https://api.deepseek.com`, OpenAI-compatible client (`openai` package with `base_url`).
-- Model line: `deepseek-chat` / `deepseek-reasoner` (docs show `deepseek-v4-pro` as current flagship).
+- Model line: `deepseek-flash` (DeepSeek-V4.1-Flash, current default) and `deepseek-v4-pro` (V4 Pro); legacy `deepseek-v4-flash` is still accepted and served by V4.1-Flash.
 - **JSON output mode (verified):**
   - `response_format: {"type": "json_object"}`.
   - The prompt **must contain the word "json"** and an example of the desired schema, otherwise JSON mode does not engage.

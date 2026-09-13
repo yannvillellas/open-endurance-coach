@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "ovh": "Qwen3.5-397B-A17B",
-    "deepseek": "deepseek-v4-pro",
+    "deepseek": "deepseek-flash",
 }
 
 # Providers usable without an API key (OVHcloud anonymous free tier); others name

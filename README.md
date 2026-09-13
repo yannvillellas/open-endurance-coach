@@ -61,24 +61,24 @@ Options: `--provider`/`--model` (`-p`/`-m`) choose the LLM for one run (e.g. `co
 
 All settings come from environment variables or a `.env` file (see `.env.example`). Essentials: `INTERVALS_API_KEY`, `INTERVALS_ATHLETE_ID`. No LLM API key is required by default: the coach uses OVHcloud AI Endpoints' anonymous free tier (Qwen3.5-397B-A17B), which is IP-rate-limited to roughly 2 requests/minute and shared with any other OVH free-tier usage from the same IP. On a 429 the coach reports the limit and the options (wait, set `OVH_API_KEY`, or select another provider with `--provider <name>`). Optional knobs:
 
-| Variable                           | Default          | Purpose                                                                               |
-| ---------------------------------- | ---------------- | ------------------------------------------------------------------------------------- |
-| `LLM_PROVIDER`                     | `ovh`            | LLM provider (`ovh` or `deepseek`)                                                    |
-| `LLM_MODEL`                        | provider default | Model override; defaults to `Qwen3.5-397B-A17B` (ovh) or `deepseek-v4-pro` (deepseek) |
-| `LLM_THINKING`                     | `true`           | Reasoning mode (DeepSeek flag; OVH reasons server-side and ignores it)                |
-| `OVH_API_KEY` / `DEEPSEEK_API_KEY` | empty            | Only for the OVH paid tier / the DeepSeek provider                                    |
-| `LLM_MAX_TOKENS`                   | `8192`           | Output budget for the analysis JSON                                                   |
-| `LLM_TIMEOUT_SECONDS`              | `180`            | Per-call timeout                                                                      |
-| `APP_TIMEZONE`                     | `Europe/Paris`   | Training-day boundaries; must match the Intervals.icu account timezone                |
-| `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (drafts, decisions, feedback)                                      |
-| `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`        | HTTP retry policy                                                                     |
-| `REQUESTS_PER_SECOND`              | `8`              | Intervals.icu rate-limit throttle                                                     |
-| `ATHLETE_PROFILE` / `COACH_TONE`   | configurable     | Persona injected into every prompt                                                    |
-| `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                            |
-| `CHAT_HISTORY_MAX_TOKENS`          | `2048`           | Chat memory budget (self-trimmed) (>= 1)                                              |
-| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for feedback rows loaded as chat memory (>= 1)                             |
+| Variable                           | Default          | Purpose                                                                                                                       |
+| ---------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`                     | `ovh`            | LLM provider (`ovh` or `deepseek`)                                                                                            |
+| `LLM_MODEL`                        | provider default | Model override; defaults to `Qwen3.5-397B-A17B` (ovh) or `deepseek-flash` (deepseek). DeepSeek also accepts `deepseek-v4-pro` |
+| `LLM_THINKING`                     | `true`           | Reasoning mode (DeepSeek flag; OVH reasons server-side and ignores it)                                                        |
+| `OVH_API_KEY` / `DEEPSEEK_API_KEY` | empty            | Only for the OVH paid tier / the DeepSeek provider                                                                            |
+| `LLM_MAX_TOKENS`                   | `8192`           | Output budget for the analysis JSON                                                                                           |
+| `LLM_TIMEOUT_SECONDS`              | `180`            | Per-call timeout                                                                                                              |
+| `APP_TIMEZONE`                     | `Europe/Paris`   | Training-day boundaries; must match the Intervals.icu account timezone                                                        |
+| `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (drafts, decisions, feedback)                                                                              |
+| `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`        | HTTP retry policy                                                                                                             |
+| `REQUESTS_PER_SECOND`              | `8`              | Intervals.icu rate-limit throttle                                                                                             |
+| `ATHLETE_PROFILE` / `COACH_TONE`   | configurable     | Persona injected into every prompt                                                                                            |
+| `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                                                                    |
+| `CHAT_HISTORY_MAX_TOKENS`          | `2048`           | Chat memory budget (self-trimmed) (>= 1)                                                                                      |
+| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for feedback rows loaded as chat memory (>= 1)                                                                     |
 
-To use DeepSeek instead, either set `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` in `.env`, or override a single run without editing anything: `coach chat --provider deepseek` (`-p` for short; the matching default model is selected automatically; add `--model`/`-m` to force one). Inside the chat, the active provider and model are printed on startup and `/provider [name]` / `/model [name]` switch them mid-session. A provider can only be selected when it is usable: an unknown name (e.g. `ova`) lists the available providers with their credential status, and DeepSeek without a key reports `No API key for provider 'deepseek'; set DEEPSEEK_API_KEY` immediately.
+To use DeepSeek instead, either set `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` in `.env`, or override a single run without editing anything: `coach chat --provider deepseek` (`-p` for short; the matching default model is selected automatically; add `--model`/`-m` to force one). DeepSeek model IDs: `deepseek-flash` (DeepSeek-V4.1-Flash, the default) and `deepseek-v4-pro` (DeepSeek-V4-Pro) — e.g. `coach chat -p deepseek -m deepseek-v4-pro` or `LLM_MODEL=deepseek-v4-pro`; `/model deepseek-v4-pro` switches mid-session. Inside the chat, the active provider and model are printed on startup and `/provider [name]` / `/model [name]` switch them mid-session. A provider can only be selected when it is usable: an unknown name (e.g. `ova`) lists the available providers with their credential status, and DeepSeek without a key reports `No API key for provider 'deepseek'; set DEEPSEEK_API_KEY` immediately.
 
 ```text
 Unknown LLM provider: 'ova'

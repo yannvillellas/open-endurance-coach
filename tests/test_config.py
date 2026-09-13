@@ -28,7 +28,7 @@ def test_provider_selected_by_env_resolves_default_model(
     monkeypatch.delenv("LLM_MODEL", raising=False)
     settings = Settings(intervals_api_key="k", deepseek_api_key="k", _env_file=None)
     assert settings.llm_provider == "deepseek"
-    assert settings.llm_model == "deepseek-v4-pro"
+    assert settings.llm_model == "deepseek-flash"
 
 
 def test_deepseek_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,7 +53,7 @@ def test_llm_keys_are_optional() -> None:
 def test_with_llm_override_switches_provider_and_default_model(settings: Settings) -> None:
     overridden = settings.with_llm_override(provider="deepseek")
     assert overridden.llm_provider == "deepseek"
-    assert overridden.llm_model == "deepseek-v4-pro"
+    assert overridden.llm_model == "deepseek-flash"
 
 
 def test_with_llm_override_ovh_default_model(settings: Settings) -> None:

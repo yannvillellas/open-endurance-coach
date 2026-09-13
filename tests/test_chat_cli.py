@@ -147,8 +147,8 @@ def test_chat_provider_command_switches_and_next_analysis_uses_it(
         cli_main.app, ["chat"], input="/provider deepseek\nanalyze my week\n/exit\n"
     )
     assert result.exit_code == 0
-    assert "Using deepseek (deepseek-v4-pro)." in result.output
-    assert deepseek.calls[-1]["model"] == "deepseek-v4-pro"
+    assert "Using deepseek (deepseek-flash)." in result.output
+    assert deepseek.calls[-1]["model"] == "deepseek-flash"
     store.close()
 
 

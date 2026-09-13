@@ -142,7 +142,7 @@ def test_with_engine_applies_provider_override(
 
     asyncio.run(cli_main._with_engine(callback, provider="deepseek"))
     assert captured["settings"].llm_provider == "deepseek"
-    assert captured["settings"].llm_model == "deepseek-v4-pro"
+    assert captured["settings"].llm_model == "deepseek-flash"
 
 
 def test_with_engine_unknown_provider_fails_clearly(

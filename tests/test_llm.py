@@ -25,7 +25,7 @@ async def test_provider_selected_from_settings(settings: Settings) -> None:
     client = make_client(settings, provider)
     result = await client.complete([LlmMessage(role="user", content="hi")])
     assert result.content == "ok"
-    assert provider.calls[0]["model"] == "deepseek-v4-pro"
+    assert provider.calls[0]["model"] == settings.llm_model
 
 
 async def test_unknown_provider_rejected(settings: Settings) -> None:
@@ -162,7 +162,7 @@ def ok_response() -> httpx.Response:
         200,
         json={
             "choices": [{"message": {"content": "ok"}}],
-            "model": "deepseek-v4-pro",
+            "model": "deepseek-flash",
             "usage": {},
         },
     )
@@ -176,7 +176,7 @@ async def test_provider_retries_on_429_then_succeeds(settings: Settings) -> None
 
     provider, sleep = make_provider(settings, handler)
     completion = await provider.complete(
-        model="deepseek-v4-pro",
+        model="deepseek-flash",
         messages=[LlmMessage(role="user", content="hi")],
         thinking=True,
         json_mode=False,
@@ -200,7 +200,7 @@ async def test_provider_honors_retry_after_on_429(settings: Settings) -> None:
 
     provider, sleep = make_provider(settings, handler)
     completion = await provider.complete(
-        model="deepseek-v4-pro",
+        model="deepseek-flash",
         messages=[LlmMessage(role="user", content="hi")],
         thinking=True,
         json_mode=False,
@@ -223,7 +223,7 @@ async def test_provider_429_http_date_retry_after_falls_back(settings: Settings)
 
     provider, sleep = make_provider(settings, handler)
     completion = await provider.complete(
-        model="deepseek-v4-pro",
+        model="deepseek-flash",
         messages=[LlmMessage(role="user", content="hi")],
         thinking=True,
         json_mode=False,
@@ -243,7 +243,7 @@ async def test_provider_retries_on_500_then_succeeds(settings: Settings) -> None
 
     provider, _ = make_provider(settings, handler)
     completion = await provider.complete(
-        model="deepseek-v4-pro",
+        model="deepseek-flash",
         messages=[LlmMessage(role="user", content="hi")],
         thinking=True,
         json_mode=False,
@@ -264,7 +264,7 @@ async def test_provider_raises_immediately_on_client_error(settings: Settings) -
     provider, _ = make_provider(settings, handler)
     with pytest.raises(LlmError, match="401"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -286,7 +286,7 @@ async def test_provider_retries_network_errors(settings: Settings) -> None:
 
     provider, _ = make_provider(settings, handler)
     completion = await provider.complete(
-        model="deepseek-v4-pro",
+        model="deepseek-flash",
         messages=[LlmMessage(role="user", content="hi")],
         thinking=True,
         json_mode=False,
@@ -311,7 +311,7 @@ async def test_provider_network_exhaustion_sleeps_only_between_attempts(
     provider, _ = make_provider(settings, handler, sleep=sleep)
     with pytest.raises(LlmError, match="unreachable after retries"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -335,7 +335,7 @@ async def test_provider_429_then_network_error_reports_unreachable(settings: Set
     provider, _ = make_provider(settings, handler)
     with pytest.raises(LlmError, match="unreachable after retries"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -357,7 +357,7 @@ async def test_provider_raises_after_retries_exhausted(settings: Settings) -> No
     provider, _ = make_provider(settings, handler, sleep=sleep)
     with pytest.raises(LlmError, match="API error 429"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -376,7 +376,7 @@ async def test_provider_guards_malformed_success_response(settings: Settings) ->
     provider, _ = make_provider(settings, handler)
     with pytest.raises(LlmError, match="shape"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -393,7 +393,7 @@ async def test_provider_guards_non_dict_message(settings: Settings) -> None:
     provider, _ = make_provider(settings, handler)
     with pytest.raises(LlmError, match="shape"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -410,7 +410,7 @@ async def test_provider_guards_non_json_body(settings: Settings) -> None:
     provider, _ = make_provider(settings, handler)
     with pytest.raises(LlmError, match="non-JSON"):
         await provider.complete(
-            model="deepseek-v4-pro",
+            model="deepseek-flash",
             messages=[LlmMessage(role="user", content="hi")],
             thinking=True,
             json_mode=False,
@@ -784,10 +784,10 @@ async def test_llm_client_select_switches_provider_and_default_model(settings: S
     client, fake, deepseek = _two_provider_client(settings)
     client.select(provider="deepseek")
     assert client.provider_name == "deepseek"
-    assert client.model_name == "deepseek-v4-pro"
+    assert client.model_name == "deepseek-flash"
     result = await client.complete([LlmMessage(role="user", content="hi")])
     assert result.content == "deepseek-ok"
-    assert deepseek.calls[0]["model"] == "deepseek-v4-pro"
+    assert deepseek.calls[0]["model"] == "deepseek-flash"
     assert fake.calls == []
 
 
