@@ -563,3 +563,19 @@ async def test_build_context_surfaces_unseen_without_marking(
     assert "New activities since last review" in context.focus
     assert store.is_activity_seen("fx-a") is False
     assert store.list_drafts() == []
+
+
+def test_engine_llm_selection_and_switch(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    fake = FakeLlmProvider()
+    deepseek = FakeLlmProvider()
+    llm = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake", "llm_model": "fake-model"}),
+        {"fake": fake, "deepseek": deepseek},
+    )
+    engine = CoachEngine(settings, store, make_intervals_client(), llm)
+    assert engine.llm_selection() == ("fake", "fake-model")
+    assert engine.select_llm(provider="deepseek") == ("deepseek", "deepseek-flash")
+    assert engine.llm_selection() == ("deepseek", "deepseek-flash")
+    assert engine.select_llm(model="custom-model") == ("deepseek", "custom-model")
+    store.close()

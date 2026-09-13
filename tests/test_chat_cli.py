@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from open_endurance_coach.cli import main as cli_main
+from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
@@ -14,7 +16,13 @@ from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 
-from .fakes import FakeCalendarClient, FakeLlmProvider, completion, report_json
+from .fakes import (
+    FakeCalendarClient,
+    FakeLlmProvider,
+    completion,
+    make_intervals_client,
+    report_json,
+)
 from .test_cli import CREATE_MUTATION, FakeRunner, decision_of, make_engine
 
 runner = CliRunner()
@@ -75,6 +83,119 @@ def _spy_writes(engine: CoachEngine) -> dict[str, int]:
     engine.reject = reject  # type: ignore[method-assign]
     engine.apply = apply  # type: ignore[method-assign]
     return calls
+
+
+def test_chat_provider_option_threads_to_engine(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    from open_endurance_coach.cli import chat as cli_chat
+
+    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider())
+    captured: dict[str, Any] = {}
+
+    async def fake_with_engine(
+        callback: Callable[[CoachEngine], Awaitable[None]],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        captured["provider"] = provider
+        captured["model"] = model
+        await callback(engine)
+
+    async def fake_run_chat(
+        engine: CoachEngine, settings: Settings, *, fresh: bool = False
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(cli_main, "_with_engine", fake_with_engine)
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli_chat, "run_chat", fake_run_chat)
+
+    result = runner.invoke(cli_main.app, ["chat", "--provider", "deepseek"])
+    assert result.exit_code == 0
+    assert captured == {"provider": "deepseek", "model": None}
+
+
+def test_chat_startup_shows_provider_and_model(patched: Any, settings: Settings) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/exit\n")
+    assert result.exit_code == 0
+    assert f"Using fake ({settings.llm_model})." in result.output
+
+
+def test_chat_provider_command_shows_current(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/provider\n/exit\n")
+    assert result.exit_code == 0
+    assert "Using fake (" in result.output
+
+
+def test_chat_provider_command_switches_and_next_analysis_uses_it(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    deepseek = FakeLlmProvider([completion(report_json())])
+    llm = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": FakeLlmProvider(), "deepseek": deepseek},
+    )
+    store = CoachStore(tmp_path / "coach.db")
+    engine = CoachEngine(settings, store, make_intervals_client(), llm)
+    monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/provider deepseek\nanalyze my week\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert "Using deepseek (deepseek-flash)." in result.output
+    assert deepseek.calls[-1]["model"] == "deepseek-flash"
+    store.close()
+
+
+def test_chat_model_command_sets_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    fake = FakeLlmProvider([completion(report_json())])
+    llm = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": fake},
+    )
+    store = CoachStore(tmp_path / "coach.db")
+    engine = CoachEngine(settings, store, make_intervals_client(), llm)
+    monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+    result = runner.invoke(
+        cli_main.app, ["chat"], input="/model my-model\nanalyze my week\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert "Using fake (my-model)." in result.output
+    assert fake.calls[-1]["model"] == "my-model"
+    store.close()
+
+
+def test_chat_model_command_escapes_markup(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/model bad[red]\n/exit\n")
+    assert result.exit_code == 0
+    assert "bad[red]" in result.output
+
+
+def test_chat_provider_command_unknown_provider_prints_error(patched: Any) -> None:
+    patched(FakeLlmProvider())
+    result = runner.invoke(cli_main.app, ["chat"], input="/provider nope\n/exit\n")
+    assert result.exit_code == 0
+    assert "Unknown LLM provider" in result.output
+    assert "bye" in result.output
+
+
+def test_chat_provider_during_confirmation_switches_without_llm(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, ["chat"], input="/analyze\n/provider fake\ncancel\n")
+    assert result.exit_code == 0
+    assert "Using fake (" in result.output
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []
 
 
 def test_chat_help_lists_commands(patched: Any) -> None:

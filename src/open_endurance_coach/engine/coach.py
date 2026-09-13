@@ -143,6 +143,15 @@ class CoachEngine:
     def pending_drafts(self) -> list[Draft]:
         return self._store.list_drafts(DraftStatus.PENDING)
 
+    def llm_selection(self) -> tuple[str, str]:
+        return (self._llm_client.provider_name, self._llm_client.model_name)
+
+    def select_llm(
+        self, *, provider: str | None = None, model: str | None = None
+    ) -> tuple[str, str]:
+        self._llm_client.select(provider=provider, model=model)
+        return self.llm_selection()
+
     def recent_history(
         self, limit: int, *, max_age_days: int | None = None
     ) -> list[FeedbackWithReport]:

@@ -24,6 +24,7 @@ from open_endurance_coach.chat.state import ChatState
 from open_endurance_coach.cli.confirmation import Done, prompt_plan, respond
 from open_endurance_coach.cli.rendering import (
     console,
+    escape,
     mutations_plan_text,
     print_error,
     render_apply,
@@ -44,6 +45,8 @@ HELP_TEXT = (
     "exactly yes or no (cancel abandons it; anything else is a change request\n"
     "and nothing is written).\n"
     "/analyze [focus]       force a fresh analysis\n"
+    "/provider [name]       show or switch the LLM provider\n"
+    "/model [name]          show or switch the LLM model\n"
     "/clear                 forget this session's memory\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
@@ -58,6 +61,20 @@ _CHANGE_RE = re.compile(
     r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b",
     re.IGNORECASE,
 )
+
+
+def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None:
+    try:
+        if args:
+            if name == "provider":
+                provider, model = engine.select_llm(provider=args[0])
+            else:
+                provider, model = engine.select_llm(model=args[0])
+        else:
+            provider, model = engine.llm_selection()
+        console.print(f"Using {escape(provider)} ({escape(model)}).")
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
 
 
 def _analysis_due(session: ChatSession, text: str) -> bool:
@@ -144,13 +161,16 @@ async def _handle_proposal(
         return ExitChat()
 
     if line.startswith("/"):
-        name = line[1:].split()[0].casefold() if line[1:].split() else ""
+        parts = line[1:].split()
+        name = parts[0].casefold() if parts else ""
         if name == "help":
             console.print(HELP_TEXT, markup=False)
         elif name == "clear":
             session.history = []
             session.context = None
             console.print("Memory cleared.")
+        elif name in {"provider", "model"}:
+            _handle_llm_command(engine, name, parts[1:])
         elif name == "analyze":
             console.print(
                 "[yellow]/analyze is unavailable while a proposal is open;"
@@ -232,6 +252,9 @@ async def _run_command(
         session.context = None
         console.print("Memory cleared.")
         return None
+    if name in {"provider", "model"}:
+        _handle_llm_command(engine, name, args)
+        return None
     if name == "analyze":
         from open_endurance_coach.cli import main as cli_main
 
@@ -255,7 +278,9 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
         )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
+    provider, model = engine.llm_selection()
     console.print("Chat with the coach. /help lists commands.")
+    console.print(f"[dim]Using {escape(provider)} ({escape(model)}).[/dim]")
     if remembered:
         console.print(f"[dim]Remembering {remembered} past exchanges.[/dim]")
     while True:
@@ -297,10 +322,14 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
 @chat_app.command()
 def chat(
     fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
 ) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
         await run_chat(engine, cli_main.get_settings(), fresh=fresh)
 
-    cli_main._run(run)
+    cli_main._run(run, provider=provider, model=model)
