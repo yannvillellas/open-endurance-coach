@@ -25,23 +25,41 @@ SYNTHETIC_VOCABULARY: tuple[str, ...] = (
     "Synthetic Workout",
 )
 
-FREE_TEXT_KEYS = frozenset(
+IDENTITY_TOKEN = "Fixture Athlete"
+
+IDENTITY_KEYS = frozenset(
     {
-        "name",
-        "names",
-        "description",
-        "note",
-        "notes",
-        "comment",
-        "comments",
-        "title",
-        "summary",
+        "athlete_name",
+        "display_name",
+        "full_name",
+        "nick_name",
+        "nickname",
         "first_name",
         "last_name",
         "username",
-        "location",
-        "address",
     }
+)
+
+FREE_TEXT_KEYS = (
+    frozenset(
+        {
+            "name",
+            "names",
+            "description",
+            "note",
+            "notes",
+            "comment",
+            "comments",
+            "title",
+            "summary",
+            "first_name",
+            "last_name",
+            "username",
+            "location",
+            "address",
+        }
+    )
+    | IDENTITY_KEYS
 )
 
 COORD_KEYS = frozenset(
@@ -233,6 +251,8 @@ class _Anonymizer:
         if value.startswith(("http://", "https://")):
             return "fixture-url"
         lowered = key.lower()
+        if lowered in IDENTITY_KEYS:
+            return IDENTITY_TOKEN
         if lowered in COORD_KEYS and COORD_STRING_RE.match(value):
             parts = [float(part.strip()) for part in value.split(",")]
             is_lat = index is None or index % 2 == 0

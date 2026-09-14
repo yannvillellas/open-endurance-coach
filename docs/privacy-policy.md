@@ -1,6 +1,6 @@
 # Privacy Policy — Open Endurance Coach
 
-Last updated: 2026-08-17
+Last updated: 2026-09-14
 
 Open Endurance Coach ("the tool") is a self-hosted, single-user AI endurance
 coaching application. This policy describes how it handles data.
@@ -25,9 +25,10 @@ by this project. There is no remote service component.
 
 ## Data sharing
 
-- The operator's configured LLM provider (by default DeepSeek) receives
-  excerpts of training data in prompts, solely to generate coaching analysis.
-  Refer to the provider's own privacy policy for how they process requests.
+- The operator's configured LLM provider (by default OVHcloud AI Endpoints'
+  anonymous free tier; DeepSeek is optional) receives excerpts of training data
+  in prompts, solely to generate coaching analysis. Refer to the provider's own
+  privacy policy for how they process requests.
 - No other third party receives any data. The tool does not contain analytics,
   telemetry, or tracking.
 

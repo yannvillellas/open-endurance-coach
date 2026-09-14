@@ -9,7 +9,10 @@ from open_endurance_coach.fixtures.anonymize import (
     EPOCH_START,
     FREE_TEXT_KEYS,
     GENERATED_NAME_CONTEXTS,
+    IDENTITY_KEYS,
+    IDENTITY_TOKEN,
     SYNTHETIC_VOCABULARY,
+    anonymize_fixtures,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -115,6 +118,36 @@ def test_no_emails_urls_or_long_free_text() -> None:
                 assert value in SYNTHETIC_VOCABULARY, (
                     f"{key}: non-synthetic free text leaked: {value}"
                 )
+
+
+def test_anonymizer_rewrites_identity_keys_regardless_of_casing() -> None:
+    result = anonymize_fixtures(
+        {
+            "payload": [
+                {
+                    "athlete_name": "yann_vlls",
+                    "display_name": "Someone Real",
+                    "first_name": "Yann",
+                    "username": "yann_vlls",
+                    "external_id": "keep-as-id",
+                }
+            ]
+        }
+    )
+    row = result["payload"][0]
+    assert row["athlete_name"] == IDENTITY_TOKEN
+    assert row["display_name"] == IDENTITY_TOKEN
+    assert row["first_name"] == IDENTITY_TOKEN
+    assert row["username"] == IDENTITY_TOKEN
+    assert row["external_id"] == "fx000001"
+
+
+def test_identity_keys_are_anonymized() -> None:
+    for key, _kind, value, _parent in walk(load_fixtures()):
+        if not isinstance(value, str) or key.lower() not in IDENTITY_KEYS:
+            continue
+        assert key.lower() in FREE_TEXT_KEYS, f"{key}: identity key bypasses the anonymizer"
+        assert value == IDENTITY_TOKEN, f"{key}: identity value leaked: {value}"
 
 
 def test_coordinates_are_obfuscated() -> None:
