@@ -8,8 +8,9 @@
 
 ## 2. Core Functional Principles
 
-- **Event-Driven & On-Demand:** The system operates autonomously via webhooks for daily training/wellness updates but must also support manual, ad-hoc terminal queries for deep historical analysis.
-- **LLM-Driven Logic:** The system relies on the DeepSeek API to parse data, enforce coaching methodologies, and structure the calendar outputs.
+- **Event-Driven & On-Demand:** Manual-first: the terminal/chat is the daily interface; the activity webhook adapter is on the roadmap. There is no wellness webhook — readiness is pulled inside each analysis. Deep historical queries are on-demand.
+- **LLM-Driven Logic:** The LLM parses data, enforces coaching methodologies (Friel periodization, Coggan power analytics), and structures calendar outputs. The LLM layer is provider-agnostic: OVHcloud's anonymous free tier is the default, DeepSeek optional.
+- **Approval-Gated Writes:** The system never writes autonomously. Analysis produces a validated draft; calendar changes (workouts and races) are applied only after an explicit operator approval.
 - **Architecture Agnostic:** The codebase must remain modular. Core functions (API extraction, LLM prompt building, output parsing) must be decoupled so the interface can easily evolve from a terminal CLI to a web UI in the future.
 
 ## 3. Definition of Done (DoD)
