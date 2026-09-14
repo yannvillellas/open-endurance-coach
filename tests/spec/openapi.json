@@ -148,6 +148,48 @@
         }
       }
     },
+    "/api/v1/chats/{id}/block": {
+      "put": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Block or unblock the other athlete in a private chat",
+        "description": "Neither athlete can send messages to a blocked chat until it is unblocked by the athlete that blocked it. Returns the updated chat.",
+        "operationId": "updateChatBlocked",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "on",
+            "in": "query",
+            "description": "True to block, false to unblock",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chat"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/athlete/{id}/workouts/{workoutId}": {
       "get": {
         "tags": [
@@ -9185,6 +9227,44 @@
           }
         }
       },
+      "AthleteSearchResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile_medium": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "sex": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
       "Attachment": {
         "type": "object",
         "properties": {
@@ -9199,6 +9279,488 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "Chat": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PRIVATE",
+              "GROUP",
+              "ACTIVITY"
+            ]
+          },
+          "coaching_group": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "picture": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "pub": {
+            "type": "boolean"
+          },
+          "join_policy": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "ASK",
+              "INVITE_ONLY"
+            ]
+          },
+          "sidebar_logo": {
+            "type": "string"
+          },
+          "sidebar_color": {
+            "type": "string"
+          },
+          "sidebar_dark": {
+            "type": "boolean"
+          },
+          "sidebar_top_color": {
+            "type": "string"
+          },
+          "hide_members": {
+            "type": "boolean"
+          },
+          "members_cannot_chat": {
+            "type": "boolean"
+          },
+          "primary_group": {
+            "type": "boolean"
+          },
+          "coins": {
+            "type": "number",
+            "format": "float"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMember"
+            }
+          },
+          "athlete_id": {
+            "type": "string"
+          },
+          "activity_id": {
+            "type": "string"
+          },
+          "other_athlete_id": {
+            "type": "string"
+          },
+          "other_athlete_sex": {
+            "type": "string"
+          },
+          "follows_you": {
+            "type": "string"
+          },
+          "you_follow": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "MEMBER",
+              "FOLLOWER",
+              "COACH",
+              "ADMIN"
+            ]
+          },
+          "new_message_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "kicked": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kicked_by_id": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_message_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mute_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sharedFolders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Folder"
+            }
+          }
+        }
+      },
+      "ChatMember": {
+        "type": "object",
+        "properties": {
+          "athlete_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile_medium": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "MEMBER",
+              "FOLLOWER",
+              "COACH",
+              "ADMIN"
+            ]
+          },
+          "coach": {
+            "type": "boolean"
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "FREE",
+              "PREMIUM",
+              "SUPPORTER",
+              "WHITELABEL"
+            ]
+          },
+          "accepted_coaching_group": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Folder": {
+        "type": "object",
+        "properties": {
+          "athlete_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "FOLDER",
+              "PLAN"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workout"
+            }
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          },
+          "start_date_local": {
+            "type": "string"
+          },
+          "rollout_weeks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "auto_rollout_day": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "read_only_workouts": {
+            "type": "boolean"
+          },
+          "starting_ctl": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "starting_atl": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "activity_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "Ride",
+                "Run",
+                "Swim",
+                "WeightTraining",
+                "Hike",
+                "Walk",
+                "AlpineSki",
+                "BackcountrySki",
+                "Badminton",
+                "Canoeing",
+                "Crossfit",
+                "EBikeRide",
+                "EMountainBikeRide",
+                "Elliptical",
+                "Golf",
+                "GravelRide",
+                "TrackRide",
+                "Handcycle",
+                "HighIntensityIntervalTraining",
+                "Hockey",
+                "IceSkate",
+                "InlineSkate",
+                "Kayaking",
+                "Kitesurf",
+                "MountainBikeRide",
+                "Cyclocross",
+                "NordicSki",
+                "OpenWaterSwim",
+                "Padel",
+                "Pilates",
+                "Pickleball",
+                "Racquetball",
+                "Rugby",
+                "RockClimbing",
+                "RollerSki",
+                "Rowing",
+                "Sail",
+                "Skateboard",
+                "Snowboard",
+                "Snowshoe",
+                "Soccer",
+                "Squash",
+                "StairStepper",
+                "StandUpPaddling",
+                "Surfing",
+                "TableTennis",
+                "Tennis",
+                "TrailRun",
+                "Transition",
+                "Velomobile",
+                "VirtualRide",
+                "VirtualRow",
+                "VirtualRun",
+                "VirtualSki",
+                "WaterSport",
+                "Wheelchair",
+                "Windsurf",
+                "Workout",
+                "Yoga",
+                "Other"
+              ]
+            }
+          },
+          "num_workouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "duration_weeks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hours_per_week_min": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hours_per_week_max": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "workout_targets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "AUTO",
+                "POWER",
+                "HR",
+                "PACE"
+              ]
+            }
+          },
+          "blurb": {
+            "type": "string"
+          },
+          "canEdit": {
+            "type": "boolean"
+          },
+          "sharedWithCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "shareToken": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/AthleteSearchResult"
+          }
+        }
+      },
+      "Workout": {
+        "type": "object",
+        "properties": {
+          "athlete_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "icu_training_load": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "indoor": {
+            "type": "boolean"
+          },
+          "color": {
+            "type": "string"
+          },
+          "moving_time": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "joules": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "joules_above_ftp": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "workout_doc": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          },
+          "folder_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "day": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "plan_applied": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hide_from_athlete": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "POWER",
+              "HR",
+              "PACE"
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "AUTO",
+                "POWER",
+                "HR",
+                "PACE"
+              ]
+            }
+          },
+          "carbs_per_hour": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "time": {
+            "type": "string"
+          },
+          "sub_type": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "COMMUTE",
+              "WARMUP",
+              "COOLDOWN",
+              "RACE"
+            ]
+          },
+          "for_week": {
+            "type": "boolean"
+          },
+          "distance": {
+            "type": "number",
+            "format": "float"
+          },
+          "icu_intensity": {
+            "type": "number",
+            "format": "float"
           }
         }
       },
@@ -9333,139 +9895,6 @@
           },
           "filename": {
             "type": "string"
-          },
-          "distance": {
-            "type": "number",
-            "format": "float"
-          },
-          "icu_intensity": {
-            "type": "number",
-            "format": "float"
-          }
-        }
-      },
-      "Workout": {
-        "type": "object",
-        "properties": {
-          "athlete_id": {
-            "type": "string"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "icu_training_load": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "indoor": {
-            "type": "boolean"
-          },
-          "color": {
-            "type": "string"
-          },
-          "moving_time": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "updated": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "joules": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "joules_above_ftp": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "workout_doc": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object"
-            }
-          },
-          "folder_id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "day": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "days": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "plan_applied": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "hide_from_athlete": {
-            "type": "boolean"
-          },
-          "target": {
-            "type": "string",
-            "enum": [
-              "AUTO",
-              "POWER",
-              "HR",
-              "PACE"
-            ]
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "AUTO",
-                "POWER",
-                "HR",
-                "PACE"
-              ]
-            }
-          },
-          "carbs_per_hour": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "attachments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Attachment"
-            }
-          },
-          "time": {
-            "type": "string"
-          },
-          "sub_type": {
-            "type": "string",
-            "enum": [
-              "NONE",
-              "COMMUTE",
-              "WARMUP",
-              "COOLDOWN",
-              "RACE"
-            ]
-          },
-          "for_week": {
-            "type": "boolean"
           },
           "distance": {
             "type": "number",
@@ -9818,44 +10247,6 @@
           }
         }
       },
-      "AthleteSearchResult": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "profile_medium": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "sex": {
-            "type": "string"
-          },
-          "bio": {
-            "type": "string"
-          },
-          "website": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          }
-        }
-      },
       "AthleteTrainingPlan": {
         "type": "object",
         "properties": {
@@ -9881,178 +10272,6 @@
           },
           "training_plan_alias": {
             "type": "string"
-          }
-        }
-      },
-      "Folder": {
-        "type": "object",
-        "properties": {
-          "athlete_id": {
-            "type": "string"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "FOLDER",
-              "PLAN"
-            ]
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "children": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Workout"
-            }
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "PRIVATE",
-              "PUBLIC"
-            ]
-          },
-          "start_date_local": {
-            "type": "string"
-          },
-          "rollout_weeks": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "auto_rollout_day": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "read_only_workouts": {
-            "type": "boolean"
-          },
-          "starting_ctl": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "starting_atl": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "activity_types": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "Ride",
-                "Run",
-                "Swim",
-                "WeightTraining",
-                "Hike",
-                "Walk",
-                "AlpineSki",
-                "BackcountrySki",
-                "Badminton",
-                "Canoeing",
-                "Crossfit",
-                "EBikeRide",
-                "EMountainBikeRide",
-                "Elliptical",
-                "Golf",
-                "GravelRide",
-                "TrackRide",
-                "Handcycle",
-                "HighIntensityIntervalTraining",
-                "Hockey",
-                "IceSkate",
-                "InlineSkate",
-                "Kayaking",
-                "Kitesurf",
-                "MountainBikeRide",
-                "Cyclocross",
-                "NordicSki",
-                "OpenWaterSwim",
-                "Padel",
-                "Pilates",
-                "Pickleball",
-                "Racquetball",
-                "Rugby",
-                "RockClimbing",
-                "RollerSki",
-                "Rowing",
-                "Sail",
-                "Skateboard",
-                "Snowboard",
-                "Snowshoe",
-                "Soccer",
-                "Squash",
-                "StairStepper",
-                "StandUpPaddling",
-                "Surfing",
-                "TableTennis",
-                "Tennis",
-                "TrailRun",
-                "Transition",
-                "Velomobile",
-                "VirtualRide",
-                "VirtualRow",
-                "VirtualRun",
-                "VirtualSki",
-                "WaterSport",
-                "Wheelchair",
-                "Windsurf",
-                "Workout",
-                "Yoga",
-                "Other"
-              ]
-            }
-          },
-          "num_workouts": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "duration_weeks": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "hours_per_week_min": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "hours_per_week_max": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "workout_targets": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "AUTO",
-                "POWER",
-                "HR",
-                "PACE"
-              ]
-            }
-          },
-          "blurb": {
-            "type": "string"
-          },
-          "canEdit": {
-            "type": "boolean"
-          },
-          "sharedWithCount": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "shareToken": {
-            "type": "string"
-          },
-          "owner": {
-            "$ref": "#/components/schemas/AthleteSearchResult"
           }
         }
       },
@@ -14460,179 +14679,6 @@
           },
           "attachment_id": {
             "type": "string"
-          }
-        }
-      },
-      "Chat": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "PRIVATE",
-              "GROUP",
-              "ACTIVITY"
-            ]
-          },
-          "coaching_group": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "name": {
-            "type": "string"
-          },
-          "picture": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "pub": {
-            "type": "boolean"
-          },
-          "join_policy": {
-            "type": "string",
-            "enum": [
-              "OPEN",
-              "ASK",
-              "INVITE_ONLY"
-            ]
-          },
-          "sidebar_logo": {
-            "type": "string"
-          },
-          "sidebar_color": {
-            "type": "string"
-          },
-          "sidebar_dark": {
-            "type": "boolean"
-          },
-          "sidebar_top_color": {
-            "type": "string"
-          },
-          "hide_members": {
-            "type": "boolean"
-          },
-          "members_cannot_chat": {
-            "type": "boolean"
-          },
-          "primary_group": {
-            "type": "boolean"
-          },
-          "coins": {
-            "type": "number",
-            "format": "float"
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ChatMember"
-            }
-          },
-          "athlete_id": {
-            "type": "string"
-          },
-          "activity_id": {
-            "type": "string"
-          },
-          "other_athlete_id": {
-            "type": "string"
-          },
-          "other_athlete_sex": {
-            "type": "string"
-          },
-          "follows_you": {
-            "type": "string"
-          },
-          "you_follow": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "MEMBER",
-              "FOLLOWER",
-              "COACH",
-              "ADMIN"
-            ]
-          },
-          "new_message_count": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "kicked": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "kicked_by_id": {
-            "type": "string"
-          },
-          "last_seen_message_id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "mute_until": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "sharedFolders": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Folder"
-            }
-          }
-        }
-      },
-      "ChatMember": {
-        "type": "object",
-        "properties": {
-          "athlete_id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "profile_medium": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "MEMBER",
-              "FOLLOWER",
-              "COACH",
-              "ADMIN"
-            ]
-          },
-          "coach": {
-            "type": "boolean"
-          },
-          "plan": {
-            "type": "string",
-            "enum": [
-              "FREE",
-              "PREMIUM",
-              "SUPPORTER",
-              "WHITELABEL"
-            ]
-          },
-          "accepted_coaching_group": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
