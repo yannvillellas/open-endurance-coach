@@ -24,9 +24,34 @@ _SECTION_KEYS = (
     "wellness",
     "upcoming_events",
     "goal_races",
+    "training_rollup",
     "sport_settings",
     "user_feedback",
 )
+
+
+class SportWeek(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: str = Field(min_length=1)
+    sessions: int = Field(ge=0)
+    time_s: int = Field(ge=0)
+    load: float | None = None
+
+
+class TrainingWeek(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    week_start: date
+    partial: bool = False
+    sessions: int = Field(ge=0)
+    time_s: int = Field(ge=0)
+    load: float | None = None
+    fitness: float | None = None
+    fatigue: float | None = None
+    form: float | None = None
+    ramp_rate: float | None = None
+    sports: list[SportWeek] = Field(default_factory=list)
 
 
 class GoalRace(BaseModel):
@@ -53,6 +78,7 @@ class CoachContext(BaseModel):
     wellness: list[Wellness] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
     goal_races: list[GoalRace] = Field(default_factory=list)
+    training_rollup: list[TrainingWeek] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
     max_tokens: int = Field(default=4096, gt=0)
@@ -74,6 +100,9 @@ class CoachContext(BaseModel):
             ],
             "goal_races": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.goal_races
+            ],
+            "training_rollup": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.training_rollup
             ],
             "sport_settings": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings

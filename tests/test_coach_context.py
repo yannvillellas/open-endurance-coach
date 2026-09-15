@@ -128,6 +128,7 @@ def test_section_tokens_reports_per_section() -> None:
         "wellness",
         "upcoming_events",
         "goal_races",
+        "training_rollup",
         "sport_settings",
         "user_feedback",
     }

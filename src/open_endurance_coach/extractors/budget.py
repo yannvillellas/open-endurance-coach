@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from typing import Any
 
-from open_endurance_coach.schemas.context import CoachContext, GoalRace
+from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
@@ -26,6 +26,7 @@ def build_within_budget(
     *,
     current_proposal: DecisionReport | None = None,
     goal_races: list[GoalRace] | None = None,
+    training_rollup: list[TrainingWeek] | None = None,
     user_feedback: str | None,
     activity_detail: Activity | None,
     max_tokens: int,
@@ -35,6 +36,7 @@ def build_within_budget(
     wellness_rows = list(wellness)
     events = list(upcoming_events)
     races = list(goal_races or [])
+    rollup = list(training_rollup or [])
     while True:
         payload: dict[str, Any] = {
             "focus": focus,
@@ -45,6 +47,7 @@ def build_within_budget(
             "wellness": wellness_rows,
             "upcoming_events": events,
             "goal_races": races,
+            "training_rollup": rollup,
             "sport_settings": sport_settings,
             "user_feedback": user_feedback,
             "max_tokens": max_tokens,
@@ -54,6 +57,8 @@ def build_within_budget(
             return CoachContext.model_validate(payload)
         if activities and _activity_droppable(activities, today):
             activities.pop()
+        elif rollup:
+            rollup.pop()
         elif wellness_rows:
             wellness_rows.pop()
         elif events:

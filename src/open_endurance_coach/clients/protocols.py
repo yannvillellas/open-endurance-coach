@@ -14,6 +14,10 @@ class IntervalsReadClient(Protocol):
 
     async def get_sport_settings(self) -> list[dict[str, Any]]: ...
 
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]: ...
+
 
 class IntervalsCalendarClient(Protocol):
     async def list_events(

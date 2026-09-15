@@ -94,7 +94,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 1. **Personal webhook config:** RESOLVED 2026-08-16 — in-app check: Developer Settings contains only API key, athlete ID, and connected apps. No webhooks section for personal API-key accounts. Webhooks require an OAuth app (email <david@intervals.icu>). **Consequence: manual-first trigger architecture; webhooks optional later.**
 2. **Wellness trigger:** moot under manual-first triggers; wellness data is pulled on demand and by an optional scheduled poll later. Revisit if an OAuth app is created.
 3. **Exact webhook event fields** for `ACTIVITY_UPLOADED`/`ACTIVITY_ANALYZED` payloads (activity object shape) — only needed if a webhook adapter is added.
-4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets.
+4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets. Partially resolved: ADR-0015 bounds the system prompt at 1024 tokens and a full 14-week rollup context test keeps total input inside the context budget; comparing live `usage.prompt_tokens` against the estimate remains optional.
 5. **Tunnel hostname:** RESOLVED — a Cloudflare-managed domain is available for a permanent tunnel hostname.
 
 ## 5. Design implications recorded for later iterations
@@ -109,7 +109,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 - **Strava-sourced activities:** the API does not expose power/detailed metrics for activities synced via Strava (direct Garmin/device sync is required). Matches the documented webhook exclusion for Strava activities.
 - **`ATHLETE_ID` location confirmed:** Settings → Developer Settings in Intervals.icu shows both the API key and the athlete ID (their `.env` uses `INTERVALS_API_KEY` + `ATHLETE_ID`).
-- **Weekly load history:** the reference project reads `GET /api/v1/athlete/{id}/athlete-summary{ext}` for server-aggregated weekly training-load history — candidate for our standard extraction scope.
+- **Weekly load history:** standard extraction calls `GET /api/v1/athlete/{id}/athlete-summary` with `start`/`end` for the 90-day `training_rollup` section. Live-verified 2026-09-15: a 90-day window returns ~14 weekly buckets, **Monday-anchored and newest-first**, each with `fitness` (CTL), `fatigue` (ATL), `form` (TSB), `rampRate`, `training_load`, `time`, `count`, `distance`, plus `byCategory[]` per-sport `count`/`time`/`training_load`. Buckets are mapped to ISO weeks (ascending), the newest week is marked `partial`, and any missing week is zero-filled. Note `start`/`end` are the parameters — `oldest`/`newest` are ignored.
 - **Upload idempotency pattern (reference):** index existing WORKOUT events by `(name, date)` in the target range → `PUT` update if found, else `POST` create; safe re-runs, no duplicates. Structured workouts upload as `.zwo` `file_contents` with step definitions; tags are supported on events.
 - **Tunnel + localhost note:** the reference MCP setup requires an allowed-host configuration for the tunnel's public hostname (`Host` header) — any local receiver will need the same when wired to the tunnel.
 

@@ -6,7 +6,7 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 ## Current Capabilities
 
-- **Data Extraction:** Standard scope (recent activities, wellness, upcoming events, sport settings) and deep-historical scope (trend queries such as "heart rate improvement on hills over the last 3 months"), both budgeted to fit the model's token limit.
+- **Data Extraction:** Standard scope (recent activities, wellness, upcoming events, sport settings, goal races over a 120-day horizon, and a 90-day weekly training rollup with CTL/ATL/ramp and per-sport load) and deep-historical scope (trend queries such as "heart rate improvement on hills over the last 3 months"), both budgeted to fit the model's token limit.
 - **Analysis:** OVHcloud AI Endpoints' free tier (Qwen3.5-397B-A17B, JSON mode, thinking enabled; no API key) — or DeepSeek — enforces Joe Friel's periodization principles and Dr. Andrew Coggan's power analytics, comparing executed training against planned targets and current readiness (CTL/ATL, HRV, sleep).
 - **Draft & Review Loop:** Every analysis produces a validated draft under a strict schema — invalid LLM output is retried, then rejected. The coach solicits missing RPE/fueling data and re-analyzes with the athlete's feedback before anything can be approved.
 - **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and strict category guards — workout mutations only touch `WORKOUT` events, race mutations only touch `RACE_A/B/C` events, and updates/deletes never cross between the two families. Applying defaults to a dry-run.

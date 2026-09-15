@@ -5,11 +5,11 @@ import pytest
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
-from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase
+from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import make_activity, make_intervals_client, make_wellness
+from .fakes import make_activity, make_intervals_client, make_summary_week, make_wellness
 
 TODAY = date(2024, 2, 1)
 
@@ -25,6 +25,12 @@ async def test_standard_extraction_populates_all_sections(settings: Settings) ->
     assert context.activity_detail is None
     assert context.user_feedback is None
     assert context.today == TODAY
+    assert [week.week_start for week in context.training_rollup] == [
+        date(2024, 1, 23),
+        date(2024, 1, 30),
+    ]
+    assert context.training_rollup[-1].partial is True
+    assert context.training_rollup[-1].sessions == 2
 
 
 async def test_standard_extraction_uses_expected_windows(settings: Settings) -> None:
@@ -36,6 +42,7 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
         ("wellness", "2024-01-25", "2024-02-02"),
         ("events", "2024-02-01", "2024-02-15", None),
         ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
+        ("athlete_summary", "2023-11-03", "2024-02-01"),
         ("sport_settings",),
     ]
 
@@ -229,3 +236,56 @@ async def test_deep_extraction_respects_budget(settings: Settings) -> None:
     )
     assert isinstance(context, CoachContext)
     assert context.estimated_tokens() <= 150
+
+
+def test_training_rollup_is_ascending_with_partial_current_week() -> None:
+    weeks = training_rollup(
+        [make_summary_week("2024-01-30"), make_summary_week("2024-01-23")], today=TODAY
+    )
+    assert [week.week_start for week in weeks] == [date(2024, 1, 23), date(2024, 1, 30)]
+    assert weeks[0].partial is False
+    assert weeks[-1].partial is True
+    assert weeks[-1].fitness == 30.0
+    assert [sport.category for sport in weeks[-1].sports] == ["Ride", "Run"]
+
+
+def test_training_rollup_zero_fills_missing_weeks() -> None:
+    weeks = training_rollup(
+        [make_summary_week("2024-01-30"), make_summary_week("2024-01-16")], today=TODAY
+    )
+    assert [week.week_start for week in weeks] == [
+        date(2024, 1, 16),
+        date(2024, 1, 23),
+        date(2024, 1, 30),
+    ]
+    gap = weeks[1]
+    assert (gap.sessions, gap.time_s, gap.load, gap.fitness) == (0, 0, None, None)
+    assert gap.sports == []
+
+
+def test_training_rollup_skips_zero_session_sports() -> None:
+    weeks = training_rollup(
+        [
+            make_summary_week(
+                "2024-01-30",
+                sports=[
+                    {"category": "Ride", "count": 0, "time": 0, "training_load": 0},
+                    {"category": "Run", "count": 1, "time": 2400, "training_load": 30},
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+    assert [sport.category for sport in weeks[0].sports] == ["Run"]
+    assert weeks[0].sports[0].sessions == 1
+
+
+def test_training_rollup_rejects_non_weekly_spacing() -> None:
+    with pytest.raises(ValueError, match="bucket spacing"):
+        training_rollup(
+            [make_summary_week("2024-01-30"), make_summary_week("2024-01-28")], today=TODAY
+        )
+
+
+def test_training_rollup_returns_empty_without_rows() -> None:
+    assert training_rollup([], today=TODAY) == []

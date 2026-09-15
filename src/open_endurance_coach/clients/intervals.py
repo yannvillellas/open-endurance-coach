@@ -193,9 +193,15 @@ class IntervalsClient:
         response = await self._request("GET", self._athlete_path(""))
         return response.json()
 
-    async def get_athlete_summary(self) -> list[dict[str, Any]]:
-        response = await self._request("GET", self._athlete_path("/athlete-summary"))
-        return response.json()
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]:
+        params = {key: value for key, value in (("start", start), ("end", end)) if value}
+        response = await self._request("GET", self._athlete_path("/athlete-summary"), params=params)
+        data = response.json()
+        if not isinstance(data, list):
+            raise IntervalsApiError(response.status_code, "unexpected athlete-summary payload")
+        return data
 
     async def aclose(self) -> None:
         await self._client.aclose()

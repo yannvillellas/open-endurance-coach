@@ -65,6 +65,10 @@ METHODOLOGY = (
     "athlete's subjective feedback, and modulate upcoming load accordingly.\n"
 )
 
+# ADR-0015: the context budget covers sections only; this bounds the uncounted
+# system prompt so the total input stays predictable.
+SYSTEM_PROMPT_TOKEN_ALLOWANCE = 1024
+
 
 def _json_contract() -> str:
     return (

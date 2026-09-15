@@ -1,7 +1,13 @@
+import json
+from datetime import date, timedelta
 from typing import Any
 
 from open_endurance_coach.config import Settings
-from open_endurance_coach.prompts.prompts import OUTPUT_EXAMPLE, build_messages
+from open_endurance_coach.prompts.prompts import (
+    OUTPUT_EXAMPLE,
+    SYSTEM_PROMPT_TOKEN_ALLOWANCE,
+    build_messages,
+)
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
@@ -184,3 +190,41 @@ def test_no_user_feedback_block_without_feedback() -> None:
 def test_build_messages_is_deterministic() -> None:
     settings = make_settings()
     assert build_messages(CONTEXT, settings) == build_messages(CONTEXT, settings)
+
+
+def _estimate_tokens(payload: Any) -> int:
+    return len(json.dumps(payload, ensure_ascii=False, indent=2)) // 4
+
+
+def test_system_prompt_fits_its_allowance() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert _estimate_tokens(system) <= SYSTEM_PROMPT_TOKEN_ALLOWANCE
+
+
+def test_total_input_uses_context_and_system_budgets() -> None:
+    messages = build_messages(CONTEXT, make_settings())
+    total = _estimate_tokens(messages[0].content) + CONTEXT.estimated_tokens()
+    assert total <= CONTEXT.max_tokens + SYSTEM_PROMPT_TOKEN_ALLOWANCE
+
+
+def test_full_rollup_context_fits_default_budget() -> None:
+    rollup = [
+        {
+            "week_start": (date(2024, 1, 5) + timedelta(days=7 * index)).isoformat(),
+            "partial": index == 13,
+            "sessions": 5,
+            "time_s": 14400,
+            "load": 320.0,
+            "fitness": 45.2,
+            "fatigue": 38.1,
+            "form": 7.1,
+            "ramp_rate": 1.8,
+            "sports": [
+                {"category": "Ride", "sessions": 3, "time_s": 9000, "load": 210.0},
+                {"category": "Run", "sessions": 2, "time_s": 5400, "load": 110.0},
+            ],
+        }
+        for index in range(14)
+    ]
+    context = CoachContext.model_validate({"focus": "plan my race", "training_rollup": rollup})
+    assert context.estimated_tokens() <= context.max_tokens

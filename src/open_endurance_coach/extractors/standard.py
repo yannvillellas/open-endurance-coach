@@ -1,11 +1,18 @@
 from datetime import date, datetime, timedelta
-from typing import get_args
+from itertools import pairwise
+from typing import Any, get_args
 from zoneinfo import ZoneInfo
 
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.schemas.context import CoachContext, GoalRace, MacroPhase
+from open_endurance_coach.schemas.context import (
+    CoachContext,
+    GoalRace,
+    MacroPhase,
+    SportWeek,
+    TrainingWeek,
+)
 from open_endurance_coach.schemas.decisions import RaceCategory
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
@@ -13,9 +20,59 @@ ACTIVITY_LOOKBACK_DAYS = 14
 WELLNESS_LOOKBACK_DAYS = 7
 UPCOMING_DAYS = 14
 RACE_HORIZON_DAYS = 120
+ROLLUP_LOOKBACK_DAYS = 90
 DEFAULT_MAX_TOKENS = 4096
 RACE_CATEGORIES: tuple[RaceCategory, ...] = get_args(RaceCategory)
 RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
+
+
+def _float_or_none(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def training_rollup(summary_rows: list[dict[str, Any]], *, today: date) -> list[TrainingWeek]:
+    parsed: dict[date, dict[str, Any]] = {}
+    for row in summary_rows:
+        raw = row.get("date")
+        if not isinstance(raw, str):
+            raise ValueError("athlete-summary row without a date")
+        parsed[date.fromisoformat(raw)] = row
+    if not parsed:
+        return []
+    starts = sorted(parsed)
+    gaps = {(later - earlier).days for earlier, later in pairwise(starts)}
+    if any(gap <= 0 or gap % 7 for gap in gaps):
+        raise ValueError(f"unexpected athlete-summary bucket spacing: {sorted(gaps)}")
+    weeks: list[TrainingWeek] = []
+    cursor = starts[0]
+    while cursor <= starts[-1]:
+        row = parsed.get(cursor, {})
+        sports = [
+            SportWeek(
+                category=str(item.get("category") or "Unknown"),
+                sessions=int(item.get("count") or 0),
+                time_s=int(item.get("time") or 0),
+                load=_float_or_none(item.get("training_load")),
+            )
+            for item in row.get("byCategory") or []
+            if int(item.get("count") or 0) > 0
+        ]
+        weeks.append(
+            TrainingWeek(
+                week_start=cursor,
+                partial=cursor <= today < cursor + timedelta(days=7),
+                sessions=int(row.get("count") or 0),
+                time_s=int(row.get("time") or 0),
+                load=_float_or_none(row.get("training_load")),
+                fitness=_float_or_none(row.get("fitness")),
+                fatigue=_float_or_none(row.get("fatigue")),
+                form=_float_or_none(row.get("form")),
+                ramp_rate=_float_or_none(row.get("rampRate")),
+                sports=sports,
+            )
+        )
+        cursor += timedelta(days=7)
+    return weeks
 
 
 def macro_phase(days_to_race: int) -> MacroPhase:
@@ -81,6 +138,10 @@ class StandardExtractor:
             (current + timedelta(days=RACE_HORIZON_DAYS)).isoformat(),
             category=RACE_CATEGORY_FILTER,
         )
+        summary_raw = await self._client.get_athlete_summary(
+            start=(current - timedelta(days=ROLLUP_LOOKBACK_DAYS)).isoformat(),
+            end=current.isoformat(),
+        )
         settings_raw = await self._client.get_sport_settings()
         activities = sorted(
             (Activity.model_validate(item) for item in activities_raw),
@@ -112,6 +173,7 @@ class StandardExtractor:
             wellness=wellness,
             upcoming_events=events,
             goal_races=goal_races,
+            training_rollup=training_rollup(summary_raw, today=current),
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
             user_feedback=user_feedback,
             activity_detail=None,
