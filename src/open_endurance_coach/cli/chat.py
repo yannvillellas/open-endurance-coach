@@ -42,7 +42,7 @@ HELP_TEXT = (
     "abandons it; anything else is a change request and nothing is written).\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
-    "/clear                 forget this session's memory\n"
+    "/forget [days]         forget stored history (all, or older than N days)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
@@ -56,6 +56,10 @@ _CHANGE_RE = re.compile(
     re.IGNORECASE,
 )
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
+_BARE_COMMAND_RE = re.compile(
+    r"^\s*(help|exit|quit|forget(?:\s+\d+)?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
+    re.IGNORECASE,
+)
 _ASSUME_RE = re.compile(
     r"\b(proceed with assumptions|use assumptions|assume|i don'?t know|no idea|not sure yet)\b",
     re.IGNORECASE,
@@ -196,10 +200,8 @@ async def _handle_proposal(
         name = parts[0].casefold() if parts else ""
         if name == "help":
             console.print(HELP_TEXT, markup=False)
-        elif name == "clear":
-            session.history = []
-            session.context = None
-            console.print("Memory cleared.")
+        elif name == "forget":
+            console.print("[yellow]/forget is unavailable while a proposal is open.[/yellow]")
         elif name in {"provider", "model"}:
             _handle_llm_command(engine, name, parts[1:])
         else:
@@ -271,10 +273,20 @@ async def _run_command(
     if name == "help":
         console.print(HELP_TEXT, markup=False)
         return None
-    if name == "clear":
-        session.history = []
-        session.context = None
-        console.print("Memory cleared.")
+    if name == "forget":
+        days: int | None = None
+        if args:
+            if not args[0].isdigit():
+                console.print("[red]Usage: /forget [days][/red]")
+                return None
+            days = int(args[0])
+        removed = engine.prune_history(days)
+        if days is None:
+            session.history = []
+            session.context = None
+            session.pending_decision_id = None
+        scope = "all history" if days is None else f"history older than {days} days"
+        console.print(f"Forgot {sum(removed.values())} records ({scope}).")
         return None
     if name in {"provider", "model"}:
         _handle_llm_command(engine, name, args)
@@ -282,16 +294,22 @@ async def _run_command(
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
-    if not fresh:
-        session.seed(
-            engine.recent_history(
-                settings.chat_history_turns,
-                max_age_days=settings.chat_history_max_age_days,
-            ),
-            max_tokens=settings.chat_history_max_tokens,
-        )
+    if settings.history_days > 0:
+        removed = engine.prune_history(settings.history_days)
+        total = sum(removed.values())
+        if total:
+            console.print(
+                f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
+            )
+    session.seed(
+        engine.recent_history(
+            settings.chat_history_turns,
+            max_age_days=settings.chat_history_max_age_days,
+        ),
+        max_tokens=settings.chat_history_max_tokens,
+    )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
@@ -314,36 +332,41 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
                 continue
             console.print("bye")
             return
-        match dispatch(line, state):
-            case Ignore():
+        try:
+            bare = _BARE_COMMAND_RE.match(line)
+            if bare is not None:
+                console.print(
+                    f"[dim]That looks like a command; type it with a slash:"
+                    f" /{bare.group(1).lower()}[/dim]"
+                )
                 continue
-            case Exit():
-                console.print("bye")
-                return
-            case Converse(text=text):
-                state = await _handle_text(engine, session, text) or state
-            case UnknownCommand():
-                console.print("[red]Unknown command.[/red]")
-                console.print(HELP_TEXT, markup=False)
-            case Confirmation(line=line):
-                step = await _handle_proposal(engine, state, line, session)
-                if isinstance(step, ExitChat):
+            match dispatch(line, state):
+                case Ignore():
+                    continue
+                case Exit():
                     console.print("bye")
                     return
-                state = step
-            case Command(name=name, args=args):
-                state = await _run_command(engine, name, args, session) or state
+                case Converse(text=text):
+                    state = await _handle_text(engine, session, text) or state
+                case UnknownCommand():
+                    console.print("[red]Unknown command.[/red]")
+                    console.print(HELP_TEXT, markup=False)
+                case Confirmation(line=line):
+                    step = await _handle_proposal(engine, state, line, session)
+                    if isinstance(step, ExitChat):
+                        console.print("bye")
+                        return
+                    state = step
+                case Command(name=name, args=args):
+                    state = await _run_command(engine, name, args, session) or state
+        except Exception as exc:
+            print_error(exc)
 
 
-def start_chat(
-    *,
-    fresh: bool = False,
-    provider: str | None = None,
-    model: str | None = None,
-) -> None:
+def start_chat(*, provider: str | None = None, model: str | None = None) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
+        await run_chat(engine, cli_main.get_settings())
 
     cli_main._run(run, provider=provider, model=model)

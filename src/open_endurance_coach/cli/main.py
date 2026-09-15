@@ -24,12 +24,11 @@ def _default_entry(
         None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
     ),
     model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
-    fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
 ) -> None:
     if ctx.invoked_subcommand is None:
         from open_endurance_coach.cli.chat import start_chat
 
-        start_chat(fresh=fresh, provider=provider, model=model)
+        start_chat(provider=provider, model=model)
 
 
 async def _with_engine(

@@ -21,7 +21,7 @@ _CONFIRMING = ChatState(
     ("line", "name", "args"),
     [
         ("/help", "help", []),
-        ("/clear", "clear", []),
+        ("/forget", "forget", []),
         ("/provider", "provider", []),
         ("/provider deepseek", "provider", ["deepseek"]),
         ("/model", "model", []),
@@ -36,7 +36,7 @@ def test_slash_commands_dispatch_to_commands(line: str, name: str, args: list[st
     ("line", "expected"),
     [
         ("/HELP", Command("help", [])),
-        ("/CLEAR", Command("clear", [])),
+        ("/FORGET", Command("forget", [])),
     ],
 )
 def test_command_names_are_case_insensitive(line: str, expected: Command) -> None:

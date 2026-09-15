@@ -430,3 +430,27 @@ def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
     assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
     unfiltered = store.recent_feedback(10)
     assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]
+
+
+def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    old_draft = store.save_draft(focus="old", report=make_report(), context=make_context())
+    store.add_feedback(old_draft, "old feedback")
+    store.mark_activities_seen(["fx-old"])
+    store.approve_draft(old_draft)
+
+    clock.now = NOW + timedelta(days=200)
+    recent_draft = store.save_draft(focus="recent", report=make_report(), context=make_context())
+    store.add_feedback(recent_draft, "recent feedback")
+    store.mark_activities_seen(["fx-recent"])
+
+    counts = store.prune_before(NOW + timedelta(days=100))
+
+    assert counts == {"feedback": 1, "decisions": 1, "drafts": 1, "seen_activities": 1}
+    assert [draft.focus for draft in store.list_drafts()] == ["recent"]
+    assert [row.feedback.content for row in store.recent_feedback(10)] == ["recent feedback"]
+    assert store.list_decisions() == []
+    assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}

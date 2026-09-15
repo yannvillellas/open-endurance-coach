@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -165,6 +165,14 @@ class CoachEngine:
     ) -> tuple[str, str]:
         self._llm_client.select(provider=provider, model=model)
         return self.llm_selection()
+
+    def prune_history(
+        self, days: int | None = None, *, now: datetime | None = None
+    ) -> dict[str, int]:
+        cutoff = now or datetime.now(UTC)
+        if days is not None:
+            cutoff = cutoff - timedelta(days=days)
+        return self._store.prune_before(cutoff)
 
     def recent_history(
         self, limit: int, *, max_age_days: int | None = None

@@ -202,7 +202,7 @@ def test_chat_help_lists_commands(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="/help\n")
     assert result.exit_code == 0
     assert "/provider" in result.output
-    assert "/clear" in result.output
+    assert "/forget" in result.output
     assert "/exit" in result.output
 
 
@@ -528,8 +528,10 @@ def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.Mo
     assert "Cancelled" not in result.output
 
 
-def test_chat_fresh_skips_seeding(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+def test_chat_startup_keeps_history_when_window_is_zero(
+    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
     draft_id = store.save_draft(
         focus="f",
@@ -537,10 +539,13 @@ def test_chat_fresh_skips_seeding(patched: Any) -> None:
         context=CoachContext(focus="f"),
     )
     store.add_feedback(draft_id, "legs heavy")
-    result = runner.invoke(cli_main.app, ["--fresh"], input="how was my week?\nand today?\n")
+    monkeypatch.setattr(
+        cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 0})
+    )
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "Remembering" not in result.output
-    assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
+    assert "Remembering 1 past exchange" in result.output
+    assert "Pruned" not in result.output
 
 
 def test_chat_shows_seeded_memory_count(patched: Any) -> None:
@@ -558,17 +563,70 @@ def test_chat_shows_seeded_memory_count(patched: Any) -> None:
     assert "Remembering 2 past exchanges." in result.output
 
 
-def test_chat_clear_wipes_session_memory(patched: Any) -> None:
+def test_chat_bare_command_prints_a_slash_hint(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="forget 7\n/exit\n")
+    assert result.exit_code == 0
+    assert "type it with a slash" in result.output
+    assert provider.calls == []
+
+
+def test_chat_unexpected_error_keeps_the_session(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    engine, _ = patched(provider)
+
+    async def broken_analyze(focus: str, **kwargs: Any) -> Any:
+        raise KeyError("boom")
+
+    engine.analyze = broken_analyze
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
+    assert result.exit_code == 0
+    assert "error:" in result.output
+    assert "bye" in result.output
+
+
+def test_chat_forget_wipes_stored_history_and_memory(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     _, store = patched(provider)
     result = runner.invoke(
-        cli_main.app, [], input="how was my week?\nsecond question\n/clear\nthird\n"
+        cli_main.app, [], input="how was my week?\nsecond question\n/forget\nthird\n"
     )
     assert result.exit_code == 0
-    assert "Memory cleared." in result.output
-    assert provider.calls[2]["json_mode"] is True
+    assert "Forgot" in result.output
     assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
-    assert len(store.list_drafts()) == 3
+    drafts = store.list_drafts()
+    assert len(drafts) == 1
+    assert drafts[0].focus.startswith("third")
+
+
+def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    _, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=CoachContext(focus="f"),
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    result = runner.invoke(cli_main.app, [], input="/forget 30\nhow was my week?\n")
+    assert result.exit_code == 0
+    assert "history older than 30 days" in result.output
+    assert "legs heavy" in provider.calls[0]["messages"][1].content
+
+
+def test_chat_startup_reports_pruned_records(
+    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    provider = FakeLlmProvider([completion(report_json())])
+    engine, _ = patched(provider)
+    monkeypatch.setattr(engine, "prune_history", lambda days=None, **kwargs: {"drafts": 2})
+    monkeypatch.setattr(
+        cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 180})
+    )
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
+    assert result.exit_code == 0
+    assert "Pruned 2 old records" in result.output
 
 
 def test_chat_session_trims_to_cap(
@@ -902,12 +960,12 @@ def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
     assert store.list_feedback(1) == []
 
 
-def test_chat_clear_during_confirmation_clears_without_llm(patched: Any) -> None:
+def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\n/clear\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/forget\ncancel\n")
     assert result.exit_code == 0
-    assert "Memory cleared." in result.output
+    assert "unavailable while a proposal is open" in result.output
     assert len(provider.calls) == 1
     assert store.list_feedback(1) == []
 
