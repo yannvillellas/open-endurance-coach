@@ -41,10 +41,9 @@ from open_endurance_coach.store.records import Draft
 chat_app = typer.Typer()
 
 HELP_TEXT = (
-    "Just talk to the coach. When he proposes calendar changes, answer with\n"
-    "exactly yes or no (cancel abandons it; anything else is a change request\n"
-    "and nothing is written).\n"
-    "/analyze [focus]       force a fresh analysis\n"
+    "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
+    "When he proposes calendar changes, answer with exactly yes or no (cancel\n"
+    "abandons it; anything else is a change request and nothing is written).\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
     "/clear                 forget this session's memory\n"
@@ -52,7 +51,7 @@ HELP_TEXT = (
     "/exit, /quit           leave the chat\n"
 )
 
-_ANALYZE_RE = re.compile(r"\b(analy[sz]e|review|assess|check|plan)\b", re.IGNORECASE)
+_ANALYZE_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess)\b", re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
 _QUESTION_START_RE = re.compile(
     r"^\s*(?:what|why|how|which|when|who|explain|detail\w*)\b", re.IGNORECASE
@@ -108,6 +107,12 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
     if draft.report.mutations:
+        if draft.report.intent != "plan":
+            console.print(
+                "[dim]The coach drafted calendar changes but did not read this as a"
+                " planning request; ask him to plan if you want a proposal.[/dim]"
+            )
+            return None
         return _open_proposal(draft.id, draft.report.mutations)
     console.print("[dim]Answer my questions here if you like.[/dim]")
     return None
@@ -171,11 +176,6 @@ async def _handle_proposal(
             console.print("Memory cleared.")
         elif name in {"provider", "model"}:
             _handle_llm_command(engine, name, parts[1:])
-        elif name == "analyze":
-            console.print(
-                "[yellow]/analyze is unavailable while a proposal is open;"
-                " reply yes, no, or cancel.[/yellow]"
-            )
         else:
             console.print("[red]Unknown command.[/red]")
             console.print(HELP_TEXT, markup=False)
@@ -255,14 +255,6 @@ async def _run_command(
     if name in {"provider", "model"}:
         _handle_llm_command(engine, name, args)
         return None
-    if name == "analyze":
-        from open_endurance_coach.cli import main as cli_main
-
-        focus = " ".join(args) if args else cli_main.DEFAULT_ANALYZE_FOCUS
-        try:
-            return await _analyze_line(engine, session, focus)
-        except RECOVERABLE_EXCEPTIONS as exc:
-            print_error(exc)
     return None
 
 

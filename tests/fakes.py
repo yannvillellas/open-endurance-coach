@@ -271,6 +271,7 @@ def completion(content: str, reasoning_content: str | None = None) -> LlmComplet
 
 def report_json(summary: str = "Load stable.", **overrides: Any) -> str:
     payload: dict[str, Any] = {
+        "intent": "plan",
         "summary": summary,
         "findings": ["Tempo block hit target."],
         "questions": ["RPE on Thursday?"],

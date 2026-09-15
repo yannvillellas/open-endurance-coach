@@ -6,6 +6,7 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.schemas.context import CoachContext
 
 OUTPUT_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
     "summary": "Execution matched targets; keep load stable.",
     "findings": ["Thursday's tempo block executed 8% above target power."],
     "questions": ["What was your RPE on Thursday's session?"],
@@ -25,6 +26,27 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
         {"action": "delete", "event_id": 10002},
     ],
 }
+
+DISCUSSION_EXAMPLE: dict[str, Any] = {
+    "intent": "chat",
+    "summary": "Both runs stayed aerobic; the load ramp, not the intensity, is the risk.",
+    "findings": [
+        "Sep 10 averaged 4 bpm below the Z2 floor.",
+        "ATL rose from 30.6 to 40.0 in 48 h while CTL held near 30.",
+    ],
+    "questions": ["How did the legs feel on the 12th?", "Was the climbing continuous?"],
+    "mutations": [],
+}
+
+PROPOSAL_POLICY = (
+    'Classify the athlete\'s request in intent: "chat" for questions, advice, '
+    'explanation or discussion; "analysis" for a review of executed training; '
+    '"plan" only when the athlete asks for a calendar change or a training plan '
+    "(plan, schedule, create, add, adjust, taper, reschedule). Return an empty "
+    'mutations list unless intent is "plan": for chat and analysis put the answer in '
+    "summary/findings and, if a change would help, offer it as a question - never "
+    "encode a change the athlete did not ask for.\n"
+)
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
 # (forum topic 1163), the workout builder syntax quick guide (123701), distance-based
@@ -66,21 +88,25 @@ METHODOLOGY = (
 )
 
 # ADR-0015: the context budget covers sections only; this bounds the uncounted
-# system prompt so the total input stays predictable.
-SYSTEM_PROMPT_TOKEN_ALLOWANCE = 1024
+# system prompt so the total input stays predictable. Provisional - replaced by a
+# measured per-settings budget once the tokenizer calibration is in.
+SYSTEM_PROMPT_TOKEN_ALLOWANCE = 1280
 
 
 def _json_contract() -> str:
     return (
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
+        f"{PROPOSAL_POLICY}"
         "Every start_date_local must be on or after today (the athlete's local date), "
         "taken from the upcoming schedule - never copy the example dates.\n"
         "If current_proposal is present in the athlete data, revise that proposal "
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         "Copy the workout text format from the example, not the example's numbers.\n"
         f"{WORKOUT_TEXT_FORMAT}"
-        "Example json:\n"
+        "Example json (conversation - no calendar change requested):\n"
+        f"{json.dumps(DISCUSSION_EXAMPLE, indent=2)}\n"
+        "Example json (the athlete asked for a plan or calendar change):\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )
 

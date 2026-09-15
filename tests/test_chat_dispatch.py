@@ -21,8 +21,6 @@ _CONFIRMING = ChatState(
     ("line", "name", "args"),
     [
         ("/help", "help", []),
-        ("/analyze", "analyze", []),
-        ("/analyze how was my week", "analyze", ["how", "was", "my", "week"]),
         ("/clear", "clear", []),
         ("/provider", "provider", []),
         ("/provider deepseek", "provider", ["deepseek"]),
@@ -37,8 +35,7 @@ def test_slash_commands_dispatch_to_commands(line: str, name: str, args: list[st
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
-        ("/ANALYZE 3", Command("analyze", ["3"])),
-        ("/Analyze 3", Command("analyze", ["3"])),
+        ("/HELP", Command("help", [])),
         ("/CLEAR", Command("clear", [])),
     ],
 )
@@ -52,7 +49,7 @@ def test_exit_commands(line: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "line", ["/bogus", "/feedbackx 1 hi", "/", "  /  ", "/approve 3", "/review"]
+    "line", ["/bogus", "/feedbackx 1 hi", "/", "  /  ", "/approve 3", "/review", "/analyze"]
 )
 def test_unknown_slash_commands_are_reported_verbatim(line: str) -> None:
     assert dispatch(line, ChatState()) == UnknownCommand(line.strip())

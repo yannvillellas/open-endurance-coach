@@ -4,6 +4,7 @@ from typing import Any
 
 from open_endurance_coach.config import Settings
 from open_endurance_coach.prompts.prompts import (
+    DISCUSSION_EXAMPLE,
     OUTPUT_EXAMPLE,
     SYSTEM_PROMPT_TOKEN_ALLOWANCE,
     build_messages,
@@ -228,3 +229,17 @@ def test_full_rollup_context_fits_default_budget() -> None:
     ]
     context = CoachContext.model_validate({"focus": "plan my race", "training_rollup": rollup})
     assert context.estimated_tokens() <= context.max_tokens
+
+
+def test_contract_defaults_to_discussion_policy() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert 'Return an empty mutations list unless intent is "plan"' in system
+    assert "conversation - no calendar change requested" in system
+    assert "asked for a plan or calendar change" in system
+
+
+def test_examples_declare_intent() -> None:
+    assert DISCUSSION_EXAMPLE["intent"] == "chat"
+    assert DISCUSSION_EXAMPLE["mutations"] == []
+    assert OUTPUT_EXAMPLE["intent"] == "plan"
+    assert OUTPUT_EXAMPLE["mutations"]

@@ -17,9 +17,10 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 `coach chat` is a single conversation with the coach. You just talk:
 
 - **Free text runs the right thing automatically.** When fresh data is needed (first message, trend questions, or requests like "analyze/review/check my week"), the coach runs a full analysis and answers with the report. Otherwise he answers conversationally from the same data snapshot.
+- **The coach decides what you need.** Every message is classified as _chat_ (answer from the analysis already in the session), _analysis_ (review executed training), or _plan_ (propose calendar changes). A full analysis is reused for follow-ups — there is no re-analysis until you ask for one or the question needs historical depth. If a change would help during a chat, he offers it instead of interrupting you with a confirmation gate.
 - **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes.
 - **Memory**: sessions remember recent exchanges (last 10 feedback rows from the last 90 days, up to 2048 tokens, self-trimmed). Start fresh with `coach chat --fresh`, or say `/clear` at any time.
-- Commands are optional: `/analyze` forces a fresh analysis, `/provider` and `/model` show or switch the LLM mid-session, `/help`, `/exit` — everything else is conversation.
+- Session commands only: `/provider` and `/model` show or switch the LLM, `/clear`, `/help`, `/exit` — everything else is conversation.
 
 ```text
 $ coach chat

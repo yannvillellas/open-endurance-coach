@@ -71,3 +71,11 @@ def test_chat_history_sits_between_data_and_turn(settings: Settings) -> None:
 def test_chat_history_is_optional(settings: Settings) -> None:
     messages = build_chat_messages(CoachContext(focus="f"), settings, text="hi")
     assert [message.role for message in messages] == ["system", "user", "user"]
+
+
+def test_chat_directive_defaults_to_discussion(settings: Settings) -> None:
+    from open_endurance_coach.prompts.chat import build_chat_messages
+    from open_endurance_coach.schemas.context import CoachContext
+
+    messages = build_chat_messages(CoachContext(focus="status"), settings, text="how was it?")
+    assert "Default to discussion" in messages[0].content
