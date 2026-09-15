@@ -1052,7 +1052,7 @@ def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
     assert len(provider.calls) == 1
 
 
-def test_chat_material_questions_block_the_proposal(patched: Any) -> None:
+def test_chat_material_questions_block_a_workout_plan(patched: Any) -> None:
     provider = FakeLlmProvider(
         [
             completion(

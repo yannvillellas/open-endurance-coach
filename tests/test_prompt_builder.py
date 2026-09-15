@@ -70,14 +70,17 @@ def test_race_example_validates_and_is_placeholder_only() -> None:
     assert isinstance(report.mutations[0], CreateRace)
     assert isinstance(report.mutations[1], UpdateRace)
     assert RACE_EXAMPLE["mutations"][0]["category"] == "RACE_B"
+    assert RACE_EXAMPLE["mutations"][0]["moving_time"] == 4500
+    assert RACE_EXAMPLE["mutations"][0]["icu_training_load"] == 90
     assert "<race name>" in json.dumps(RACE_EXAMPLE)
 
 
 def test_contract_blocks_proposals_on_material_questions() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert "Put in needs_input only the questions whose answer materially changes" in system
-    assert "empty mutations list and ask - never propose a plan built on a guess" in system
-    assert "proceeding with assumptions" not in system
+    assert "Before prescribing anything - workouts, a race, or a full block" in system
+    assert "list what you still need to know that would change the plan" in system
+    assert "never assume on the athlete's behalf" in system
+    assert "Assume only when the athlete explicitly tells you to" in system
     assert "state the assumption in the summary" in system
 
 

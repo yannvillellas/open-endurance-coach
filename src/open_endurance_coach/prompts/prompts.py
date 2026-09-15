@@ -50,6 +50,8 @@ RACE_EXAMPLE: dict[str, Any] = {
             "start_date_local": "2099-01-01",
             "category": "RACE_B",
             "type": "<Run | Ride | Swim | ...>",
+            "moving_time": 4500,
+            "icu_training_load": 90,
         },
         {"action": "update_race", "event_id": 0, "category": "RACE_A"},
     ],
@@ -72,13 +74,17 @@ PROPOSAL_POLICY = (
     "beyond the visible calendar window.\n"
     "Race events use category RACE_A (season objective), RACE_B (important) or RACE_C "
     "(training race). If a distance, elevation gain or expected load is missing from a "
-    "race, ask the athlete for it instead of estimating.\n"
-    "Put in needs_input only the questions whose answer materially changes the plan "
-    "(missing race duration, elevation or expected load, available training days, an "
-    "injury, immovable schedule constraints). If needs_input is not empty, return an "
-    "empty mutations list and ask - never propose a plan built on a guess. If the "
-    "athlete says they do not know or asks you to proceed, state the assumption in the "
-    "summary and then plan, leaving needs_input empty.\n"
+    "race, ask the athlete for it instead of estimating. When you create or update a "
+    "race, set moving_time and icu_training_load from the athlete's figures (or your "
+    "derived target when they told you to proceed), so no plan is built on an unknown "
+    "race load.\n"
+    "Before prescribing anything - workouts, a race, or a full block - list what you "
+    "still need to know that would change the plan "
+    "(athlete goals, available days, constraints, injury, RPE; race duration, elevation, "
+    "expected load). Put those questions in needs_input and, when it is non-empty, return "
+    "no mutations and ask - never assume on the athlete's behalf, even when the data lets "
+    "you estimate. Assume only when the athlete explicitly tells you to: then state the "
+    "assumption in the summary and plan.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder

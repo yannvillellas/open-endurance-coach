@@ -64,6 +64,8 @@ class GoalRace(BaseModel):
     days_to_race: int = Field(ge=0)
     weeks_to_race: int = Field(ge=0)
     phase: MacroPhase
+    moving_time: int | None = None
+    icu_training_load: float | None = None
 
 
 class CoachContext(BaseModel):
