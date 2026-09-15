@@ -3,11 +3,13 @@ from datetime import date
 import pytest
 
 from open_endurance_coach.config import Settings
+from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
 from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import make_intervals_client
+from .fakes import make_activity, make_intervals_client, make_wellness
 
 TODAY = date(2024, 2, 1)
 
@@ -176,3 +178,70 @@ async def test_deep_extraction_respects_budget(settings: Settings) -> None:
     )
     assert isinstance(context, CoachContext)
     assert context.estimated_tokens() <= 150
+
+
+def test_budget_keeps_recent_activities_and_drops_wellness_first() -> None:
+    recent = [
+        Activity.model_validate(make_activity("fx-near", 28)),
+        Activity.model_validate(make_activity("fx-nearer", 31)),
+    ]
+    recent.sort(key=lambda activity: activity.start_date_local, reverse=True)
+    probe = CoachContext(
+        focus="status check", today=TODAY, recent_activities=recent, max_tokens=10**9
+    )
+    context = build_within_budget(
+        focus="status check",
+        recent_activities=recent,
+        wellness=[Wellness.model_validate(make_wellness(28))],
+        upcoming_events=[],
+        sport_settings=[],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=probe.estimated_tokens(),
+        today=TODAY,
+    )
+    assert len(context.recent_activities) == 2
+    assert context.wellness == []
+
+
+def test_budget_drops_activity_detail_before_failing() -> None:
+    detail = Activity.model_validate(
+        {
+            **make_activity("fx-detail", 5),
+            "icu_intervals": [
+                {"id": index, "type": "Ride", "label": f"rep {index}", "average_watts": 300.0}
+                for index in range(40)
+            ],
+        }
+    )
+    full = CoachContext(focus="f", activity_detail=detail).estimated_tokens()
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        user_feedback=None,
+        activity_detail=detail,
+        max_tokens=full - 5,
+    )
+    assert context.activity_detail is None
+
+
+def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None:
+    activities = [
+        Activity.model_validate(make_activity("fx-old-hard", 1)),
+        Activity.model_validate(make_activity("fx-new-easy", 10)),
+    ]
+    context = build_within_budget(
+        focus="f",
+        recent_activities=activities,
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=CoachContext(focus="f", recent_activities=activities).estimated_tokens() + 1,
+        today=date(2024, 2, 1),
+    )
+    assert [activity.id for activity in context.recent_activities] == ["fx-new-easy"]

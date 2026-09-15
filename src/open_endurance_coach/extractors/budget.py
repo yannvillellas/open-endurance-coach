@@ -1,8 +1,19 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+
+RECENT_ACTIVITY_KEEP_DAYS = 7
+
+
+def _activity_droppable(activities: list[Activity], today: date | None) -> bool:
+    if not activities:
+        return False
+    if today is None:
+        return True
+    oldest = min(activity.start_date_local.date() for activity in activities)
+    return oldest < today - timedelta(days=RECENT_ACTIVITY_KEEP_DAYS)
 
 
 def build_within_budget(
@@ -35,11 +46,21 @@ def build_within_budget(
         probe = CoachContext.model_construct(**payload)
         if probe.estimated_tokens() <= max_tokens:
             return CoachContext.model_validate(payload)
-        if activities:
-            activities.pop()
+        if activities and _activity_droppable(activities, today):
+            oldest_index = min(
+                range(len(activities)),
+                key=lambda index: activities[index].start_date_local,
+            )
+            activities.pop(oldest_index)
         elif wellness_rows:
             wellness_rows.pop()
         elif events:
             events.pop()
+        elif activity_detail is not None:
+            activity_detail = None
+        elif user_feedback is not None:
+            user_feedback = None
+        elif activities:
+            activities.pop()
         else:
             raise RuntimeError(f"cannot fit focus in token budget: {max_tokens}")
