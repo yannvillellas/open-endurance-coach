@@ -303,4 +303,4 @@ def test_examples_are_placeholders_not_copyable_answers() -> None:
 def test_contract_warns_that_examples_are_shape_only() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "show the shape only" in system
-    assert "a mutation dated before today is rejected" in system
+    assert "a mutation that sets a date before today is rejected" in system
