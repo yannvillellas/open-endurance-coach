@@ -1,6 +1,8 @@
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -12,7 +14,7 @@ from open_endurance_coach.extractors.standard import StandardExtractor
 from open_endurance_coach.prompts.chat import build_chat_messages
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, WorkoutMutation
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Decision,
@@ -28,6 +30,26 @@ from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 class ReviewView:
     draft: Draft
     requested_feedback: list[str]
+
+
+def _today(context: CoachContext, settings: Settings) -> date:
+    if context.today is not None:
+        return context.today
+    return datetime.now(ZoneInfo(settings.app_timezone)).date()
+
+
+def _validate_report(payload: Any, *, today: date) -> DecisionReport:
+    report = DecisionReport.model_validate(payload)
+    past = [
+        mutation
+        for mutation in report.mutations
+        if isinstance(mutation, CreateWorkout) and mutation.start_date_local < today
+    ]
+    if past:
+        raise ValueError(
+            "create mutations must be dated on or after today; example dates are placeholders"
+        )
+    return report
 
 
 class CoachEngine:
@@ -82,9 +104,10 @@ class CoachEngine:
             return context
 
     async def _run_llm(self, context: CoachContext) -> DecisionReport:
+        today = _today(context, self._settings)
         content = await self._llm_client.complete_json(
             build_messages(context, self._settings),
-            validator=lambda payload: DecisionReport.model_validate(payload),
+            validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))
 

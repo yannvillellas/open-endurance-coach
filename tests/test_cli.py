@@ -32,7 +32,7 @@ runner = CliRunner()
 CREATE_MUTATION = {
     "action": "create",
     "name": "Tempo Session",
-    "start_date_local": "2024-02-05",
+    "start_date_local": "2099-01-01",
     "moving_time": 3600,
 }
 
@@ -223,7 +223,7 @@ def test_approve_with_mutations_file(patched: Any, tmp_path: Path) -> None:
     mutations_path = tmp_path / "mutations.json"
     mutations_path.write_text(
         json.dumps(
-            [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
+            [{"action": "create", "name": "Custom Session", "start_date_local": "2099-01-02"}]
         )
     )
     result = runner.invoke(
@@ -473,7 +473,7 @@ def test_approve_gate_override_plan_survives_discussion(patched: Any, tmp_path: 
     mutations_path = tmp_path / "mutations.json"
     mutations_path.write_text(
         json.dumps(
-            [{"action": "create", "name": "Custom Session", "start_date_local": "2024-02-06"}]
+            [{"action": "create", "name": "Custom Session", "start_date_local": "2099-01-02"}]
         )
     )
     result = runner.invoke(

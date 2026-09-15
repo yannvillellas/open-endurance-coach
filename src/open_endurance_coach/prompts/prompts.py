@@ -6,23 +6,23 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.schemas.context import CoachContext
 
 OUTPUT_EXAMPLE: dict[str, Any] = {
-    "summary": "Execution matched targets; keep load stable.",
-    "findings": ["Thursday's tempo block executed 8% above target power."],
-    "questions": ["What was your RPE on Thursday's session?"],
+    "summary": "<one-line summary of the athlete's data>",
+    "findings": ["<finding grounded in the athlete's data>"],
+    "questions": ["<question for the athlete>"],
     "mutations": [
         {
             "action": "create",
-            "name": "Tempo Session",
-            "start_date_local": "2024-01-05",
+            "name": "<workout name>",
+            "start_date_local": "2099-01-01",
             "description": (
                 "- 15m 55% Warmup\n\n3x\n- 1m 150%\n- 1m 50%\n\n- 5m 50%\n- 5m 120%\n- 15m 55%"
             ),
-            "type": "Ride",
-            "moving_time": 3600,
-            "icu_training_load": 84,
+            "type": "<Run | Ride | Swim | ...>",
+            "moving_time": 0,
+            "icu_training_load": 0,
         },
-        {"action": "update", "event_id": 10001, "moving_time": 4200},
-        {"action": "delete", "event_id": 10002},
+        {"action": "update", "event_id": 0, "moving_time": 0},
+        {"action": "delete", "event_id": 0},
     ],
 }
 
@@ -70,8 +70,11 @@ def _json_contract() -> str:
     return (
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
-        "Every start_date_local must be on or after today (the athlete's local date), "
-        "taken from the upcoming schedule - never copy the example dates.\n"
+        "The example below shows the shape only: its values are placeholders, every field "
+        "must come from the athlete data, the example workout text is the only thing to "
+        "imitate, and a mutation that sets a date before today is rejected.\n"
+        "Any start_date_local you set must be on or after today (the athlete's local "
+        "date), taken from the upcoming schedule - never copy the example dates.\n"
         "If current_proposal is present in the athlete data, revise that proposal "
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         "Copy the workout text format from the example, not the example's numbers.\n"
