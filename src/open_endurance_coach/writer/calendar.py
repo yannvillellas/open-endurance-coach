@@ -98,6 +98,11 @@ class CalendarWriter:
             mutation.name, mutation.start_date_local
         )
         if existing is not None:
+            if existing.get("category") != WORKOUT_CATEGORY:
+                raise WriterError(
+                    f"refusing to update non-WORKOUT event {existing.get('id')}"
+                    f" (category: {existing.get('category')})"
+                )
             await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
                 action="create",
@@ -167,6 +172,11 @@ class CalendarWriter:
         payload = self._race_create_payload(mutation)
         existing = await self._find_race_by_name_and_date(mutation.name, mutation.start_date_local)
         if existing is not None:
+            if existing.get("category") not in RACE_CATEGORIES:
+                raise WriterError(
+                    f"refusing to update non-RACE event {existing.get('id')}"
+                    f" (category: {existing.get('category')})"
+                )
             await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
                 action="create_race",

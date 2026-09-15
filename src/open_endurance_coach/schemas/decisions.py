@@ -52,11 +52,6 @@ class DeleteWorkout(BaseModel):
     event_id: int | str
 
 
-WorkoutMutation = Annotated[
-    CreateWorkout | UpdateWorkout | DeleteWorkout, Field(discriminator="action")
-]
-
-
 RaceCategory = Literal["RACE_A", "RACE_B", "RACE_C"]
 
 
@@ -110,8 +105,6 @@ class DeleteRace(BaseModel):
     action: Literal["delete_race"]
     event_id: int | str
 
-
-RaceMutation = Annotated[CreateRace | UpdateRace | DeleteRace, Field(discriminator="action")]
 
 Mutation = Annotated[
     CreateWorkout | UpdateWorkout | DeleteWorkout | CreateRace | UpdateRace | DeleteRace,

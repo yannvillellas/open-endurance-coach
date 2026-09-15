@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from datetime import date
 
 from pydantic import ValidationError
 from rich.prompt import Prompt
@@ -32,6 +33,7 @@ from open_endurance_coach.cli.rendering import (
 )
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
@@ -61,9 +63,20 @@ _BARE_COMMAND_RE = re.compile(
     re.IGNORECASE,
 )
 _ASSUME_RE = re.compile(
-    r"\b(proceed with assumptions|use assumptions|assume|i don'?t know|no idea|not sure yet)\b",
-    re.IGNORECASE,
+    r"\b(proceed with assumptions|use assumptions|assume it|assume so)\b", re.IGNORECASE
 )
+_NEGATED_ASSUME_RE = re.compile(r"\b(?:don'?t|do not|never)\s+assume\b", re.IGNORECASE)
+_REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
+
+
+def _assumes_answers(focus: str) -> bool:
+    return _ASSUME_RE.search(focus) is not None and _NEGATED_ASSUME_RE.search(focus) is None
+
+
+def _needs_fresh_context(focus: str, today: date | None) -> bool:
+    if detect_deep_query(focus, today=today) is not None:
+        return True
+    return _REFRESH_RE.search(focus) is not None
 
 
 def _print_needs_input(questions: list[str]) -> None:
@@ -101,9 +114,13 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
-    cached = (
-        session.context.model_copy(update={"focus": focus}) if session.context is not None else None
-    )
+    today = session.context.today if session.context is not None else None
+    if session.context is not None and _needs_fresh_context(focus, today):
+        cached = None
+    elif session.context is not None:
+        cached = session.context.model_copy(update={"focus": focus})
+    else:
+        cached = None
     async with thinking():
         draft = await engine.analyze(focus, context=cached, history=session.history)
     report = draft.report
@@ -118,7 +135,7 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
     needs_input = draft.report.needs_input
-    assumed = _ASSUME_RE.search(focus) is not None
+    assumed = _assumes_answers(focus)
     if draft.report.mutations:
         if draft.report.intent != "plan":
             console.print(
@@ -206,8 +223,8 @@ async def _handle_proposal(
         prompt_plan(snapshot)
         return state
 
-    if _QUESTION_START_RE.search(line) or (
-        _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
+    if (_QUESTION_START_RE.search(line) or _QUESTION_RE.search(line)) and not (
+        _CHANGE_RE.search(line)
     ):
         try:
             draft = engine.review(draft_id)
@@ -216,11 +233,12 @@ async def _handle_proposal(
                 context = CoachContext.model_validate(
                     {
                         **context_base.model_dump(),
+                        "focus": line,
                         "current_proposal": draft.report,
                     }
                 )
             except ValidationError:
-                context = context_base
+                context = context_base.model_copy(update={"focus": line})
             async with thinking():
                 answer = await engine.analyze(line, context=context, history=session.history)
             render_report(answer.report)
@@ -238,8 +256,16 @@ async def _handle_proposal(
 
     async def feedback(line: str, updated: Draft) -> bool | None:
         session.append(line, assistant_turn(updated.report).content)
+        if updated.report.needs_input and not _assumes_answers(line):
+            _print_needs_input(updated.report.needs_input)
+            return True
         if not updated.report.mutations:
             console.print("[yellow]No changes proposed anymore.[/yellow]")
+            return True
+        if updated.report.intent != "plan":
+            console.print(
+                "[dim]The coach did not read that as a planning request; nothing is proposed.[/dim]"
+            )
             return True
         return None
 
@@ -272,8 +298,8 @@ async def _run_command(
     if name == "forget":
         days: int | None = None
         if args:
-            if not args[0].isdigit():
-                console.print("[red]Usage: /forget [days][/red]")
+            if not args[0].isdigit() or int(args[0]) <= 0:
+                console.print("[red]Usage: /forget [days>0] (omit days to forget everything)[/red]")
                 return None
             days = int(args[0])
         removed = engine.prune_history(days)

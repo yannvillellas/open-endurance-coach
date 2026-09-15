@@ -59,8 +59,14 @@ class CoachStore:
     def prune_before(self, cutoff: datetime) -> dict[str, int]:
         stamp = cutoff.isoformat()
         statements = {
-            "feedback": "DELETE FROM feedback WHERE created_at < ?",
-            "decisions": "DELETE FROM decisions WHERE decided_at < ?",
+            "feedback": (
+                "DELETE FROM feedback WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
+            "decisions": (
+                "DELETE FROM decisions WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
             "drafts": "DELETE FROM drafts WHERE created_at < ?",
             "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
         }
@@ -69,7 +75,8 @@ class CoachStore:
             cursor = self._connection.execute(statement, (stamp,))
             counts[name] = cursor.rowcount
         self._connection.commit()
-        self._connection.execute("VACUUM")
+        if any(counts.values()):
+            self._connection.execute("VACUUM")
         return counts
 
     def close(self) -> None:

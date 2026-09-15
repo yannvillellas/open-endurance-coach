@@ -430,3 +430,19 @@ def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
     assert [row.feedback.content for row in store.recent_feedback(10)] == ["recent feedback"]
     assert store.list_decisions() == []
     assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
+
+
+def test_prune_before_removes_an_old_draft_with_recent_children(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    clock.now = NOW + timedelta(days=10)
+    store.add_feedback(draft_id, "recent feedback about an old draft")
+
+    counts = store.prune_before(NOW + timedelta(days=1))
+
+    assert counts == {"feedback": 1, "decisions": 0, "drafts": 1, "seen_activities": 0}
+    assert store.list_drafts() == []
+    assert store.recent_feedback(10) == []

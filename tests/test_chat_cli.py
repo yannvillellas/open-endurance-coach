@@ -99,9 +99,7 @@ def test_chat_provider_option_threads_to_engine(
         captured["model"] = model
         await callback(engine)
 
-    async def fake_run_chat(
-        engine: CoachEngine, settings: Settings, *, fresh: bool = False
-    ) -> None:
+    async def fake_run_chat(engine: CoachEngine, settings: Settings) -> None:
         return None
 
     monkeypatch.setattr(cli_main, "_with_engine", fake_with_engine)
@@ -407,7 +405,7 @@ def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
         input="how much did my heart rate improve on hills over the last 3 months\n",
     )
     assert result.exit_code == 0
-    assert "activity_detail" in provider.calls[0]["messages"][1].content
+    assert '"activity_detail": {' in provider.calls[0]["messages"][1].content
     assert len(store.list_drafts()) == 1
 
 
@@ -669,6 +667,89 @@ def test_chat_mid_session_planning_request_opens_a_proposal(patched: Any) -> Non
     assert result.exit_code == 0
     assert len(provider.calls) == 2
     assert "Confirm? Reply with exactly yes or no" in result.output
+
+
+def test_chat_analyze_request_refreshes_the_context(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
+    engine, _ = patched(provider)
+    builds: list[int] = []
+    original = engine.build_context
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        builds.append(1)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "build_context", spy)
+    result = runner.invoke(
+        cli_main.app, [], input="how was my week?\nand today?\nanalyze my week\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert len(builds) == 2
+
+
+def test_chat_gate_question_reaches_the_model(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Explanation.")),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
+    )
+    assert result.exit_code == 0
+    prompt = provider.calls[1]["messages"][1].content
+    assert "Current message:\nwhat would this train exactly?" in prompt
+
+
+def test_chat_question_first_change_request_revises_the_plan(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nhow about 45 minutes instead?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert len(provider.calls) == 2
+    assert [row.content for row in store.list_feedback(1)] == ["how about 45 minutes instead?"]
+
+
+def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[CREATE_MUTATION], needs_input=["What is your goal time?"])
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race - don't assume anything\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_revision_with_needs_input_keeps_the_gate_closed(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(
+                report_json("Need more.", mutations=[CREATE_MUTATION], needs_input=["Goal time?"])
+            ),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
 
 
 def test_chat_proposal_question_line_gets_an_answer_without_replan(
@@ -938,7 +1019,7 @@ def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) ->
     assert store.list_feedback(1) == []
 
 
-def test_chat_question_after_clear_mid_gate_still_answered(patched: Any) -> None:
+def test_chat_question_mid_gate_is_answered(patched: Any) -> None:
     provider = FakeLlmProvider(
         [
             completion(report_json(mutations=[CREATE_MUTATION])),
@@ -951,7 +1032,6 @@ def test_chat_question_after_clear_mid_gate_still_answered(patched: Any) -> None
     )
     assert result.exit_code == 0
     assert "Coach: Explanation." in result.output
-    assert "no cached context" not in result.output
     assert len(provider.calls) == 2
     assert store.list_feedback(1) == []
 
@@ -977,7 +1057,7 @@ def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> No
         ),
     )
     assert result.exit_code == 0
-    assert "activity_detail" in provider.calls[1]["messages"][1].content
+    assert '"activity_detail": {' in provider.calls[1]["messages"][1].content
     assert len(store.list_drafts()) == 2
 
 
@@ -1120,3 +1200,54 @@ def test_chat_analysis_with_mutations_opens_proposal(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="analyze my week\ncancel\n")
     assert result.exit_code == 0
     assert "Confirm? Reply with exactly yes or no" in result.output
+
+
+def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
+    race = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": "2099-01-27",
+        "category": "RACE_A",
+        "type": "Run",
+        "moving_time": 4200,
+        "icu_training_load": 90,
+    }
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[race]))])
+    _, store = patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="plan my race\nyes\n")
+    assert result.exit_code == 0
+    assert calendar.created[0]["category"] == "RACE_A"
+    assert calendar.created[0]["moving_time"] == 4200
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
+    race = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": "2099-01-27",
+        "category": "RACE_A",
+        "type": "Run",
+    }
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[race], needs_input=["What is your expected finish time?"])
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_forget_zero_is_rejected(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="/forget 0\n/exit\n")
+    assert result.exit_code == 0
+    assert "Usage: /forget" in result.output
+    assert provider.calls == []

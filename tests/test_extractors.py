@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -6,7 +6,7 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Wellness
 
 from .fakes import make_activity, make_intervals_client, make_summary_week, make_wellness
@@ -189,10 +189,16 @@ def test_hill_query_without_a_sport_keeps_every_type() -> None:
     assert query.activity_types == frozenset()
 
 
-def test_hill_query_naming_a_ride_keeps_the_ride_filter() -> None:
+def test_hill_query_naming_a_ride_keeps_the_cycling_family() -> None:
     query = detect_deep_query("heart rate improve on hilly bike sections")
     assert query is not None
-    assert query.activity_types == frozenset({"Ride"})
+    assert {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide"} <= query.activity_types
+
+
+def test_zwift_query_keeps_virtual_rides() -> None:
+    query = detect_deep_query("heart rate trend on my zwift rides")
+    assert query is not None
+    assert "VirtualRide" in query.activity_types
 
 
 def test_detect_deep_query_on_past_activity_reference() -> None:
@@ -325,3 +331,73 @@ def test_training_rollup_rejects_non_weekly_spacing() -> None:
 
 def test_training_rollup_returns_empty_without_rows() -> None:
     assert training_rollup([], today=TODAY) == []
+
+
+def test_budget_keeps_the_newest_rollup_weeks_when_trimming() -> None:
+    weeks = [
+        TrainingWeek(
+            week_start=date(2024, 1, 1) + timedelta(days=7 * index),
+            sessions=5,
+            time_s=14400,
+            load=320.0,
+        )
+        for index in range(6)
+    ]
+    full = CoachContext(focus="f", training_rollup=weeks).estimated_tokens()
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        training_rollup=weeks,
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=full - 40,
+    )
+    assert len(context.training_rollup) < len(weeks)
+    assert context.training_rollup[-1].week_start == weeks[-1].week_start
+    assert context.training_rollup[0].week_start == weeks[1].week_start
+
+
+def test_budget_drops_activity_detail_before_failing() -> None:
+    detail = Activity.model_validate(
+        {
+            **make_activity("fx-detail", 5),
+            "icu_intervals": [
+                {"id": index, "type": "Ride", "label": f"rep {index}", "average_watts": 300.0}
+                for index in range(40)
+            ],
+        }
+    )
+    full = CoachContext(focus="f", activity_detail=detail).estimated_tokens()
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        user_feedback=None,
+        activity_detail=detail,
+        max_tokens=full - 5,
+    )
+    assert context.activity_detail is None
+
+
+def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None:
+    activities = [
+        Activity.model_validate(make_activity("fx-new-easy", 10)),
+        Activity.model_validate(make_activity("fx-old-hard", 1)),
+    ]
+    context = build_within_budget(
+        focus="f",
+        recent_activities=activities,
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=CoachContext(focus="f", recent_activities=activities).estimated_tokens() + 1,
+        today=date(2024, 2, 1),
+    )
+    assert [activity.id for activity in context.recent_activities] == ["fx-new-easy"]

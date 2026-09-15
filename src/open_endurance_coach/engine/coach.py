@@ -16,6 +16,8 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
+    UpdateRace,
+    UpdateWorkout,
 )
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
@@ -34,17 +36,20 @@ def _today(context: CoachContext, settings: Settings) -> date:
     return datetime.now(ZoneInfo(settings.app_timezone)).date()
 
 
+def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
+    for mutation in report.mutations:
+        if not isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace)):
+            continue
+        scheduled = mutation.start_date_local
+        if scheduled is not None and scheduled < today:
+            raise ValueError(
+                "mutations must be dated on or after today; example dates are placeholders"
+            )
+
+
 def _validate_report(payload: Any, *, today: date) -> DecisionReport:
     report = DecisionReport.model_validate(payload)
-    past = [
-        mutation
-        for mutation in report.mutations
-        if isinstance(mutation, (CreateWorkout, CreateRace)) and mutation.start_date_local < today
-    ]
-    if past:
-        raise ValueError(
-            "create mutations must be dated on or after today; example dates are placeholders"
-        )
+    _reject_past_dates(report, today=today)
     return report
 
 
@@ -192,9 +197,15 @@ class CoachEngine:
         assert updated is not None
         return updated
 
+    def _assert_current_dates(self, report: DecisionReport) -> None:
+        today = datetime.now(ZoneInfo(self._settings.app_timezone)).date()
+        _reject_past_dates(report, today=today)
+
     def approve(self, draft_id: int) -> Decision:
-        if self._store.get_draft(draft_id) is None:
+        draft = self._store.get_draft(draft_id)
+        if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
+        self._assert_current_dates(draft.report)
         return self._store.approve_draft(draft_id)
 
     async def apply(self, decision_id: int | None = None) -> ApplyReport:
@@ -215,6 +226,8 @@ class CoachEngine:
             decisions = [decision]
         else:
             decisions = self._store.list_unapplied_decisions()
+        for decision in decisions:
+            self._assert_current_dates(decision.report)
         applied: list[AppliedDecision] = []
         for decision in decisions:
             outcomes = await self._writer.apply_decision(decision)

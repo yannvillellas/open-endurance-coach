@@ -17,10 +17,9 @@ from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
     DeleteRace,
-    RaceMutation,
+    Mutation,
     UpdateRace,
     UpdateWorkout,
-    WorkoutMutation,
 )
 from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
@@ -56,9 +55,9 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     from datetime import date
 
     from open_endurance_coach.cli.rendering import mutations_plan_text
-    from open_endurance_coach.schemas.decisions import CreateWorkout, WorkoutMutation
+    from open_endurance_coach.schemas.decisions import CreateWorkout
 
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(
             action="create",
             name="Aerobic Swim",
@@ -96,7 +95,7 @@ def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_mutations_plan_text_lists_each_mutation() -> None:
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)),
         UpdateWorkout(action="update", event_id=10001, moving_time=4200),
     ]
@@ -112,7 +111,7 @@ def test_mutations_plan_text_empty_mutations() -> None:
 
 
 def test_mutations_plan_text_renders_race_create_with_type_and_category() -> None:
-    mutations: list[RaceMutation] = [
+    mutations: list[Mutation] = [
         CreateRace(
             action="create_race",
             name="Autumn Trail Race",
@@ -126,8 +125,24 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
     assert "- create RACE_A Autumn Trail Race on 2026-09-27 (Run): hilly loop" in text
 
 
+def test_mutations_plan_text_restates_create_duration_and_load() -> None:
+    mutations: list[Mutation] = [
+        CreateRace(
+            action="create_race",
+            name="Autumn Trail Race",
+            start_date_local=date(2026, 9, 27),
+            category="RACE_A",
+            type="Run",
+            moving_time=4200,
+            icu_training_load=104,
+        )
+    ]
+    text = mutations_plan_text(mutations)
+    assert "(Run, moving_time=4200, load=104.0)" in text
+
+
 def test_mutations_plan_text_renders_race_update_and_delete() -> None:
-    mutations: list[RaceMutation] = [
+    mutations: list[Mutation] = [
         UpdateRace(
             action="update_race",
             event_id=20001,
@@ -173,7 +188,7 @@ def test_plan_texts_escape_llm_markup() -> None:
     from open_endurance_coach.cli.rendering import apply_plan_text, mutations_plan_text
     from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
 
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(
             action="create",
             name="Weird [bold]Session[/bold]",

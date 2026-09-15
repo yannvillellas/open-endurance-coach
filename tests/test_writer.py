@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -318,3 +319,39 @@ async def test_mixed_workout_and_race_decision_applies_in_order() -> None:
             },
         )
     ]
+
+
+class _LeakyCategoryClient(FakeCalendarClient):
+    """Returns the same event for any category filter, like a misbehaving server."""
+
+    def __init__(self, event: dict[str, Any]) -> None:
+        super().__init__()
+        self._event = event
+
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        return [dict(self._event)]
+
+
+async def test_create_workout_refuses_a_same_name_race_event() -> None:
+    event = make_event(10001, "2024-02-05", name="Tempo Session", category="RACE_B")
+    writer = CalendarWriter(_LeakyCategoryClient(event))
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+    with pytest.raises(WriterError, match="non-WORKOUT"):
+        await writer.apply_decision(make_decision(mutation))
+
+
+async def test_create_race_refuses_a_same_name_workout_event() -> None:
+    event = make_event(10001, "2024-02-05", name="Autumn Trail", category="WORKOUT")
+    writer = CalendarWriter(_LeakyCategoryClient(event))
+    mutation = CreateRace(
+        action="create_race",
+        name="Autumn Trail",
+        start_date_local=date(2024, 2, 5),
+        category="RACE_A",
+    )
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(mutation))

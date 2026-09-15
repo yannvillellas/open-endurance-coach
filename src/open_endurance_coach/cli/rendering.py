@@ -50,8 +50,15 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
                 f"  - create {mutation.category} {escape(mutation.name)}"
                 f" on {mutation.start_date_local.isoformat()}"
             )
+            details = []
             if mutation.type:
-                line += f" ({escape(mutation.type)})"
+                details.append(escape(mutation.type))
+            if mutation.moving_time is not None:
+                details.append(f"moving_time={mutation.moving_time}")
+            if mutation.icu_training_load is not None:
+                details.append(f"load={mutation.icu_training_load}")
+            if details:
+                line += f" ({', '.join(details)})"
             if mutation.description:
                 line += f": {escape(mutation.description)}"
             lines.append(line)
@@ -77,6 +84,15 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
             lines.append(f"  - delete race event {escape(str(mutation.event_id))}")
         elif isinstance(mutation, CreateWorkout):
             line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
+            details = []
+            if mutation.type:
+                details.append(escape(mutation.type))
+            if mutation.moving_time is not None:
+                details.append(f"moving_time={mutation.moving_time}")
+            if mutation.icu_training_load is not None:
+                details.append(f"load={mutation.icu_training_load}")
+            if details:
+                line += f" ({', '.join(details)})"
             if mutation.description:
                 line += f": {escape(mutation.description)}"
             lines.append(line)
