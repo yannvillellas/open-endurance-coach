@@ -156,16 +156,24 @@ def _system_message(settings: Settings) -> str:
     return "".join(parts)
 
 
-def _user_message(context: CoachContext) -> str:
-    return (
-        "Athlete data:\n"
-        f"{json.dumps(context.sections(), indent=2, ensure_ascii=False)}\n"
-        "Produce your analysis as json per the contract.\n"
-    )
+def _user_message(context: CoachContext, history: list[LlmMessage] | None = None) -> str:
+    data = context.sections()
+    focus = str(data.pop("focus", ""))
+    parts = [f"Athlete data:\n{json.dumps(data, indent=2, ensure_ascii=False)}\n"]
+    if history:
+        transcript = "\n".join(f"{turn.role}: {turn.content}" for turn in history)
+        parts.append(f"Recent conversation:\n{transcript}\n")
+    parts.append(f"Current message:\n{focus}\n")
+    parts.append("Respond per the contract.\n")
+    return "".join(parts)
 
 
-def build_messages(context: CoachContext, settings: Settings) -> list[LlmMessage]:
+def build_messages(
+    context: CoachContext,
+    settings: Settings,
+    history: list[LlmMessage] | None = None,
+) -> list[LlmMessage]:
     return [
         LlmMessage(role="system", content=_system_message(settings)),
-        LlmMessage(role="user", content=_user_message(context)),
+        LlmMessage(role="user", content=_user_message(context, history)),
     ]

@@ -32,7 +32,6 @@ from open_endurance_coach.cli.rendering import (
 )
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
-from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
@@ -48,7 +47,6 @@ HELP_TEXT = (
     "/exit, /quit           leave the chat\n"
 )
 
-_ANALYZE_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess)\b", re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
 _QUESTION_START_RE = re.compile(
     r"^\s*(?:what|why|how|which|when|who|explain|detail\w*)\b", re.IGNORECASE
@@ -85,17 +83,6 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
         print_error(exc)
 
 
-def _analysis_due(session: ChatSession, text: str) -> bool:
-    if session.context is None or session.awaiting_input:
-        return True
-    current = session.context.today if session.context is not None else None
-    if detect_deep_query(text, today=current) is not None:
-        return True
-    if _QUESTION_START_RE.search(text) is not None:
-        return False
-    return _ANALYZE_RE.search(text) is not None
-
-
 def _open_proposal(draft_id: int, mutations: list[Mutation]) -> ChatState:
     snapshot = PlanSnapshot(
         action="approve",
@@ -111,8 +98,11 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
+    cached = (
+        session.context.model_copy(update={"focus": focus}) if session.context is not None else None
+    )
     async with thinking():
-        draft = await engine.analyze(focus)
+        draft = await engine.analyze(focus, context=cached, history=session.history)
     report = draft.report
     if report.needs_input:
         blocking = {question.strip().casefold() for question in report.needs_input}
@@ -128,66 +118,55 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     assumed = _ASSUME_RE.search(focus) is not None
     if draft.report.mutations:
         if draft.report.intent != "plan":
-            session.awaiting_input = False
             console.print(
                 "[dim]The coach drafted calendar changes but did not read this as a"
                 " planning request; ask him to plan if you want a proposal.[/dim]"
             )
             return None
         if needs_input and not assumed:
-            session.awaiting_input = True
             _print_needs_input(needs_input)
             return None
-        session.awaiting_input = False
         return _open_proposal(draft.id, draft.report.mutations)
     if needs_input:
-        session.awaiting_input = True
         _print_needs_input(needs_input)
     else:
-        session.awaiting_input = False
         console.print("[dim]Answer my questions here if you like.[/dim]")
     return None
 
 
 async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
+    if session.pending_decision_id is None:
+        console.print("Nothing to apply.")
+        return
     try:
-        report = await engine.apply()
+        report = await engine.apply(session.pending_decision_id)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return
-    if not report.decisions:
-        console.print("Nothing to apply.")
-        return
+    session.pending_decision_id = None
     render_apply(report, write=True)
     session.append(text, "Applied the recorded calendar changes.")
 
 
-async def _handle_converse(
-    engine: CoachEngine, session: ChatSession, text: str
-) -> ChatState | None:
+async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> ChatState | None:
     try:
         if _RETRY_RE.match(text):
             await _retry_apply(engine, session, text)
             return None
-        if _analysis_due(session, text):
-            return await _analyze_line(engine, session, text)
-        async with thinking():
-            reply = await engine.converse(text, history=session.history, context=session.context)
-        console.print("[bold green]Coach:[/bold green]", end=" ")
-        console.print(reply, markup=False)
-        session.append(text, reply)
-        return None
+        return await _analyze_line(engine, session, text)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return None
 
 
-async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
+async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
     decision = engine.approve(draft_id)
     try:
         render_apply(await engine.apply(decision.id), write=True)
+        session.pending_decision_id = None
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
+        session.pending_decision_id = decision.id
         console.print(
             f"[yellow]Decision #{decision.id} was recorded but not applied;"
             ' say "retry" to apply it again.[/yellow]'
@@ -245,10 +224,9 @@ async def _handle_proposal(
             except ValidationError:
                 context = context_base
             async with thinking():
-                reply = await engine.converse(line, history=session.history, context=context)
-            console.print("[bold green]Coach:[/bold green]", end=" ")
-            console.print(reply, markup=False)
-            session.append(line, reply)
+                answer = await engine.analyze(line, context=context, history=session.history)
+            render_report(answer.report)
+            session.append(line, assistant_turn(answer.report).content)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -258,7 +236,7 @@ async def _handle_proposal(
         return state
 
     async def execute(current: CoachEngine) -> None:
-        await _apply_proposal(current, draft_id)
+        await _apply_proposal(current, session, draft_id)
 
     async def feedback(line: str, updated: Draft) -> bool | None:
         session.append(line, assistant_turn(updated.report).content)
@@ -296,7 +274,6 @@ async def _run_command(
     if name == "clear":
         session.history = []
         session.context = None
-        session.awaiting_input = False
         console.print("Memory cleared.")
         return None
     if name in {"provider", "model"}:
@@ -344,7 +321,7 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
                 console.print("bye")
                 return
             case Converse(text=text):
-                state = await _handle_converse(engine, session, text) or state
+                state = await _handle_text(engine, session, text) or state
             case UnknownCommand():
                 console.print("[red]Unknown command.[/red]")
                 console.print(HELP_TEXT, markup=False)

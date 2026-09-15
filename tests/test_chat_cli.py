@@ -15,7 +15,6 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
-from open_endurance_coach.tokens import CHARS_PER_TOKEN
 
 from .fakes import (
     CREATE_MUTATION,
@@ -348,7 +347,7 @@ def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> 
         [
             completion(report_json(mutations=[CREATE_MUTATION])),
             completion(report_json("No changes needed.")),
-            completion("Prose reply."),
+            completion(report_json("Prose reply.")),
         ]
     )
     patched(provider)
@@ -396,7 +395,7 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
 
 
 def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Sure.")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json("Sure."))])
     engine, store = patched(provider)
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input="how was my week?\nyes\n")
@@ -404,16 +403,6 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     assert "Coach: Sure." in result.output
     assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
     assert store.list_decisions() == []
-
-
-def test_chat_cached_turns_are_prose(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Prose reply.")])
-    _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
-    assert result.exit_code == 0
-    assert "Coach: Prose reply." in result.output
-    assert provider.calls[1]["json_mode"] is False
-    assert len(store.list_drafts()) == 1
 
 
 def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
@@ -430,7 +419,7 @@ def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
 
 
 def test_chat_seeds_history_from_feedback(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
     draft_id = store.save_draft(
         focus="f",
@@ -440,18 +429,16 @@ def test_chat_seeds_history_from_feedback(patched: Any) -> None:
     store.add_feedback(draft_id, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
-    second = provider.calls[1]["messages"]
-    assert second[2].content == "legs heavy"
-    assert "Reconsidered." in second[3].content
-    assert second[4].content == "how was my week?"
-    assert "Load stable." in second[5].content
-    assert second[6].content == "and today?"
+    prompt = provider.calls[1]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "legs heavy" in prompt
+    assert "Reconsidered." in prompt
 
 
 def test_chat_seed_passes_max_age_from_settings(
     patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json("Chat reply."))])
     engine, _ = patched(provider)
     monkeypatch.setattr(
         cli_main,
@@ -472,20 +459,17 @@ def test_chat_seed_passes_max_age_from_settings(
 
 
 def test_chat_session_memory_appends_turns(patched: Any) -> None:
-    provider = FakeLlmProvider(
-        [completion(report_json()), completion("Answer one."), completion("Answer two.")]
-    )
+    provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     patched(provider)
     result = runner.invoke(
         cli_main.app, [], input="how was my week?\nfirst question\nsecond question\n"
     )
     assert result.exit_code == 0
-    third = provider.calls[2]["messages"]
-    assert third[2].content == "how was my week?"
-    assert "Load stable." in third[3].content
-    assert third[4].content == "first question"
-    assert third[5].content == "Answer one."
-    assert third[6].content == "second question"
+    prompt = provider.calls[2]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "user: how was my week?" in prompt
+    assert "user: first question" in prompt
+    assert "second question" in prompt
 
 
 def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> None:
@@ -493,7 +477,7 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
         [
             completion(report_json(mutations=[CREATE_MUTATION])),
             completion(report_json("Reconsidered.", mutations=[CREATE_MUTATION])),
-            completion("Chat reply."),
+            completion(report_json("Going well.")),
         ]
     )
     patched(provider)
@@ -503,11 +487,10 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
         input="analyze my week\nmake it easier\nyes\nhow is it going?\n",
     )
     assert result.exit_code == 0
-    third = provider.calls[2]["messages"]
-    assert third[2].content == "analyze my week"
-    assert third[4].content == "make it easier"
-    assert "Reconsidered." in third[5].content
-    assert third[6].content == "how is it going?"
+    prompt = provider.calls[2]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "make it easier" in prompt
+    assert "Reconsidered." in prompt
 
 
 def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
@@ -546,7 +529,7 @@ def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.Mo
 
 
 def test_chat_fresh_skips_seeding(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Fresh reply.")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
     draft_id = store.save_draft(
         focus="f",
@@ -557,20 +540,11 @@ def test_chat_fresh_skips_seeding(patched: Any) -> None:
     result = runner.invoke(cli_main.app, ["--fresh"], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     assert "Remembering" not in result.output
-    second = provider.calls[1]["messages"]
-    assert [message.role for message in second] == [
-        "system",
-        "user",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert second[2].content == "how was my week?"
-    assert second[-1].content == "and today?"
+    assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
 
 
 def test_chat_shows_seeded_memory_count(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
     draft_id = store.save_draft(
         focus="f",
@@ -585,13 +559,7 @@ def test_chat_shows_seeded_memory_count(patched: Any) -> None:
 
 
 def test_chat_clear_wipes_session_memory(patched: Any) -> None:
-    provider = FakeLlmProvider(
-        [
-            completion(report_json()),
-            completion("Answer two."),
-            completion(report_json()),
-        ]
-    )
+    provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     _, store = patched(provider)
     result = runner.invoke(
         cli_main.app, [], input="how was my week?\nsecond question\n/clear\nthird\n"
@@ -599,44 +567,34 @@ def test_chat_clear_wipes_session_memory(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Memory cleared." in result.output
     assert provider.calls[2]["json_mode"] is True
-    assert len(store.list_drafts()) == 2
+    assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
+    assert len(store.list_drafts()) == 3
 
 
 def test_chat_session_trims_to_cap(
     patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    provider = FakeLlmProvider(
-        [
-            completion(report_json()),
-            completion("A" * 4000),
-            completion("B" * 4000),
-            completion("C" * 4000),
-        ]
-    )
+    provider = FakeLlmProvider([completion(report_json()) for _ in range(4)])
     patched(provider)
     monkeypatch.setattr(
         cli_main,
         "get_settings",
         lambda: settings.model_copy(update={"chat_history_max_tokens": 100}),
     )
-    result = runner.invoke(cli_main.app, [], input="how was my week?\nfirst\nsecond\nthird\n")
+    result = runner.invoke(
+        cli_main.app,
+        [],
+        input=f"how was my week?\n{'A' * 4000}\n{'B' * 4000}\n{'C' * 4000}\n",
+    )
     assert result.exit_code == 0
-    history = provider.calls[3]["messages"][2:-1]
-    assert [message.role for message in history] == ["user", "assistant"]
-    assert history[0].content == "second"
-    assert history[1].content == "B" * ((100 - 2) * CHARS_PER_TOKEN)
+    prompt = provider.calls[3]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "A" * 4000 not in prompt
 
 
 def test_chat_shows_thinking_indicator(patched: Any) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
     result = runner.invoke(cli_main.app, [], input="analyze my week\n")
-    assert result.exit_code == 0
-    assert "Thinking…" in result.output
-
-
-def test_chat_prose_turn_shows_thinking_indicator(patched: Any) -> None:
-    patched(FakeLlmProvider([completion(report_json()), completion("Prose reply.")]))
-    result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     assert "Thinking…" in result.output
 
@@ -649,11 +607,27 @@ def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     assert "/provider" in result.output
 
 
-def test_chat_proposal_question_line_gets_prose_answer_without_replan(
+def test_chat_mid_session_planning_request_opens_a_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json()), completion(report_json(mutations=[CREATE_MUTATION]))]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="how was my week?\nplan a rest run tomorrow\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert len(provider.calls) == 2
+    assert "Confirm? Reply with exactly yes or no" in result.output
+
+
+def test_chat_proposal_question_line_gets_an_answer_without_replan(
     patched: Any,
 ) -> None:
     provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Explanation.")),
+        ]
     )
     _, store = patched(provider)
     result = runner.invoke(
@@ -663,7 +637,7 @@ def test_chat_proposal_question_line_gets_prose_answer_without_replan(
     assert "Coach: Explanation." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
-    assert len(store.list_drafts()) == 1
+    assert len(store.list_drafts()) == 2
     draft = store.get_draft(1)
     assert draft is not None
     assert draft.user_feedback is None
@@ -693,7 +667,10 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
 
 def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None:
     provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Explanation.")),
+        ]
     )
     patched(provider)
     result = runner.invoke(
@@ -705,7 +682,10 @@ def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None
 
 def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> None:
     provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Explanation.")),
+        ]
     )
     patched(provider)
     result = runner.invoke(
@@ -777,7 +757,7 @@ def test_chat_proposal_question_budget_overflow_falls_back_to_context(
     from open_endurance_coach.chat.state import ChatState
     from open_endurance_coach.cli import chat as cli_chat
 
-    provider = FakeLlmProvider([completion("Explanation.")])
+    provider = FakeLlmProvider([completion(report_json("Explanation."))])
     engine, store = patched(provider)
     draft_id = store.save_draft(
         focus="tight",
@@ -798,7 +778,7 @@ def test_chat_proposal_question_budget_overflow_falls_back_to_context(
     asyncio.run(cli_chat._handle_proposal(engine, state, "what is this?", session))
     user_message = provider.calls[0]["messages"][1].content
     assert "current_proposal" not in user_message
-    assert provider.calls[0]["json_mode"] is False
+    assert provider.calls[0]["json_mode"] is True
 
 
 async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
@@ -902,49 +882,14 @@ def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     engine, _ = patched(provider)
 
-    async def broken_converse(
-        text: str, *, history: Any = None, context: Any = None, today: Any = None
-    ) -> str:
+    async def broken_analyze(focus: str, **kwargs: Any) -> Any:
         raise sqlite3.OperationalError("database is locked")
 
-    engine.converse = broken_converse
+    engine.analyze = broken_analyze
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n/help\n")
     assert result.exit_code == 0
     assert "error:" in result.output
     assert "/provider" in result.output
-
-
-def test_chat_pure_question_with_digits_stays_a_question(patched: Any) -> None:
-    provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
-    )
-    _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app, [], input="analyze my week\nhow long is the 2000m swim?\nno\n"
-    )
-    assert result.exit_code == 0
-    assert "Coach: Explanation." in result.output
-    assert len(provider.calls) == 2
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.user_feedback is None
-
-
-def test_chat_leading_question_with_change_word_stays_a_question(patched: Any) -> None:
-    provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
-    )
-    _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app, [], input="analyze my week\nwhy did you add intervals?\nno\n"
-    )
-    assert result.exit_code == 0
-    assert "Coach: Explanation." in result.output
-    assert len(provider.calls) == 2
-    assert store.list_feedback(1) == []
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.user_feedback is None
 
 
 def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
@@ -969,7 +914,10 @@ def test_chat_clear_during_confirmation_clears_without_llm(patched: Any) -> None
 
 def test_chat_question_after_clear_mid_gate_still_answered(patched: Any) -> None:
     provider = FakeLlmProvider(
-        [completion(report_json(mutations=[CREATE_MUTATION])), completion("Explanation.")]
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Explanation.")),
+        ]
     )
     _, store = patched(provider)
     result = runner.invoke(
@@ -992,27 +940,6 @@ def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> Non
     assert store.list_feedback(1) == []
 
 
-def test_chat_leading_question_on_cached_snapshot_is_prose(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Prose reply.")])
-    _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app, [], input="how was my week?\nwhat should I ride tomorrow?\n"
-    )
-    assert result.exit_code == 0
-    assert "Coach: Prose reply." in result.output
-    assert provider.calls[1]["json_mode"] is False
-    assert len(store.list_drafts()) == 1
-
-
-def test_chat_followup_question_reuses_the_analysis(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Chat reply.")])
-    _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="how was my week?\nwhat about the weekend?\n")
-    assert result.exit_code == 0
-    assert provider.calls[1]["json_mode"] is False
-    assert len(store.list_drafts()) == 1
-
-
 def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
@@ -1026,18 +953,6 @@ def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> No
     assert result.exit_code == 0
     assert "activity_detail" in provider.calls[1]["messages"][1].content
     assert len(store.list_drafts()) == 2
-
-
-def test_chat_leading_question_with_analysis_keyword_is_prose(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion("Prose reply.")])
-    _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app, [], input="how was my week?\nwhat does my plan look like?\n"
-    )
-    assert result.exit_code == 0
-    assert "Coach: Prose reply." in result.output
-    assert provider.calls[1]["json_mode"] is False
-    assert len(store.list_drafts()) == 1
 
 
 def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
