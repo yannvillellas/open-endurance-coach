@@ -260,11 +260,8 @@ async def test_surface_unseen_falls_back_when_listing_overflows_budget(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    context = CoachContext(
-        focus="status check",
-        recent_activities=[make_activity_model("fx-a", 20)],
-        max_tokens=75,
-    )
+    probe = CoachContext(focus="status check", recent_activities=[make_activity_model("fx-a", 20)])
+    context = probe.model_copy(update={"max_tokens": probe.estimated_tokens()})
     engine = make_engine(settings, store, FakeLlmProvider())
     surfaced = engine._surface_unseen(context)
     assert surfaced.focus == "status check"
