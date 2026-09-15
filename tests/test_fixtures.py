@@ -125,10 +125,10 @@ def test_anonymizer_rewrites_identity_keys_regardless_of_casing() -> None:
         {
             "payload": [
                 {
-                    "athlete_name": "yann_vlls",
+                    "athlete_name": "fixture_handle",
                     "display_name": "Someone Real",
-                    "first_name": "Yann",
-                    "username": "yann_vlls",
+                    "first_name": "Fixture",
+                    "username": "fixture_handle",
                     "external_id": "keep-as-id",
                 }
             ]
