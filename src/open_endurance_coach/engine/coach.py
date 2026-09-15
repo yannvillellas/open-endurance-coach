@@ -201,6 +201,12 @@ class CoachEngine:
         ]
         if missing:
             lines.append("Fueling: carb intake and hydration for the sessions above?")
+        if context.goal_races:
+            race = context.goal_races[0]
+            lines.append(
+                f"Goal race {race.name} in {race.days_to_race} days: what is your target"
+                " (finish or a time), and are there schedule constraints in the coming weeks?"
+            )
         return lines
 
     async def submit_feedback(self, draft_id: int, feedback: str) -> Draft:

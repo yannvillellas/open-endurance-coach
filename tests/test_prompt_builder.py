@@ -6,13 +6,16 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.prompts.prompts import (
     DISCUSSION_EXAMPLE,
     OUTPUT_EXAMPLE,
+    RACE_EXAMPLE,
     build_messages,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
     DeleteWorkout,
+    UpdateRace,
     UpdateWorkout,
 )
 from open_endurance_coach.tokens import estimate_text_tokens
@@ -59,6 +62,24 @@ def test_output_example_validates_against_the_strict_contract() -> None:
     assert isinstance(report.mutations[0], CreateWorkout)
     assert isinstance(report.mutations[1], UpdateWorkout)
     assert isinstance(report.mutations[2], DeleteWorkout)
+
+
+def test_race_example_validates_and_is_placeholder_only() -> None:
+    report = DecisionReport.model_validate(RACE_EXAMPLE)
+    assert report.intent == "plan"
+    assert isinstance(report.mutations[0], CreateRace)
+    assert isinstance(report.mutations[1], UpdateRace)
+    assert RACE_EXAMPLE["mutations"][0]["category"] == "RACE_B"
+    assert "<race name>" in json.dumps(RACE_EXAMPLE)
+
+
+def test_contract_teaches_backwards_planning_and_asking() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "plan backwards from the nearest race" in system
+    assert "Base, Build, Peak, Taper" in system
+    assert "next 7-14 days only" in system
+    assert "RACE_A (season objective), RACE_B (important) or RACE_C" in system
+    assert "ask the athlete for it instead of estimating" in system
 
 
 def test_output_example_description_is_documented_workout_text() -> None:
@@ -242,7 +263,7 @@ def test_examples_declare_intent() -> None:
 
 
 def test_examples_are_placeholders_not_copyable_answers() -> None:
-    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE):
+    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE, RACE_EXAMPLE):
         rendered = json.dumps(example)
         assert "2024-" not in rendered
         assert "Tempo Session" not in rendered

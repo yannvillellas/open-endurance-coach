@@ -35,6 +35,23 @@ DISCUSSION_EXAMPLE: dict[str, Any] = {
     "mutations": [],
 }
 
+RACE_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
+    "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
+    "findings": ["<what the weekly rollup and readiness say about the current phase>"],
+    "questions": ["<missing race detail, e.g. expected duration and climbing>"],
+    "mutations": [
+        {
+            "action": "create_race",
+            "name": "<race name>",
+            "start_date_local": "2099-01-01",
+            "category": "RACE_B",
+            "type": "<Run | Ride | Swim | ...>",
+        },
+        {"action": "update_race", "event_id": 0, "category": "RACE_A"},
+    ],
+}
+
 PROPOSAL_POLICY = (
     'Classify the athlete\'s request in intent: "chat" for questions, advice, '
     'explanation or discussion; "analysis" for a review of executed training; '
@@ -46,6 +63,13 @@ PROPOSAL_POLICY = (
     "The examples below show the shape only. Their values are placeholders: every "
     "field must come from the athlete data, the example workout text is the only "
     "thing to imitate, and a mutation dated before today is rejected.\n"
+    "When goal_races is present, plan backwards from the nearest race: state the macro "
+    "phases (Base, Build, Peak, Taper) with weekly load targets in the summary, then "
+    "propose concrete workouts for the next 7-14 days only - do not schedule sessions "
+    "beyond the visible calendar window.\n"
+    "Race events use category RACE_A (season objective), RACE_B (important) or RACE_C "
+    "(training race). If a distance, elevation gain or expected load is missing from a "
+    "race, ask the athlete for it instead of estimating.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
@@ -103,6 +127,8 @@ def _json_contract() -> str:
         f"{json.dumps(DISCUSSION_EXAMPLE, indent=2)}\n"
         "Example json (the athlete asked for a plan or calendar change):\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
+        "Example json (a goal race is in the athlete data - plan backwards from it):\n"
+        f"{json.dumps(RACE_EXAMPLE, indent=2)}\n"
     )
 
 

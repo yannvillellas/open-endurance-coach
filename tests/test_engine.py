@@ -622,3 +622,24 @@ async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
     with pytest.raises(LlmError, match="validation failed"):
         await engine.analyze("plan my week", today=TODAY)
+
+
+def test_solicitations_ask_for_race_intent_when_a_goal_race_exists() -> None:
+    context = CoachContext(
+        focus="plan my race",
+        goal_races=[
+            {
+                "event_id": 1,
+                "name": "Trail Race 11 km",
+                "date": "2026-09-27",
+                "category": "RACE_B",
+                "type": "Run",
+                "days_to_race": 13,
+                "weeks_to_race": 2,
+                "phase": "Taper",
+            }
+        ],
+    )
+    solicitations = CoachEngine._solicitations(context)
+    assert any("Trail Race 11 km in 13 days" in line for line in solicitations)
+    assert any("schedule constraints" in line for line in solicitations)
