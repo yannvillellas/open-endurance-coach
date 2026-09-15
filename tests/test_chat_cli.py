@@ -1052,6 +1052,45 @@ def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
     assert len(provider.calls) == 1
 
 
+def test_chat_material_questions_block_the_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    mutations=[CREATE_MUTATION],
+                    needs_input=["What is your expected finish time for the race?"],
+                )
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "expected finish time" in result.output
+    assert "proceed with assumptions" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_proceed_with_assumptions_opens_the_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    mutations=[CREATE_MUTATION],
+                    needs_input=["What is your expected finish time for the race?"],
+                )
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="plan my race, proceed with assumptions\ncancel\n"
+    )
+    assert result.exit_code == 0
+    assert "Confirm? Reply with exactly yes or no" in result.output
+
+
 def test_chat_planning_phrase_opens_proposal(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     patched(provider)

@@ -9,7 +9,8 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<one-line summary of the athlete's data>",
     "findings": ["<finding grounded in the athlete's data>"],
-    "questions": ["<question for the athlete>"],
+    "questions": ["<optional question for the athlete>"],
+    "needs_input": [],
     "mutations": [
         {
             "action": "create",
@@ -32,6 +33,7 @@ DISCUSSION_EXAMPLE: dict[str, Any] = {
     "summary": "<direct answer to the athlete's question>",
     "findings": ["<supporting observation from the athlete's data>"],
     "questions": ["<follow-up question for the athlete>"],
+    "needs_input": [],
     "mutations": [],
 }
 
@@ -39,7 +41,8 @@ RACE_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
     "findings": ["<what the weekly rollup and readiness say about the current phase>"],
-    "questions": ["<missing race detail, e.g. expected duration and climbing>"],
+    "questions": ["<optional question for the athlete>"],
+    "needs_input": [],
     "mutations": [
         {
             "action": "create_race",
@@ -70,6 +73,12 @@ PROPOSAL_POLICY = (
     "Race events use category RACE_A (season objective), RACE_B (important) or RACE_C "
     "(training race). If a distance, elevation gain or expected load is missing from a "
     "race, ask the athlete for it instead of estimating.\n"
+    "Put in needs_input only the questions whose answer materially changes the plan "
+    "(missing race duration, elevation or expected load, available training days, an "
+    "injury, immovable schedule constraints). If needs_input is not empty, return an "
+    "empty mutations list and ask - never propose a plan built on a guess. If the "
+    "athlete says they do not know or asks you to proceed, state the assumption in the "
+    "summary and then plan, leaving needs_input empty.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder

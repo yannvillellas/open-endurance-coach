@@ -58,6 +58,17 @@ _CHANGE_RE = re.compile(
     re.IGNORECASE,
 )
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
+_ASSUME_RE = re.compile(
+    r"\b(proceed with assumptions|use assumptions|assume|i don'?t know|no idea|not sure yet)\b",
+    re.IGNORECASE,
+)
+
+
+def _print_needs_input(questions: list[str]) -> None:
+    console.print("[yellow]The coach needs answers before proposing calendar changes:[/yellow]")
+    for question in questions:
+        console.print(f"  ? {escape(question)}")
+    console.print('[dim]Answer here, or say "proceed with assumptions" to plan anyway.[/dim]')
 
 
 def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None:
@@ -110,6 +121,9 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
                 "[dim]The coach drafted calendar changes but did not read this as a"
                 " planning request; ask him to plan if you want a proposal.[/dim]"
             )
+            return None
+        if draft.report.needs_input and _ASSUME_RE.search(focus) is None:
+            _print_needs_input(draft.report.needs_input)
             return None
         return _open_proposal(draft.id, draft.report.mutations)
     console.print("[dim]Answer my questions here if you like.[/dim]")

@@ -126,4 +126,5 @@ class DecisionReport(BaseModel):
     summary: str = Field(min_length=1)
     findings: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
+    needs_input: list[str] = Field(default_factory=list)
     mutations: list[Mutation] = Field(default_factory=list)

@@ -73,6 +73,20 @@ def test_race_example_validates_and_is_placeholder_only() -> None:
     assert "<race name>" in json.dumps(RACE_EXAMPLE)
 
 
+def test_contract_blocks_proposals_on_material_questions() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Put in needs_input only the questions whose answer materially changes" in system
+    assert "empty mutations list and ask - never propose a plan built on a guess" in system
+    assert "proceeding with assumptions" not in system
+    assert "state the assumption in the summary" in system
+
+
+def test_examples_declare_needs_input() -> None:
+    assert OUTPUT_EXAMPLE["needs_input"] == []
+    assert DISCUSSION_EXAMPLE["needs_input"] == []
+    assert RACE_EXAMPLE["needs_input"] == []
+
+
 def test_contract_teaches_backwards_planning_and_asking() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "plan backwards from the nearest race" in system
