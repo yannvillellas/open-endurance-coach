@@ -3,7 +3,6 @@ import pytest
 from open_endurance_coach.chat.gate import (
     Cancelled,
     Declined,
-    Discuss,
     Feedback,
     Ignored,
     PlanSnapshot,
@@ -11,11 +10,7 @@ from open_endurance_coach.chat.gate import (
     handle,
 )
 
-APPROVE = PlanSnapshot(
-    action="approve", plan_text="Draft #3 - approve these mutations: ...", draft_id=3
-)
-APPLY = PlanSnapshot(action="apply", plan_text="Decision #1 - write: ...", draft_id=3)
-REJECT = PlanSnapshot(action="reject", plan_text="Draft #3 - reject: ...", draft_id=3)
+APPROVE = PlanSnapshot(plan_text="Draft #3 - approve these mutations: ...", draft_id=3)
 
 
 @pytest.mark.parametrize("line", ["yes", "YES", " Yes ", "\tyes\n"])
@@ -48,16 +43,7 @@ def test_any_other_input_on_approve_falls_back_to_feedback() -> None:
 
 
 def test_any_other_input_on_reject_falls_back_to_feedback() -> None:
-    assert handle("Hold on", REJECT) == Feedback("Hold on")
-
-
-def test_any_other_input_on_apply_falls_back_to_discussion() -> None:
-    assert handle("Wait, what does update mean?", APPLY) == Discuss("Wait, what does update mean?")
-
-
-def test_missing_draft_id_falls_back_to_discussion() -> None:
-    snapshot = PlanSnapshot(action="approve", plan_text="plan", draft_id=None)
-    assert handle("explain first", snapshot) == Discuss("explain first")
+    assert handle("Hold on", APPROVE) == Feedback("Hold on")
 
 
 def test_fallback_preserves_interior_whitespace_and_strips_ends() -> None:

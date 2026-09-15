@@ -30,27 +30,25 @@ class CalendarWriter:
     def __init__(self, client: IntervalsCalendarClient) -> None:
         self._client = client
 
-    async def apply_decision(
-        self, decision: Decision, *, dry_run: bool = False
-    ) -> list[MutationOutcome]:
+    async def apply_decision(self, decision: Decision) -> list[MutationOutcome]:
         outcomes = []
         for mutation in decision.report.mutations:
-            outcomes.append(await self._apply_mutation(mutation, dry_run=dry_run))
+            outcomes.append(await self._apply_mutation(mutation))
         return outcomes
 
-    async def _apply_mutation(self, mutation: Mutation, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_mutation(self, mutation: Mutation) -> MutationOutcome:
         if isinstance(mutation, CreateWorkout):
-            return await self._apply_create(mutation, dry_run=dry_run)
+            return await self._apply_create(mutation)
         if isinstance(mutation, UpdateWorkout):
-            return await self._apply_update(mutation, dry_run=dry_run)
+            return await self._apply_update(mutation)
         if isinstance(mutation, DeleteWorkout):
-            return await self._apply_delete(mutation, dry_run=dry_run)
+            return await self._apply_delete(mutation)
         if isinstance(mutation, CreateRace):
-            return await self._apply_create_race(mutation, dry_run=dry_run)
+            return await self._apply_create_race(mutation)
         if isinstance(mutation, UpdateRace):
-            return await self._apply_update_race(mutation, dry_run=dry_run)
+            return await self._apply_update_race(mutation)
         if isinstance(mutation, DeleteRace):
-            return await self._apply_delete_race(mutation, dry_run=dry_run)
+            return await self._apply_delete_race(mutation)
         assert_never(mutation)
 
     @staticmethod
@@ -94,26 +92,23 @@ class CalendarWriter:
                 return row
         return None
 
-    async def _apply_create(self, mutation: CreateWorkout, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_create(self, mutation: CreateWorkout) -> MutationOutcome:
         payload = self._create_payload(mutation)
         existing = await self._find_workout_by_name_and_date(
             mutation.name, mutation.start_date_local
         )
         if existing is not None:
-            if not dry_run:
-                await self._client.update_event(str(existing["id"]), payload)
+            await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
                 action="create",
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
             )
-        if not dry_run:
-            created = await self._client.create_event(payload)
-            return MutationOutcome(
-                action="create", target="created", event_id=created.get("id"), name=mutation.name
-            )
-        return MutationOutcome(action="create", target="created", name=mutation.name)
+        created = await self._client.create_event(payload)
+        return MutationOutcome(
+            action="create", target="created", event_id=created.get("id"), name=mutation.name
+        )
 
     async def _fetch_event(
         self, event_id: int | str, *, allowed: tuple[str, ...], label: str
@@ -137,7 +132,7 @@ class CalendarWriter:
     async def _fetch_race(self, event_id: int | str) -> dict[str, Any] | None:
         return await self._fetch_event(event_id, allowed=RACE_CATEGORIES, label="RACE")
 
-    async def _apply_update(self, mutation: UpdateWorkout, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_update(self, mutation: UpdateWorkout) -> MutationOutcome:
         event = await self._fetch_workout(mutation.event_id)
         if event is None:
             raise WriterError(f"update target event not found: {mutation.event_id}")
@@ -147,16 +142,14 @@ class CalendarWriter:
         if mutation.start_date_local is not None:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         self._add_detail_fields(payload, mutation)
-        if not dry_run:
-            await self._client.update_event(str(mutation.event_id), payload)
+        await self._client.update_event(str(mutation.event_id), payload)
         return MutationOutcome(action="update", target="updated", event_id=mutation.event_id)
 
-    async def _apply_delete(self, mutation: DeleteWorkout, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_delete(self, mutation: DeleteWorkout) -> MutationOutcome:
         event = await self._fetch_workout(mutation.event_id)
         if event is None:
             return MutationOutcome(action="delete", target="skipped", event_id=mutation.event_id)
-        if not dry_run:
-            await self._client.delete_event(str(mutation.event_id))
+        await self._client.delete_event(str(mutation.event_id))
         return MutationOutcome(action="delete", target="deleted", event_id=mutation.event_id)
 
     async def _find_race_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
@@ -170,29 +163,26 @@ class CalendarWriter:
                 return row
         return None
 
-    async def _apply_create_race(self, mutation: CreateRace, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_create_race(self, mutation: CreateRace) -> MutationOutcome:
         payload = self._race_create_payload(mutation)
         existing = await self._find_race_by_name_and_date(mutation.name, mutation.start_date_local)
         if existing is not None:
-            if not dry_run:
-                await self._client.update_event(str(existing["id"]), payload)
+            await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
                 action="create_race",
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
             )
-        if not dry_run:
-            created = await self._client.create_event(payload)
-            return MutationOutcome(
-                action="create_race",
-                target="created",
-                event_id=created.get("id"),
-                name=mutation.name,
-            )
-        return MutationOutcome(action="create_race", target="created", name=mutation.name)
+        created = await self._client.create_event(payload)
+        return MutationOutcome(
+            action="create_race",
+            target="created",
+            event_id=created.get("id"),
+            name=mutation.name,
+        )
 
-    async def _apply_update_race(self, mutation: UpdateRace, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_update_race(self, mutation: UpdateRace) -> MutationOutcome:
         event = await self._fetch_race(mutation.event_id)
         if event is None:
             raise WriterError(f"update target event not found: {mutation.event_id}")
@@ -204,16 +194,14 @@ class CalendarWriter:
         if mutation.category is not None:
             payload["category"] = mutation.category
         self._add_detail_fields(payload, mutation)
-        if not dry_run:
-            await self._client.update_event(str(mutation.event_id), payload)
+        await self._client.update_event(str(mutation.event_id), payload)
         return MutationOutcome(action="update_race", target="updated", event_id=mutation.event_id)
 
-    async def _apply_delete_race(self, mutation: DeleteRace, *, dry_run: bool) -> MutationOutcome:
+    async def _apply_delete_race(self, mutation: DeleteRace) -> MutationOutcome:
         event = await self._fetch_race(mutation.event_id)
         if event is None:
             return MutationOutcome(
                 action="delete_race", target="skipped", event_id=mutation.event_id
             )
-        if not dry_run:
-            await self._client.delete_event(str(mutation.event_id))
+        await self._client.delete_event(str(mutation.event_id))
         return MutationOutcome(action="delete_race", target="deleted", event_id=mutation.event_id)

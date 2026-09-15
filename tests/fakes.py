@@ -187,12 +187,10 @@ class FakeCalendarClient:
         self.created: list[dict[str, Any]] = []
         self.updated: list[tuple[str, dict[str, Any]]] = []
         self.deleted: list[str] = []
-        self.list_calls: list[tuple[str, str, str | None]] = []
 
     async def list_events(
         self, oldest: str, newest: str, category: str | None = None
     ) -> list[dict[str, Any]]:
-        self.list_calls.append((oldest, newest, category))
         rows = []
         allowed = {part.strip() for part in category.split(",")} if category else None
         for event in self.events:
@@ -292,14 +290,6 @@ CREATE_MUTATION = {
     "name": "Tempo Session",
     "start_date_local": "2099-01-01",
     "moving_time": 3600,
-}
-
-CREATE_RACE_MUTATION = {
-    "action": "create_race",
-    "name": "Autumn Trail Race",
-    "start_date_local": "2099-01-27",
-    "category": "RACE_A",
-    "type": "Run",
 }
 
 

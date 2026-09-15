@@ -73,23 +73,7 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     assert "- create Bare Session on 2026-08-24" in text
 
 
-def test_render_apply_dry_run_banner_and_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
-    report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
-                outcomes=[MutationOutcome(action="create", target="created", name="Tempo Session")],
-            )
-        ]
-    )
-    render_apply(report, write=False)
-    out = capsys.readouterr().out
-    assert "DRY RUN - no changes written" in out
-    assert "Decision #1:" in out
-    assert "- create -> created: Tempo Session" in out
-
-
-def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
+def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
         decisions=[
             AppliedDecision(
@@ -98,7 +82,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
             )
         ]
     )
-    render_apply(report, write=True)
+    render_apply(report)
     out = capsys.readouterr().out
     assert "Applied:" in out
     assert "DRY RUN" not in out
@@ -106,7 +90,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
-    render_apply(ApplyReport(), write=False)
+    render_apply(ApplyReport())
     out = capsys.readouterr().out
     assert "No unapplied decisions." in out
 

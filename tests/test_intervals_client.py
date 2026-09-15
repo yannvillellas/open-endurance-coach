@@ -46,12 +46,11 @@ async def test_basic_auth_and_browser_user_agent(settings: Settings) -> None:
 
 async def test_list_activities_url_and_params(settings: Settings) -> None:
     client, captured = make_client(settings, [httpx.Response(200, json=[{"id": "i1"}])])
-    result = await client.list_activities("2026-08-01", "2026-08-17", fields=["id", "type"])
+    result = await client.list_activities("2026-08-01", "2026-08-17")
     request = captured[0]
     assert str(request.url).startswith("https://intervals.icu/api/v1/athlete/12345/activities")
     assert request.url.params["oldest"] == "2026-08-01"
     assert request.url.params["newest"] == "2026-08-17"
-    assert request.url.params["fields"] == "id,type"
     assert result == [{"id": "i1"}]
     await client.aclose()
 
@@ -136,7 +135,7 @@ async def test_5xx_retry_then_success(settings: Settings) -> None:
         [httpx.Response(500), httpx.Response(200, json={})],
         sleep=sleep,
     )
-    await client.get_athlete()
+    await client.list_activities("2026-08-01", "2026-08-17")
     assert len(captured) == 2
     assert sleep.calls == [0.0]
     await client.aclose()

@@ -89,7 +89,6 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
 
 def _open_proposal(draft_id: int, mutations: list[Mutation]) -> ChatState:
     snapshot = PlanSnapshot(
-        action="approve",
         plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
         draft_id=draft_id,
     )
@@ -148,7 +147,7 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
         print_error(exc)
         return
     session.pending_decision_id = None
-    render_apply(report, write=True)
+    render_apply(report)
     session.append(text, "Applied the recorded calendar changes.")
 
 
@@ -166,7 +165,7 @@ async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> 
 async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
     decision = engine.approve(draft_id)
     try:
-        render_apply(await engine.apply(decision.id), write=True)
+        render_apply(await engine.apply(decision.id))
         session.pending_decision_id = None
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
@@ -188,9 +187,6 @@ async def _handle_proposal(
     assert state.plan is not None
     snapshot = state.plan
     draft_id = snapshot.draft_id
-    if draft_id is None:
-        console.print("[red]error:[/red] confirmation state has no draft")
-        return ChatState()
     if is_exit_command(line):
         console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
         return ExitChat()
@@ -214,13 +210,13 @@ async def _handle_proposal(
         _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
     ):
         try:
-            view = engine.review(draft_id)
-            context_base = session.context if session.context is not None else view.draft.context
+            draft = engine.review(draft_id)
+            context_base = session.context if session.context is not None else draft.context
             try:
                 context = CoachContext.model_validate(
                     {
                         **context_base.model_dump(),
-                        "current_proposal": view.draft.report,
+                        "current_proposal": draft.report,
                     }
                 )
             except ValidationError:

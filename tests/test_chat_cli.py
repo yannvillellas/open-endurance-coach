@@ -64,26 +64,19 @@ def make_fake_prompt(monkeypatch: pytest.MonkeyPatch, script: list[object]) -> N
 
 
 def _spy_writes(engine: CoachEngine) -> dict[str, int]:
-    calls = {"approve": 0, "reject": 0, "apply_write": 0}
+    calls = {"approve": 0, "apply_write": 0}
     original_approve = engine.approve
-    original_reject = engine.reject
     original_apply = engine.apply
 
-    def approve(draft_id: int, *, mutations: Any = None) -> Any:
+    def approve(draft_id: int) -> Any:
         calls["approve"] += 1
-        return original_approve(draft_id, mutations=mutations)
+        return original_approve(draft_id)
 
-    def reject(draft_id: int) -> None:
-        calls["reject"] += 1
-        original_reject(draft_id)
-
-    async def apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
-        if not dry_run:
-            calls["apply_write"] += 1
-        return await original_apply(decision_id, dry_run=dry_run)
+    async def apply(decision_id: int | None = None) -> Any:
+        calls["apply_write"] += 1
+        return await original_apply(decision_id)
 
     engine.approve = approve  # type: ignore[method-assign]
-    engine.reject = reject  # type: ignore[method-assign]
     engine.apply = apply  # type: ignore[method-assign]
     return calls
 
@@ -304,7 +297,7 @@ def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n")
     assert result.exit_code == 0
     assert "Apply this to Intervals.icu" in result.output
-    assert calls == {"approve": 1, "reject": 0, "apply_write": 1}
+    assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
     assert decision_of(store, 1).applied_at is not None
 
@@ -316,7 +309,7 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input="analyze my week\nno\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert store.list_decisions() == []
     assert store.get_draft(1).status is DraftStatus.PENDING
@@ -335,7 +328,7 @@ def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\nyes\n")
     assert result.exit_code == 0
     assert result.output.count("Apply this to Intervals.icu") == 2
-    assert calls == {"approve": 1, "reject": 0, "apply_write": 1}
+    assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
     draft = store.get_draft(1)
     assert draft is not None
@@ -371,7 +364,7 @@ def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input="analyze my week\nyes please\ncancel\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert [row.content for row in store.list_feedback(1)] == ["yes please"]
 
@@ -389,7 +382,7 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\ncancel\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
     assert store.get_draft(1).status is DraftStatus.PENDING
 
@@ -401,7 +394,7 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="how was my week?\nyes\n")
     assert result.exit_code == 0
     assert "Coach: Sure." in result.output
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
 
 
@@ -826,7 +819,6 @@ def test_chat_proposal_question_budget_overflow_falls_back_to_context(
     session.context = CoachContext(focus="tight", today=TODAY, max_tokens=25)
     state = ChatState(
         plan=PlanSnapshot(
-            action="approve",
             plan_text="Apply this to Intervals.icu:\nProposed changes:\n  - create Tempo Session",
             draft_id=draft_id,
         )
@@ -851,7 +843,7 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     draft_id = store.save_draft(
         focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
     )
-    state = ChatState(plan=PlanSnapshot(action="approve", plan_text="plan", draft_id=draft_id))
+    state = ChatState(plan=PlanSnapshot(plan_text="plan", draft_id=draft_id))
     session = ChatSession()
     session.context = CoachContext(focus="f", max_tokens=100)
     result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
@@ -863,37 +855,13 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     assert draft.context.current_proposal is None
 
 
-def test_chat_proposal_without_draft_errors_gracefully(patched: Any) -> None:
-    from open_endurance_coach.chat.gate import PlanSnapshot
-    from open_endurance_coach.chat.history import ChatSession
-    from open_endurance_coach.chat.state import ChatState
-    from open_endurance_coach.cli import chat as cli_chat
-
-    provider = FakeLlmProvider()
-    engine, _ = patched(provider)
-    state = ChatState(
-        plan=PlanSnapshot(
-            action="approve",
-            plan_text="Apply this to Intervals.icu:",
-            draft_id=None,
-        )
-    )
-    import asyncio
-
-    result = asyncio.run(cli_chat._handle_proposal(engine, state, "make it easier", ChatSession()))
-    assert isinstance(result, ChatState)
-    assert result.plan is None
-
-
 def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
 
-    async def broken_apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
-        if not dry_run:
-            raise RuntimeError("writer exploded")
-        return await engine.apply(decision_id, dry_run=True)
+    async def broken_apply(decision_id: int | None = None) -> Any:
+        raise RuntimeError("writer exploded")
 
     import asyncio
 
@@ -919,11 +887,11 @@ def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
     original = engine.apply
     attempts: list[int] = []
 
-    async def flaky_apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
+    async def flaky_apply(decision_id: int | None = None) -> Any:
         attempts.append(1)
-        if len(attempts) == 1 and not dry_run:
+        if len(attempts) == 1:
             raise RuntimeError("writer exploded")
-        return await original(decision_id, dry_run=dry_run)
+        return await original(decision_id)
 
     engine.apply = flaky_apply
     result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\nretry\n")

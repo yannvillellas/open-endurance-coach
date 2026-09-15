@@ -183,21 +183,6 @@ async def test_mixed_decision_applies_in_order() -> None:
     assert client.deleted == ["10001"]
 
 
-async def test_dry_run_makes_no_writes() -> None:
-    client = FakeCalendarClient([make_event(10001, "2024-02-05")])
-    writer = CalendarWriter(client)
-    decision = make_decision(
-        CreateWorkout(action="create", name="New Session", start_date_local=date(2024, 2, 7)),
-        UpdateWorkout(action="update", event_id=10001, moving_time=4200),
-        DeleteWorkout(action="delete", event_id=10001),
-    )
-    outcomes = await writer.apply_decision(decision, dry_run=True)
-    assert [outcome.target for outcome in outcomes] == ["created", "updated", "deleted"]
-    assert client.created == []
-    assert client.updated == []
-    assert client.deleted == []
-
-
 def make_race_create(**overrides: object) -> CreateRace:
     payload: dict[str, object] = {
         "action": "create_race",
@@ -309,21 +294,6 @@ async def test_delete_race_missing_event_is_skipped() -> None:
     outcomes = await writer.apply_decision(make_decision(mutation))
     assert client.deleted == []
     assert outcomes[0].target == "skipped"
-
-
-async def test_race_dry_run_makes_no_writes() -> None:
-    client = FakeCalendarClient([make_event(10001, "2026-09-27", category="RACE_A")])
-    writer = CalendarWriter(client)
-    decision = make_decision(
-        make_race_create(),
-        UpdateRace(action="update_race", event_id=10001, moving_time=7200),
-        DeleteRace(action="delete_race", event_id=10001),
-    )
-    outcomes = await writer.apply_decision(decision, dry_run=True)
-    assert [outcome.target for outcome in outcomes] == ["created", "updated", "deleted"]
-    assert client.created == []
-    assert client.updated == []
-    assert client.deleted == []
 
 
 async def test_mixed_workout_and_race_decision_applies_in_order() -> None:

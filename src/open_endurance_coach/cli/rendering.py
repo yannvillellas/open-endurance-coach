@@ -116,12 +116,9 @@ def apply_plan_text(report: ApplyReport) -> str:
     return "\n".join(lines)
 
 
-def render_apply(report: ApplyReport, *, write: bool) -> None:
+def render_apply(report: ApplyReport) -> None:
     if not report.decisions:
         console.print("No unapplied decisions.")
         return
-    if write:
-        console.print("[green]Applied:[/green]")
-    else:
-        console.print("[yellow]DRY RUN - no changes written[/yellow]")
+    console.print("[green]Applied:[/green]")
     console.print(apply_plan_text(report))

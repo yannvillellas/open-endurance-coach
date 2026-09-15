@@ -225,30 +225,6 @@ def test_approve_twice_raises(tmp_path: Path) -> None:
     assert len(store.list_decisions()) == 1
 
 
-def test_reject_draft_flips_status(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.reject_draft(draft_id)
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.REJECTED
-    assert store.list_decisions() == []
-
-
-def test_reject_missing_draft_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.reject_draft(404)
-
-
-def test_reject_approved_draft_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.approve_draft(draft_id)
-    with pytest.raises(ValueError, match="pending"):
-        store.reject_draft(draft_id)
-
-
 def test_store_persists_across_reopen(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     from tests.fakes import FakeClock

@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     # it must match the athlete's Intervals.icu account timezone.
     app_timezone: str = "Europe/Paris"
     database_path: str = "data/coach.db"
-    http_port: int = 8000
 
     athlete_profile: str = ""
     coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
