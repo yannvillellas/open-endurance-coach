@@ -7,34 +7,31 @@ from open_endurance_coach.schemas.context import CoachContext
 
 OUTPUT_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
-    "summary": "Execution matched targets; keep load stable.",
-    "findings": ["Thursday's tempo block executed 8% above target power."],
-    "questions": ["What was your RPE on Thursday's session?"],
+    "summary": "<one-line summary of the athlete's data>",
+    "findings": ["<finding grounded in the athlete's data>"],
+    "questions": ["<question for the athlete>"],
     "mutations": [
         {
             "action": "create",
-            "name": "Tempo Session",
-            "start_date_local": "2024-01-05",
+            "name": "<workout name>",
+            "start_date_local": "2099-01-01",
             "description": (
                 "- 15m 55% Warmup\n\n3x\n- 1m 150%\n- 1m 50%\n\n- 5m 50%\n- 5m 120%\n- 15m 55%"
             ),
-            "type": "Ride",
-            "moving_time": 3600,
-            "icu_training_load": 84,
+            "type": "<Run | Ride | Swim | ...>",
+            "moving_time": 0,
+            "icu_training_load": 0,
         },
-        {"action": "update", "event_id": 10001, "moving_time": 4200},
-        {"action": "delete", "event_id": 10002},
+        {"action": "update", "event_id": 0, "moving_time": 0},
+        {"action": "delete", "event_id": 0},
     ],
 }
 
 DISCUSSION_EXAMPLE: dict[str, Any] = {
     "intent": "chat",
-    "summary": "Both runs stayed aerobic; the load ramp, not the intensity, is the risk.",
-    "findings": [
-        "Sep 10 averaged 4 bpm below the Z2 floor.",
-        "ATL rose from 30.6 to 40.0 in 48 h while CTL held near 30.",
-    ],
-    "questions": ["How did the legs feel on the 12th?", "Was the climbing continuous?"],
+    "summary": "<direct answer to the athlete's question>",
+    "findings": ["<supporting observation from the athlete's data>"],
+    "questions": ["<follow-up question for the athlete>"],
     "mutations": [],
 }
 
@@ -46,6 +43,9 @@ PROPOSAL_POLICY = (
     'mutations list unless intent is "plan": for chat and analysis put the answer in '
     "summary/findings and, if a change would help, offer it as a question - never "
     "encode a change the athlete did not ask for.\n"
+    "The examples below show the shape only. Their values are placeholders: every "
+    "field must come from the athlete data, the example workout text is the only "
+    "thing to imitate, and a mutation dated before today is rejected.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder

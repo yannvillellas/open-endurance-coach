@@ -32,14 +32,14 @@ runner = CliRunner()
 CREATE_MUTATION = {
     "action": "create",
     "name": "Tempo Session",
-    "start_date_local": "2024-02-05",
+    "start_date_local": "2099-01-01",
     "moving_time": 3600,
 }
 
 CREATE_RACE_MUTATION = {
     "action": "create_race",
     "name": "Autumn Trail Race",
-    "start_date_local": "2026-09-27",
+    "start_date_local": "2099-01-27",
     "category": "RACE_A",
     "type": "Run",
 }
@@ -273,7 +273,7 @@ def test_approve_gate_shows_race_mutation(patched: Any) -> None:
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
     result = runner.invoke(cli_main.app, ["approve", "1"], input="yes\n")
     assert result.exit_code == 0
-    assert "create RACE_A Autumn Trail Race on 2026-09-27 (Run)" in result.output
+    assert "create RACE_A Autumn Trail Race on 2099-01-27 (Run)" in result.output
     assert store.get_draft(1).status is DraftStatus.APPROVED
 
 

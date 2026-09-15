@@ -32,7 +32,7 @@ TODAY = date(2024, 2, 1)
 CREATE_MUTATION = {
     "action": "create",
     "name": "Tempo Session",
-    "start_date_local": "2024-02-05",
+    "start_date_local": "2099-01-01",
     "moving_time": 3600,
 }
 
@@ -577,3 +577,48 @@ def test_engine_llm_selection_and_switch(settings: Settings, tmp_path: Path) -> 
     assert engine.llm_selection() == ("deepseek", "deepseek-flash")
     assert engine.select_llm(model="custom-model") == ("deepseek", "custom-model")
     store.close()
+
+
+PAST_MUTATION = {
+    "action": "create",
+    "name": "Copied Example",
+    "start_date_local": "2024-01-05",
+    "moving_time": 3600,
+}
+
+
+FUTURE_MUTATION = {
+    "action": "create",
+    "name": "Planned Session",
+    "start_date_local": "2024-02-05",
+    "moving_time": 3600,
+}
+
+
+async def test_past_dated_mutation_is_retried(settings: Settings, tmp_path: Path) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[PAST_MUTATION])),
+            completion(report_json(mutations=[FUTURE_MUTATION])),
+        ]
+    )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
+    draft = await engine.analyze("plan my week", today=TODAY)
+    assert len(provider.calls) == 2
+    created = [
+        mutation for mutation in draft.report.mutations if isinstance(mutation, CreateWorkout)
+    ]
+    assert [mutation.name for mutation in created] == ["Planned Session"]
+
+
+async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path: Path) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[PAST_MUTATION])),
+            completion(report_json(mutations=[PAST_MUTATION])),
+            completion(report_json(mutations=[PAST_MUTATION])),
+        ]
+    )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
+    with pytest.raises(LlmError, match="validation failed"):
+        await engine.analyze("plan my week", today=TODAY)

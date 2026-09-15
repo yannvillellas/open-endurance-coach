@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -238,3 +239,19 @@ def test_examples_declare_intent() -> None:
     assert DISCUSSION_EXAMPLE["mutations"] == []
     assert OUTPUT_EXAMPLE["intent"] == "plan"
     assert OUTPUT_EXAMPLE["mutations"]
+
+
+def test_examples_are_placeholders_not_copyable_answers() -> None:
+    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE):
+        rendered = json.dumps(example)
+        assert "2024-" not in rendered
+        assert "Tempo Session" not in rendered
+        assert "10001" not in rendered
+    assert "<workout name>" in json.dumps(OUTPUT_EXAMPLE)
+    assert "2099-01-01" in json.dumps(OUTPUT_EXAMPLE)
+
+
+def test_contract_warns_that_examples_are_shape_only() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "show the shape only" in system
+    assert "a mutation dated before today is rejected" in system
