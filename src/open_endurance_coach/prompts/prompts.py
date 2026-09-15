@@ -84,7 +84,8 @@ PROPOSAL_POLICY = (
     "expected load). Put those questions in needs_input and, when it is non-empty, return "
     "no mutations and ask - never assume on the athlete's behalf, even when the data lets "
     "you estimate. Assume only when the athlete explicitly tells you to: then state the "
-    "assumption in the summary and plan.\n"
+    "assumption in the summary and plan. Never list the same question in both questions "
+    "and needs_input.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder

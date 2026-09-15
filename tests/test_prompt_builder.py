@@ -82,6 +82,8 @@ def test_contract_blocks_proposals_on_material_questions() -> None:
     assert "never assume on the athlete's behalf" in system
     assert "Assume only when the athlete explicitly tells you to" in system
     assert "state the assumption in the summary" in system
+    assert "Never list the same question in both questions" in system
+    assert "return Never" not in system
 
 
 def test_examples_declare_needs_input() -> None:

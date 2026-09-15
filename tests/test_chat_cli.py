@@ -1072,6 +1072,78 @@ def test_chat_material_questions_block_a_workout_plan(patched: Any) -> None:
     assert "Confirm? Reply with exactly yes or no" not in result.output
 
 
+def test_chat_answer_after_needs_input_reruns_the_analysis(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(needs_input=["What is your expected finish time?"])),
+            completion(report_json(mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app,
+        [],
+        input="plan my race\ntarget 60 minutes, I can train daily\ncancel\n",
+    )
+    assert result.exit_code == 0
+    assert len(provider.calls) == 2
+    assert provider.calls[1]["json_mode"] is True
+    assert "Confirm? Reply with exactly yes or no" in result.output
+
+
+def test_chat_duplicate_questions_are_shown_once(patched: Any) -> None:
+    question = "What is your expected finish time?"
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    needs_input=[question],
+                    questions=[question, "Do you want cycling kept in the taper?"],
+                )
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
+    assert result.exit_code == 0
+    assert result.output.count(question) == 1
+    assert "Do you want cycling kept in the taper?" in result.output
+
+
+def test_chat_non_plan_report_with_needs_input_shows_only_the_intent_hint(
+    patched: Any,
+) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    intent="chat",
+                    mutations=[CREATE_MUTATION],
+                    needs_input=["What is your expected finish time?"],
+                )
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
+    assert result.exit_code == 0
+    assert "did not read this as a planning request" in result.output
+    assert "needs answers before proposing calendar changes" not in result.output
+
+
+def test_chat_needs_input_without_mutations_shows_the_questions(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(needs_input=["What is your expected finish time?"]))]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "expected finish time" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Answer my questions here if you like" not in result.output
+
+
 def test_chat_proceed_with_assumptions_opens_the_proposal(patched: Any) -> None:
     provider = FakeLlmProvider(
         [

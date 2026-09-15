@@ -86,9 +86,10 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
 
 
 def _analysis_due(session: ChatSession, text: str) -> bool:
-    if session.context is None:
+    if session.context is None or session.awaiting_input:
         return True
-    if detect_deep_query(text) is not None:
+    current = session.context.today if session.context is not None else None
+    if detect_deep_query(text, today=current) is not None:
         return True
     if _QUESTION_START_RE.search(text) is not None:
         return False
@@ -112,21 +113,39 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
     async with thinking():
         draft = await engine.analyze(focus)
-    render_report(draft.report)
+    report = draft.report
+    if report.needs_input:
+        blocking = {question.strip().casefold() for question in report.needs_input}
+        remaining = [
+            question for question in report.questions if question.strip().casefold() not in blocking
+        ]
+        if len(remaining) != len(report.questions):
+            report = report.model_copy(update={"questions": remaining})
+    render_report(report)
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
+    needs_input = draft.report.needs_input
+    assumed = _ASSUME_RE.search(focus) is not None
     if draft.report.mutations:
         if draft.report.intent != "plan":
+            session.awaiting_input = False
             console.print(
                 "[dim]The coach drafted calendar changes but did not read this as a"
                 " planning request; ask him to plan if you want a proposal.[/dim]"
             )
             return None
-        if draft.report.needs_input and _ASSUME_RE.search(focus) is None:
-            _print_needs_input(draft.report.needs_input)
+        if needs_input and not assumed:
+            session.awaiting_input = True
+            _print_needs_input(needs_input)
             return None
+        session.awaiting_input = False
         return _open_proposal(draft.id, draft.report.mutations)
-    console.print("[dim]Answer my questions here if you like.[/dim]")
+    if needs_input:
+        session.awaiting_input = True
+        _print_needs_input(needs_input)
+    else:
+        session.awaiting_input = False
+        console.print("[dim]Answer my questions here if you like.[/dim]")
     return None
 
 
@@ -277,6 +296,7 @@ async def _run_command(
     if name == "clear":
         session.history = []
         session.context = None
+        session.awaiting_input = False
         console.print("Memory cleared.")
         return None
     if name in {"provider", "model"}:
