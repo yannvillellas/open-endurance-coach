@@ -401,3 +401,25 @@ def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None
         today=date(2024, 2, 1),
     )
     assert [activity.id for activity in context.recent_activities] == ["fx-new-easy"]
+
+
+async def test_deep_extraction_carries_goal_races_and_rollup(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "name": "Trail Race",
+                "start_date_local": "2024-02-20T00:00:00",
+                "category": "RACE_B",
+                "type": "Run",
+            }
+        ]
+    )
+    focus = "how much did my heart rate improve over the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert [race.name for race in context.goal_races] == ["Trail Race"]
+    assert len(context.training_rollup) == 2
+    race_call = next(call for call in client.calls if call[0] == "events" and call[3] is not None)
+    assert race_call[1:] == ("2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C")
+    summary_call = next(call for call in client.calls if call[0] == "athlete_summary")
+    assert summary_call[1:] == ("2023-11-03", "2024-02-01")

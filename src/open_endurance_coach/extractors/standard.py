@@ -108,6 +108,30 @@ def goal_race(event: Event, *, today: date) -> GoalRace | None:
     )
 
 
+async def fetch_goal_races(client: IntervalsReadClient, current: date) -> list[GoalRace]:
+    rows = await client.list_events(
+        current.isoformat(),
+        (current + timedelta(days=RACE_HORIZON_DAYS)).isoformat(),
+        category=RACE_CATEGORY_FILTER,
+    )
+    return sorted(
+        (
+            race
+            for race in (goal_race(Event.model_validate(item), today=current) for item in rows)
+            if race is not None
+        ),
+        key=lambda race: race.date,
+    )
+
+
+async def fetch_training_rollup(client: IntervalsReadClient, current: date) -> list[TrainingWeek]:
+    rows = await client.get_athlete_summary(
+        start=(current - timedelta(days=ROLLUP_LOOKBACK_DAYS)).isoformat(),
+        end=current.isoformat(),
+    )
+    return training_rollup(rows, today=current)
+
+
 class StandardExtractor:
     def __init__(self, settings: Settings, client: IntervalsReadClient) -> None:
         self._settings = settings
@@ -135,15 +159,8 @@ class StandardExtractor:
         events_raw = await self._client.list_events(
             current.isoformat(), (current + timedelta(days=UPCOMING_DAYS)).isoformat()
         )
-        races_raw = await self._client.list_events(
-            current.isoformat(),
-            (current + timedelta(days=RACE_HORIZON_DAYS)).isoformat(),
-            category=RACE_CATEGORY_FILTER,
-        )
-        summary_raw = await self._client.get_athlete_summary(
-            start=(current - timedelta(days=ROLLUP_LOOKBACK_DAYS)).isoformat(),
-            end=current.isoformat(),
-        )
+        goal_races = await fetch_goal_races(self._client, current)
+        rollup = await fetch_training_rollup(self._client, current)
         settings_raw = await self._client.get_sport_settings()
         activities = sorted(
             (Activity.model_validate(item) for item in activities_raw),
@@ -159,23 +176,13 @@ class StandardExtractor:
             (Event.model_validate(item) for item in events_raw),
             key=lambda event: event.start_date_local,
         )
-        goal_races = sorted(
-            (
-                race
-                for race in (
-                    goal_race(Event.model_validate(item), today=current) for item in races_raw
-                )
-                if race is not None
-            ),
-            key=lambda race: race.date,
-        )
         return build_within_budget(
             focus=focus,
             recent_activities=activities,
             wellness=wellness,
             upcoming_events=events,
             goal_races=goal_races,
-            training_rollup=training_rollup(summary_raw, today=current),
+            training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
             user_feedback=user_feedback,
             activity_detail=None,

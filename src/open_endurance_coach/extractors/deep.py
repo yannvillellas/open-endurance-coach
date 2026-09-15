@@ -13,6 +13,8 @@ from open_endurance_coach.extractors.standard import (
     DEFAULT_MAX_TOKENS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
+    fetch_goal_races,
+    fetch_training_rollup,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
@@ -170,6 +172,8 @@ class DeepHistoricalExtractor:
         events_raw = await self._client.list_events(
             current.isoformat(), (current + timedelta(days=UPCOMING_DAYS)).isoformat()
         )
+        goal_races = await fetch_goal_races(self._client, current)
+        rollup = await fetch_training_rollup(self._client, current)
         settings_raw = await self._client.get_sport_settings()
         return build_within_budget(
             focus=focus,
@@ -183,6 +187,8 @@ class DeepHistoricalExtractor:
                 (Event.model_validate(item) for item in events_raw),
                 key=lambda event: event.start_date_local,
             ),
+            goal_races=goal_races,
+            training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
             user_feedback=user_feedback,
             activity_detail=activity_detail,
