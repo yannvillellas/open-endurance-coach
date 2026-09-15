@@ -27,14 +27,14 @@ from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.clients.providers import build_registry
 from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
-from open_endurance_coach.schemas.decisions import WorkoutMutation
+from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(chat_app)
-_mutations_adapter = TypeAdapter(list[WorkoutMutation])
+_mutations_adapter = TypeAdapter(list[Mutation])
 
 DEFAULT_ANALYZE_FOCUS = "Analyze my recent training"
 
@@ -84,7 +84,7 @@ def _run(
 
 
 def _approve_snapshot(
-    engine: CoachEngine, draft_id: int, override: list[WorkoutMutation] | None
+    engine: CoachEngine, draft_id: int, override: list[Mutation] | None
 ) -> PlanSnapshot:
     view = engine.review(draft_id)
     if view.draft.status is not DraftStatus.PENDING:
@@ -123,7 +123,7 @@ async def _apply_snapshot(engine: CoachEngine, decision_id: int | None) -> PlanS
 
 
 async def _execute_approve(
-    engine: CoachEngine, draft_id: int, override: list[WorkoutMutation] | None
+    engine: CoachEngine, draft_id: int, override: list[Mutation] | None
 ) -> None:
     decision = engine.approve(draft_id, mutations=override)
     console.print(
@@ -216,7 +216,7 @@ def approve(
     mutations_file: str | None = typer.Option(
         None,
         "--mutations-file",
-        help="JSON file with workout mutations replacing the coach's proposals",
+        help="JSON file with workout or race mutations replacing the coach's proposals",
     ),
     yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt"),
 ) -> None:
@@ -279,7 +279,7 @@ def apply(
     _run(run)
 
 
-def _read_mutations(path: str) -> list[WorkoutMutation]:
+def _read_mutations(path: str) -> list[Mutation]:
     try:
         with open(path, encoding="utf-8") as handle:
             payload: Any = json.load(handle)

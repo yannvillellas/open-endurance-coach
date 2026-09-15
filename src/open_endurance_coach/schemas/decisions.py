@@ -113,7 +113,10 @@ class DeleteRace(BaseModel):
 
 RaceMutation = Annotated[CreateRace | UpdateRace | DeleteRace, Field(discriminator="action")]
 
-Mutation = WorkoutMutation | RaceMutation
+Mutation = Annotated[
+    CreateWorkout | UpdateWorkout | DeleteWorkout | CreateRace | UpdateRace | DeleteRace,
+    Field(discriminator="action"),
+]
 
 
 class DecisionReport(BaseModel):

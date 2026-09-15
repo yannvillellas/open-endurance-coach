@@ -12,7 +12,7 @@ from open_endurance_coach.extractors.standard import StandardExtractor
 from open_endurance_coach.prompts.chat import build_chat_messages
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import DecisionReport, Mutation
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Decision,
@@ -199,7 +199,7 @@ class CoachEngine:
         assert updated is not None
         return updated
 
-    def approve(self, draft_id: int, *, mutations: list[WorkoutMutation] | None = None) -> Decision:
+    def approve(self, draft_id: int, *, mutations: list[Mutation] | None = None) -> Decision:
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")

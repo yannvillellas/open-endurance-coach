@@ -12,7 +12,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.decisions import CreateRace, DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
@@ -34,6 +34,14 @@ CREATE_MUTATION = {
     "name": "Tempo Session",
     "start_date_local": "2024-02-05",
     "moving_time": 3600,
+}
+
+CREATE_RACE_MUTATION = {
+    "action": "create_race",
+    "name": "Autumn Trail Race",
+    "start_date_local": "2026-09-27",
+    "category": "RACE_A",
+    "type": "Run",
 }
 
 
@@ -234,6 +242,41 @@ def test_approve_with_mutations_file(patched: Any, tmp_path: Path) -> None:
     assert decision.report.mutations[0].name == "Custom Session"
 
 
+def test_approve_with_race_mutations_file(patched: Any, tmp_path: Path) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text(json.dumps([CREATE_RACE_MUTATION]))
+    result = runner.invoke(
+        cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path), "--yes"]
+    )
+    assert result.exit_code == 0
+    mutation = store.list_decisions()[0].report.mutations[0]
+    assert isinstance(mutation, CreateRace)
+    assert mutation.category == "RACE_A"
+
+
+def test_approve_race_mutations_file_rejects_workout_category(patched: Any, tmp_path: Path) -> None:
+    patched(FakeLlmProvider([completion(report_json())]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text(json.dumps([{**CREATE_RACE_MUTATION, "category": "WORKOUT"}]))
+    result = runner.invoke(
+        cli_main.app, ["approve", "1", "--mutations-file", str(mutations_path), "--yes"]
+    )
+    assert result.exit_code == 2
+    assert "invalid mutations file" in result.output
+
+
+def test_approve_gate_shows_race_mutation(patched: Any) -> None:
+    _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_RACE_MUTATION]))]))
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    result = runner.invoke(cli_main.app, ["approve", "1"], input="yes\n")
+    assert result.exit_code == 0
+    assert "create RACE_A Autumn Trail Race on 2026-09-27 (Run)" in result.output
+    assert store.get_draft(1).status is DraftStatus.APPROVED
+
+
 def test_approve_invalid_mutations_file_fails(patched: Any, tmp_path: Path) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
     runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
@@ -349,6 +392,24 @@ def test_apply_write_flag_writes(patched: Any) -> None:
     assert "created" in result.output
     assert "DRY RUN" not in result.output
     assert len(calendar.created) == 1
+    assert decision_of(store, 1).applied_at is not None
+
+
+def test_apply_write_flag_writes_race_mutation(patched: Any, tmp_path: Path) -> None:
+    calendar = FakeCalendarClient()
+    _, store = patched(FakeLlmProvider([completion(report_json())]), calendar=calendar)
+    runner.invoke(cli_main.app, ["analyze"], catch_exceptions=False)
+    mutations_path = tmp_path / "mutations.json"
+    mutations_path.write_text(json.dumps([CREATE_RACE_MUTATION]))
+    runner.invoke(
+        cli_main.app,
+        ["approve", "1", "--mutations-file", str(mutations_path), "--yes"],
+        catch_exceptions=False,
+    )
+    result = runner.invoke(cli_main.app, ["apply", "--write", "--yes"])
+    assert result.exit_code == 0
+    assert len(calendar.created) == 1
+    assert calendar.created[0]["category"] == "RACE_A"
     assert decision_of(store, 1).applied_at is not None
 
 

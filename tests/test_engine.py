@@ -8,7 +8,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, Mutation
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
@@ -307,7 +307,7 @@ async def test_approve_with_override_mutations(settings: Settings, tmp_path: Pat
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
     draft = await engine.analyze("status check", today=TODAY)
-    override: list[WorkoutMutation] = [
+    override: list[Mutation] = [
         CreateWorkout(action="create", name="Custom Session", start_date_local=date(2024, 2, 6))
     ]
     decision = engine.approve(draft.id, mutations=override)

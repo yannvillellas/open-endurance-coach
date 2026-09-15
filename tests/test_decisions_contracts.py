@@ -1,7 +1,7 @@
 from datetime import date
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
@@ -9,6 +9,7 @@ from open_endurance_coach.schemas.decisions import (
     DecisionReport,
     DeleteRace,
     DeleteWorkout,
+    Mutation,
     UpdateRace,
     UpdateWorkout,
 )
@@ -255,6 +256,28 @@ def test_report_round_trips_through_json_with_race_mutations() -> None:
     assert reparsed == report
     assert [mutation.action for mutation in reparsed.mutations] == [
         "create",
+        "create_race",
+        "update_race",
+        "delete_race",
+    ]
+
+
+def test_flat_mutation_adapter_parses_all_six_actions() -> None:
+    adapter = TypeAdapter(list[Mutation])
+    parsed = adapter.validate_python(
+        [
+            CREATE_PAYLOAD,
+            UPDATE_PAYLOAD,
+            DELETE_PAYLOAD,
+            CREATE_RACE_PAYLOAD,
+            UPDATE_RACE_PAYLOAD,
+            DELETE_RACE_PAYLOAD,
+        ]
+    )
+    assert [mutation.action for mutation in parsed] == [
+        "create",
+        "update",
+        "delete",
         "create_race",
         "update_race",
         "delete_race",

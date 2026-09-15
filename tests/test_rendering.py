@@ -18,8 +18,12 @@ from open_endurance_coach.cli.rendering import (
 from open_endurance_coach.engine.coach import ReviewView
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
+    DeleteRace,
+    RaceMutation,
+    UpdateRace,
     UpdateWorkout,
     WorkoutMutation,
 )
@@ -173,6 +177,37 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
 def test_mutations_plan_text_empty_mutations() -> None:
     text = mutations_plan_text([])
     assert "(no calendar changes)" in text
+
+
+def test_mutations_plan_text_renders_race_create_with_type_and_category() -> None:
+    mutations: list[RaceMutation] = [
+        CreateRace(
+            action="create_race",
+            name="Autumn Trail Race",
+            start_date_local=date(2026, 9, 27),
+            category="RACE_A",
+            type="Run",
+            description="hilly loop",
+        ),
+    ]
+    text = mutations_plan_text(mutations)
+    assert "- create RACE_A Autumn Trail Race on 2026-09-27 (Run): hilly loop" in text
+
+
+def test_mutations_plan_text_renders_race_update_and_delete() -> None:
+    mutations: list[RaceMutation] = [
+        UpdateRace(
+            action="update_race",
+            event_id=20001,
+            category="RACE_B",
+            type="Run",
+            moving_time=7200,
+        ),
+        DeleteRace(action="delete_race", event_id=20002),
+    ]
+    text = mutations_plan_text(mutations)
+    assert "- update race event 20001: category=RACE_B, type=Run, moving_time=7200" in text
+    assert "- delete race event 20002" in text
 
 
 def test_apply_plan_text_lists_decisions_and_outcomes() -> None:

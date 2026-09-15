@@ -9,6 +9,7 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
+    DeleteRace,
     Mutation,
     UpdateRace,
     UpdateWorkout,
@@ -68,6 +69,8 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
                 f"  - create {mutation.category} {escape(mutation.name)}"
                 f" on {mutation.start_date_local.isoformat()}"
             )
+            if mutation.type:
+                line += f" ({escape(mutation.type)})"
             if mutation.description:
                 line += f": {escape(mutation.description)}"
             lines.append(line)
@@ -79,8 +82,18 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
                 fields.append(f"date={mutation.start_date_local.isoformat()}")
             if mutation.category is not None:
                 fields.append(f"category={mutation.category}")
+            if mutation.type is not None:
+                fields.append(f"type={escape(mutation.type)}")
+            if mutation.moving_time is not None:
+                fields.append(f"moving_time={mutation.moving_time}")
+            if mutation.description is not None:
+                fields.append(f"description={escape(mutation.description)}")
+            if mutation.icu_training_load is not None:
+                fields.append(f"load={mutation.icu_training_load}")
             detail = ", ".join(fields) if fields else "no changes"
             lines.append(f"  - update race event {escape(str(mutation.event_id))}: {detail}")
+        elif isinstance(mutation, DeleteRace):
+            lines.append(f"  - delete race event {escape(str(mutation.event_id))}")
         elif isinstance(mutation, CreateWorkout):
             line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
             if mutation.description:

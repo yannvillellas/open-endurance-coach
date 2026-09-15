@@ -49,7 +49,7 @@ coach reject <id>             Discard a draft (yes/no confirmation; --yes to ski
 coach apply [decision_id]     Dry-run by default; --write applies (needs confirmation)
 ```
 
-Options: `--provider`/`--model` (`-p`/`-m`) choose the LLM for one run (e.g. `coach chat --provider deepseek`), `--feedback` (inject subjective context into ask/analyze), `--mutations-file` (approve with your own workout mutations), `--write`/`--yes` (apply).
+Options: `--provider`/`--model` (`-p`/`-m`) choose the LLM for one run (e.g. `coach chat --provider deepseek`), `--feedback` (inject subjective context into ask/analyze), `--mutations-file` (approve with your own workout or race mutations — same strict schema as the coach, re-validated before approval), `--write`/`--yes` (apply).
 
 ## Modes
 
