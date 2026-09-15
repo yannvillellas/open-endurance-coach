@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "open-endurance-coach"
 version = "0.1.0"
-description = "Automated, event-driven AI endurance coach backed by Intervals.icu and DeepSeek"
+description = "Automated, event-driven AI endurance coach backed by Intervals.icu and a provider-agnostic LLM layer"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

@@ -1,4 +1,3 @@
-import json
 from datetime import date
 from typing import Any, Self
 
@@ -6,11 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+from open_endurance_coach.tokens import estimate_payload_tokens
 
 
 def _tokens_of(payload: Any) -> int:
-    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-    return len(serialized) // 4
+    return estimate_payload_tokens(payload)
 
 
 _SECTION_KEYS = (
@@ -38,7 +37,7 @@ class CoachContext(BaseModel):
     upcoming_events: list[Event] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(default=8192, gt=0)
 
     def sections(self) -> dict[str, Any]:
         sections: dict[str, Any] = {

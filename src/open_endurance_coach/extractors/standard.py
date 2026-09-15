@@ -10,7 +10,7 @@ from open_endurance_coach.schemas.intervals import Activity, Event, SportSetting
 ACTIVITY_LOOKBACK_DAYS = 14
 WELLNESS_LOOKBACK_DAYS = 7
 UPCOMING_DAYS = 14
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 8192
 
 
 class StandardExtractor:

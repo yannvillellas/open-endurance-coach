@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_thinking: bool = True
     llm_reasoning_effort: str | None = None
-    llm_max_tokens: int = 8192
+    llm_max_tokens: int = 32768
     llm_temperature: float | None = None
     llm_timeout_seconds: float = 180.0
 

@@ -41,4 +41,4 @@ deleting the local database and configuration.
 ## Contact
 
 Questions about this policy: open an issue in the project repository
-(<https://github.com/yannvillellas/open-endurance-coach>).
+(in this repository's issue tracker).

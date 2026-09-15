@@ -22,6 +22,60 @@ _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
 _HILL_RE = re.compile(r"\b(hills?|hilly|climbs?|elevation)\b", re.IGNORECASE)
 _HEART_RATE_RE = re.compile(r"\b(heart ?rate|hr)\b", re.IGNORECASE)
+_RIDE_RE = re.compile(r"\b(ride|rides|riding|bike|biking|cycle|cycling|zwift)\b", re.IGNORECASE)
+_ISO_DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+_WORDED_DATE_RE = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\s+(20\d{2})\b", re.IGNORECASE
+)
+_PAST_REFERENCE_RE = re.compile(
+    r"\b(last year|previous year|a year ago|one year ago|years ago)\b", re.IGNORECASE
+)
+_MONTHS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+
+def _referenced_date(focus: str, today: date) -> date | None:
+    iso = _ISO_DATE_RE.search(focus)
+    if iso:
+        try:
+            return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+        except ValueError:
+            return None
+    worded = _WORDED_DATE_RE.search(focus)
+    if worded:
+        month = _MONTHS.get(worded.group(2).lower())
+        if month is not None:
+            try:
+                return date(int(worded.group(3)), month, int(worded.group(1)))
+            except ValueError:
+                return None
+    if _PAST_REFERENCE_RE.search(focus):
+        return today - timedelta(days=365)
+    return None
 
 
 @dataclass(frozen=True)
@@ -31,8 +85,11 @@ class DeepQuery:
     activity_types: frozenset[str] = frozenset()
 
 
-def detect_deep_query(focus: str) -> DeepQuery | None:
-    if not _TREND_RE.search(focus):
+def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | None:
+    current = today or date.today()
+    reference = _referenced_date(focus, current)
+    stale_reference = reference is not None and (current - reference).days > 30
+    if not _TREND_RE.search(focus) and not stale_reference:
         return None
     lookback = DEFAULT_DEEP_LOOKBACK_DAYS
     duration = _DURATION_RE.search(focus)
@@ -40,12 +97,19 @@ def detect_deep_query(focus: str) -> DeepQuery | None:
         amount = int(duration.group(1))
         unit = duration.group(2).lower()
         lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
+    if stale_reference:
+        assert reference is not None
+        lookback = max(lookback, (current - reference).days + 7)
     if _HEART_RATE_RE.search(focus):
         metric = "heart_rate"
-        activity_types = frozenset({"Ride"}) if _HILL_RE.search(focus) else frozenset()
+        activity_types = (
+            frozenset({"Ride"})
+            if _HILL_RE.search(focus) and _RIDE_RE.search(focus)
+            else frozenset()
+        )
     elif _HILL_RE.search(focus):
         metric = "elevation"
-        activity_types = frozenset({"Ride"})
+        activity_types = frozenset({"Ride"}) if _RIDE_RE.search(focus) else frozenset()
     else:
         metric = None
         activity_types = frozenset()

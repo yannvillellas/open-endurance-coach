@@ -67,7 +67,7 @@ All settings come from environment variables or a `.env` file (see `.env.example
 | `LLM_MODEL`                        | provider default | Model override; defaults to `Qwen3.5-397B-A17B` (ovh) or `deepseek-flash` (deepseek). DeepSeek also accepts `deepseek-v4-pro` |
 | `LLM_THINKING`                     | `true`           | Reasoning mode (DeepSeek flag; OVH reasons server-side and ignores it)                                                        |
 | `OVH_API_KEY` / `DEEPSEEK_API_KEY` | empty            | Only for the OVH paid tier / the DeepSeek provider                                                                            |
-| `LLM_MAX_TOKENS`                   | `8192`           | Output budget for the analysis JSON                                                                                           |
+| `LLM_MAX_TOKENS`                   | `32768`          | Output budget shared by reasoning and the analysis JSON (reasoning models count reasoning against it)                         |
 | `LLM_TIMEOUT_SECONDS`              | `180`            | Per-call timeout                                                                                                              |
 | `APP_TIMEZONE`                     | `Europe/Paris`   | Training-day boundaries; must match the Intervals.icu account timezone                                                        |
 | `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (drafts, decisions, feedback)                                                                              |

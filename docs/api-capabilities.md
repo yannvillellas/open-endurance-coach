@@ -74,7 +74,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 - **JSON output mode (verified):**
   - `response_format: {"type": "json_object"}`.
   - The prompt **must contain the word "json"** and an example of the desired schema, otherwise JSON mode does not engage.
-  - `max_tokens` must be set high enough to avoid mid-JSON truncation.
+  - `max_tokens` must be set high enough to avoid mid-JSON truncation; reasoning counts against it — see §9 for measured output budgets.
   - **Known issue:** API occasionally returns empty `content` — our parser must retry (bounded, e.g. 3 attempts) on empty/parse-failure.
 - Context caching available (`guides/kv_cache`) — relevant if we send a large stable persona/system block repeatedly.
 - Multi-round conversation + tool calls supported (relevant for the interactive CLI chat).
@@ -91,7 +91,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 1. **Personal webhook config:** RESOLVED 2026-08-16 — in-app check: Developer Settings contains only API key, athlete ID, and connected apps. No webhooks section for personal API-key accounts. Webhooks require an OAuth app (email <david@intervals.icu>). **Consequence: manual-first trigger architecture; webhooks optional later.**
 2. **Wellness trigger:** moot under manual-first triggers; wellness data is pulled on demand and by an optional scheduled poll later. Revisit if an OAuth app is created.
 3. **Exact webhook event fields** for `ACTIVITY_UPLOADED`/`ACTIVITY_ANALYZED` payloads (activity object shape) — only needed if a webhook adapter is added.
-4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets.
+4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets. RESOLVED 2026-09-15: a live probe measured a representative prompt at 12,380 chars → 4,039 `prompt_tokens` (3.07 chars/token), so the shared estimator uses `CHARS_PER_TOKEN = 3`; `chars/4` had under-counted by 23%.
 5. **Tunnel hostname:** RESOLVED — a Cloudflare-managed domain is available for a permanent tunnel hostname.
 
 ## 5. Design implications recorded for later iterations
@@ -215,3 +215,18 @@ The dialog offers Normal, Repeats, Ramp, Warmup, Cooldown, Freeride, MaxEffort. 
 | MaxEffort | `MaxEffort` keyword in the step line (before or after the numbers) | `maxeffort: true`                      |
 
 The Warmup/Cooldown label applies to the immediately following step only — one label line per step.
+
+## 9. LLM output budget and reasoning tokens (measured 2026-09-15)
+
+Live probe with the production analysis prompt (`build_messages` over a standard extraction;
+5,679 prompt chars), `thinking` enabled, `json_mode` on, `max_tokens=65536`.
+
+| Provider | Model               | prompt_tokens | completion_tokens | Reasoning                                                       | `finish_reason` |
+| -------- | ------------------- | ------------- | ----------------- | --------------------------------------------------------------- | --------------- |
+| DeepSeek | `deepseek-flash`    | 1,913         | 2,301             | 1,754, exposed via `completion_tokens_details.reasoning_tokens` | `stop`          |
+| OVHcloud | `Qwen3.5-397B-A17B` | 2,187         | 7,025             | hidden; no `reasoning_content` or token detail                  | `stop`          |
+
+- Both providers accepted `max_tokens=65536` with no ceiling rejection.
+- **Reasoning tokens are billed inside `completion_tokens` on both providers**, and on OVH they are not exposed at all. A modest 2,187-token prompt therefore used 7,025 output tokens — ~86% of the old `LLM_MAX_TOKENS=8192` budget — so any larger context truncated and returned empty `content`.
+- OVH ignores the `thinking` flag (`OvhProvider._sends_thinking = False`), so a retry with thinking disabled cannot help it; `LLM_MAX_TOKENS` is the only client-side lever.
+- `LLM_MAX_TOKENS` therefore defaults to 32768 (>4x the measured OVH normal case). A higher cap does not force generation, so it adds no latency or cost in the normal case; it only removes the truncation cliff. Truncation is detected via `finish_reason="length"` and fails fast with an actionable error rather than retrying.
