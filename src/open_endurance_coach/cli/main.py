@@ -8,7 +8,6 @@ from pydantic import TypeAdapter, ValidationError
 
 # imported before app.add_typer below; cli.chat reaches cli.main lazily to avoid a cycle
 from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS, PlanSnapshot
-from open_endurance_coach.cli.chat import chat_app
 from open_endurance_coach.cli.confirmation import run_confirmation
 from open_endurance_coach.cli.rendering import (
     apply_plan_text,
@@ -32,11 +31,25 @@ from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.writer.calendar import CalendarWriter
 
-app = typer.Typer(no_args_is_help=True)
-app.add_typer(chat_app)
+app = typer.Typer(no_args_is_help=False)
 _mutations_adapter = TypeAdapter(list[Mutation])
 
 DEFAULT_ANALYZE_FOCUS = "Analyze my recent training"
+
+
+@app.callback(invoke_without_command=True)
+def _default_entry(
+    ctx: typer.Context,
+    provider: str | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
+    fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
+) -> None:
+    if ctx.invoked_subcommand is None:
+        from open_endurance_coach.cli.chat import start_chat
+
+        start_chat(fresh=fresh, provider=provider, model=model)
 
 
 async def _with_engine(
@@ -141,7 +154,7 @@ async def _execute_apply(engine: CoachEngine, decision_id: int | None, write: bo
     render_apply(await engine.apply(decision_id, dry_run=not write), write=write)
 
 
-@app.command()
+@app.command(hidden=True)
 def ask(
     focus: str = typer.Argument(..., help="Your question or analysis focus"),
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
@@ -157,7 +170,7 @@ def ask(
     _run(run, provider=provider, model=model)
 
 
-@app.command()
+@app.command(hidden=True)
 def analyze(
     focus: str = typer.Argument(DEFAULT_ANALYZE_FOCUS),
     feedback: str | None = typer.Option(None, "--feedback", help="Subjective context to inject"),
@@ -173,7 +186,7 @@ def analyze(
     _run(run, provider=provider, model=model)
 
 
-@app.command()
+@app.command(hidden=True)
 def review(
     draft_id: int | None = typer.Argument(None, help="Draft id; omit to list pending"),
 ) -> None:
@@ -194,7 +207,7 @@ def review(
     _run(run)
 
 
-@app.command()
+@app.command(hidden=True)
 def feedback(
     draft_id: int = typer.Argument(...),
     text: str = typer.Argument(...),
@@ -210,7 +223,7 @@ def feedback(
     _run(run, provider=provider, model=model)
 
 
-@app.command()
+@app.command(hidden=True)
 def approve(
     draft_id: int = typer.Argument(...),
     mutations_file: str | None = typer.Option(
@@ -236,7 +249,7 @@ def approve(
     _run(run)
 
 
-@app.command()
+@app.command(hidden=True)
 def reject(
     draft_id: int = typer.Argument(...),
     yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt"),
@@ -255,7 +268,7 @@ def reject(
     _run(run)
 
 
-@app.command()
+@app.command(hidden=True)
 def apply(
     decision_id: int | None = typer.Argument(None, help="Decision id; omit to apply all unapplied"),
     write: bool = typer.Option(

@@ -1,7 +1,6 @@
 import re
 from dataclasses import dataclass
 
-import typer
 from pydantic import ValidationError
 from rich.prompt import Prompt
 
@@ -37,8 +36,6 @@ from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
-
-chat_app = typer.Typer()
 
 HELP_TEXT = (
     "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
@@ -311,13 +308,11 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
                 state = await _run_command(engine, name, args, session) or state
 
 
-@chat_app.command()
-def chat(
-    fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
-    provider: str | None = typer.Option(
-        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
-    ),
-    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
+def start_chat(
+    *,
+    fresh: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> None:
     from open_endurance_coach.cli import main as cli_main
 
