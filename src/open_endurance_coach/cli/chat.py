@@ -65,7 +65,9 @@ _BARE_COMMAND_RE = re.compile(
 _ASSUME_RE = re.compile(
     r"\b(proceed with assumptions|use assumptions|assume it|assume so)\b", re.IGNORECASE
 )
-_NEGATED_ASSUME_RE = re.compile(r"\b(?:don'?t|do not|never)\s+assume\b", re.IGNORECASE)
+_NEGATED_ASSUME_RE = re.compile(
+    r"\b(?:don'?t|do not|never)\b[\s\w]{0,24}?\b(?:assume|assumptions)\b", re.IGNORECASE
+)
 _REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
 
 
@@ -114,7 +116,7 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
-    today = session.context.today if session.context is not None else None
+    today = engine.today()
     if session.context is not None and _needs_fresh_context(focus, today):
         cached = None
     elif session.context is not None:
@@ -180,7 +182,12 @@ async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> 
 
 
 async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
-    decision = engine.approve(draft_id)
+    try:
+        decision = engine.approve(draft_id)
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
+        session.pending_decision_id = None
+        return
     try:
         render_apply(await engine.apply(decision.id))
         session.pending_decision_id = None
@@ -223,8 +230,8 @@ async def _handle_proposal(
         prompt_plan(snapshot)
         return state
 
-    if (_QUESTION_START_RE.search(line) or _QUESTION_RE.search(line)) and not (
-        _CHANGE_RE.search(line)
+    if _QUESTION_START_RE.search(line) or (
+        _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
     ):
         try:
             draft = engine.review(draft_id)
@@ -243,6 +250,8 @@ async def _handle_proposal(
                 answer = await engine.analyze(line, context=context, history=session.history)
             render_report(answer.report)
             session.append(line, assistant_turn(answer.report).content)
+            if answer.report.mutations:
+                return _open_proposal(answer.id, answer.report.mutations)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -255,10 +264,12 @@ async def _handle_proposal(
         await _apply_proposal(current, session, draft_id)
 
     async def feedback(line: str, updated: Draft) -> bool | None:
-        session.append(line, assistant_turn(updated.report).content)
         if updated.report.needs_input and not _assumes_answers(line):
             _print_needs_input(updated.report.needs_input)
+            questions = "; ".join(updated.report.needs_input)
+            session.append(line, f"{assistant_turn(updated.report).content}\nNeeds: {questions}")
             return True
+        session.append(line, assistant_turn(updated.report).content)
         if not updated.report.mutations:
             console.print("[yellow]No changes proposed anymore.[/yellow]")
             return True

@@ -107,7 +107,7 @@ class CoachEngine:
     async def _run_llm(
         self, context: CoachContext, *, history: list[LlmMessage] | None = None
     ) -> DecisionReport:
-        today = _today(context, self._settings)
+        today = self.today()
         content = await self._llm_client.complete_json(
             build_messages(context, self._settings, history),
             validator=lambda payload: _validate_report(payload, today=today),
@@ -150,6 +150,9 @@ class CoachEngine:
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
         return draft
+
+    def today(self) -> date:
+        return datetime.now(ZoneInfo(self._settings.app_timezone)).date()
 
     def llm_selection(self) -> tuple[str, str]:
         return (self._llm_client.provider_name, self._llm_client.model_name)
@@ -198,8 +201,7 @@ class CoachEngine:
         return updated
 
     def _assert_current_dates(self, report: DecisionReport) -> None:
-        today = datetime.now(ZoneInfo(self._settings.app_timezone)).date()
-        _reject_past_dates(report, today=today)
+        _reject_past_dates(report, today=self.today())
 
     def approve(self, draft_id: int) -> Decision:
         draft = self._store.get_draft(draft_id)
@@ -226,8 +228,6 @@ class CoachEngine:
             decisions = [decision]
         else:
             decisions = self._store.list_unapplied_decisions()
-        for decision in decisions:
-            self._assert_current_dates(decision.report)
         applied: list[AppliedDecision] = []
         for decision in decisions:
             outcomes = await self._writer.apply_decision(decision)

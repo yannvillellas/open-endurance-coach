@@ -69,7 +69,6 @@ def build_within_budget(
             events.pop()
         elif activity_detail is not None:
             activity_detail = None
-            payload["activity_detail"] = None
         elif current_proposal is not None:
             current_proposal = None
         elif user_feedback is not None:

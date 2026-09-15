@@ -125,6 +125,21 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
     assert "- create RACE_A Autumn Trail Race on 2026-09-27 (Run): hilly loop" in text
 
 
+def test_mutations_plan_text_restates_workout_duration_and_load() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Tempo Session",
+            start_date_local=date(2026, 9, 16),
+            type="Ride",
+            moving_time=3600,
+            icu_training_load=84,
+        )
+    ]
+    text = mutations_plan_text(mutations)
+    assert "(Ride, moving_time=3600, load=84.0)" in text
+
+
 def test_mutations_plan_text_restates_create_duration_and_load() -> None:
     mutations: list[Mutation] = [
         CreateRace(

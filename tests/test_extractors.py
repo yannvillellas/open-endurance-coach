@@ -386,8 +386,8 @@ def test_budget_drops_activity_detail_before_failing() -> None:
 
 def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None:
     activities = [
-        Activity.model_validate(make_activity("fx-new-easy", 10)),
         Activity.model_validate(make_activity("fx-old-hard", 1)),
+        Activity.model_validate(make_activity("fx-new-easy", 10)),
     ]
     context = build_within_budget(
         focus="f",

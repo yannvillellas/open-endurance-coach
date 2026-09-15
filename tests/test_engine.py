@@ -466,7 +466,7 @@ def test_engine_llm_selection_and_switch(settings: Settings, tmp_path: Path) -> 
 PAST_MUTATION = {
     "action": "create",
     "name": "Copied Example",
-    "start_date_local": "2024-01-05",
+    "start_date_local": (date.today() - timedelta(days=1)).isoformat(),
     "moving_time": 3600,
 }
 
@@ -474,7 +474,7 @@ PAST_MUTATION = {
 FUTURE_MUTATION = {
     "action": "create",
     "name": "Planned Session",
-    "start_date_local": "2024-02-05",
+    "start_date_local": (date.today() + timedelta(days=1)).isoformat(),
     "moving_time": 3600,
 }
 

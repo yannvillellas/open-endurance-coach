@@ -705,20 +705,22 @@ def test_chat_gate_question_reaches_the_model(patched: Any) -> None:
     assert "Current message:\nwhat would this train exactly?" in prompt
 
 
-def test_chat_question_first_change_request_revises_the_plan(patched: Any) -> None:
+def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) -> None:
     provider = FakeLlmProvider(
         [
             completion(report_json(mutations=[CREATE_MUTATION])),
             completion(report_json("Revised.", mutations=[CREATE_MUTATION])),
         ]
     )
-    _, store = patched(provider)
+    patched(provider)
     result = runner.invoke(
         cli_main.app, [], input="analyze my week\nhow about 45 minutes instead?\nno\n"
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
-    assert [row.content for row in store.list_feedback(1)] == ["how about 45 minutes instead?"]
+    prompt = provider.calls[1]["messages"][1].content
+    assert "Current message:\nhow about 45 minutes instead?" in prompt
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
 
 
 def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:
@@ -944,11 +946,6 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     async def broken_apply(decision_id: int | None = None) -> Any:
         raise RuntimeError("writer exploded")
 
-    import asyncio
-
-    async def noop() -> None:
-        pass
-
     engine.apply = broken_apply
     result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n")
     assert result.exit_code == 0
@@ -958,7 +955,6 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     decision = store.get_decision(1)
     assert decision is not None
     assert decision.applied_at is None
-    asyncio.run(noop())
 
 
 def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
@@ -1242,6 +1238,36 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
     assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_negated_use_assumptions_does_not_override(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[CREATE_MUTATION], needs_input=["What is your goal time?"])
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my race - don't use assumptions\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_revision_to_chat_intent_closes_the_gate(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Just advice.", intent="chat", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\n/exit\n")
+    assert result.exit_code == 0
+    assert "did not read that as a planning request" in result.output
+    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 1
 
 
 def test_chat_forget_zero_is_rejected(patched: Any) -> None:
