@@ -1,11 +1,13 @@
 import json
 from datetime import date
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.decisions import DecisionReport, RaceCategory
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+
+MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
 
 
 def _tokens_of(payload: Any) -> int:
@@ -21,9 +23,23 @@ _SECTION_KEYS = (
     "activity_detail",
     "wellness",
     "upcoming_events",
+    "goal_races",
     "sport_settings",
     "user_feedback",
 )
+
+
+class GoalRace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: int | str | None = None
+    name: str = Field(min_length=1)
+    date: date
+    category: RaceCategory
+    type: str | None = None
+    days_to_race: int = Field(ge=0)
+    weeks_to_race: int = Field(ge=0)
+    phase: MacroPhase
 
 
 class CoachContext(BaseModel):
@@ -36,6 +52,7 @@ class CoachContext(BaseModel):
     activity_detail: Activity | None = None
     wellness: list[Wellness] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
+    goal_races: list[GoalRace] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
     max_tokens: int = Field(default=4096, gt=0)
@@ -54,6 +71,9 @@ class CoachContext(BaseModel):
             "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
             "upcoming_events": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.upcoming_events
+            ],
+            "goal_races": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.goal_races
             ],
             "sport_settings": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings

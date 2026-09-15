@@ -1,8 +1,20 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.context import CoachContext, GoalRace
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+
+RECENT_ACTIVITY_KEEP_DAYS = 7
+
+
+def _activity_droppable(activities: list[Activity], today: date | None) -> bool:
+    if not activities:
+        return False
+    if today is None:
+        return True
+    oldest = activities[-1].start_date_local.date()
+    return oldest < today - timedelta(days=RECENT_ACTIVITY_KEEP_DAYS)
 
 
 def build_within_budget(
@@ -12,6 +24,8 @@ def build_within_budget(
     upcoming_events: list[Event],
     sport_settings: list[SportSettings],
     *,
+    current_proposal: DecisionReport | None = None,
+    goal_races: list[GoalRace] | None = None,
     user_feedback: str | None,
     activity_detail: Activity | None,
     max_tokens: int,
@@ -20,14 +34,17 @@ def build_within_budget(
     activities = list(recent_activities)
     wellness_rows = list(wellness)
     events = list(upcoming_events)
+    races = list(goal_races or [])
     while True:
         payload: dict[str, Any] = {
             "focus": focus,
             "today": today,
+            "current_proposal": current_proposal,
             "recent_activities": activities,
             "activity_detail": activity_detail,
             "wellness": wellness_rows,
             "upcoming_events": events,
+            "goal_races": races,
             "sport_settings": sport_settings,
             "user_feedback": user_feedback,
             "max_tokens": max_tokens,
@@ -35,11 +52,19 @@ def build_within_budget(
         probe = CoachContext.model_construct(**payload)
         if probe.estimated_tokens() <= max_tokens:
             return CoachContext.model_validate(payload)
-        if activities:
+        if activities and _activity_droppable(activities, today):
             activities.pop()
         elif wellness_rows:
             wellness_rows.pop()
         elif events:
             events.pop()
+        elif current_proposal is not None:
+            current_proposal = None
+        elif user_feedback is not None:
+            user_feedback = None
+        elif races:
+            races.pop()
+        elif activities:
+            activities.pop()
         else:
             raise RuntimeError(f"cannot fit focus in token budget: {max_tokens}")

@@ -127,6 +127,7 @@ def test_section_tokens_reports_per_section() -> None:
         "activity_detail",
         "wellness",
         "upcoming_events",
+        "goal_races",
         "sport_settings",
         "user_feedback",
     }
@@ -135,6 +136,64 @@ def test_section_tokens_reports_per_section() -> None:
     assert sections["activity_detail"] == 1
     assert sections["user_feedback"] == 0
     assert sections["focus"] > 0
+
+
+def test_section_tokens_covers_every_registered_section() -> None:
+    from open_endurance_coach.schemas.context import _SECTION_KEYS
+
+    context = CoachContext.model_validate({"focus": "status check"})
+    assert set(context.section_tokens()) == set(_SECTION_KEYS)
+    assert set(context.sections()) <= set(_SECTION_KEYS)
+
+
+def test_goal_races_serialize_into_sections() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "goal_races": [
+                {
+                    "event_id": 90001,
+                    "name": "Spring Half",
+                    "date": "2024-03-01",
+                    "category": "RACE_A",
+                    "type": "Run",
+                    "days_to_race": 29,
+                    "weeks_to_race": 5,
+                    "phase": "Build",
+                }
+            ],
+        }
+    )
+    assert context.sections()["goal_races"] == [
+        {
+            "event_id": 90001,
+            "name": "Spring Half",
+            "date": "2024-03-01",
+            "category": "RACE_A",
+            "type": "Run",
+            "days_to_race": 29,
+            "weeks_to_race": 5,
+            "phase": "Build",
+        }
+    ]
+    assert context.section_tokens()["goal_races"] > 0
+
+
+def test_goal_race_rejects_unknown_category_and_extras() -> None:
+    base = {
+        "name": "Spring Half",
+        "date": "2024-03-01",
+        "category": "RACE_A",
+        "days_to_race": 29,
+        "weeks_to_race": 5,
+        "phase": "Build",
+    }
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "category": "WORKOUT"}]})
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "phase": "Recovery"}]})
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "hallucinated": True}]})
 
 
 def test_max_tokens_must_be_positive() -> None:

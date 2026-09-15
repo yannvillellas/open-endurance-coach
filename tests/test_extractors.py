@@ -3,11 +3,13 @@ from datetime import date
 import pytest
 
 from open_endurance_coach.config import Settings
+from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
-from open_endurance_coach.extractors.standard import StandardExtractor
+from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase
 from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import make_intervals_client
+from .fakes import make_activity, make_intervals_client, make_wellness
 
 TODAY = date(2024, 2, 1)
 
@@ -19,6 +21,7 @@ async def test_standard_extraction_populates_all_sections(settings: Settings) ->
     assert len(context.wellness) == 3
     assert len(context.upcoming_events) == 2
     assert context.sport_settings[0].ftp == 250.0
+    assert context.goal_races == []
     assert context.activity_detail is None
     assert context.user_feedback is None
     assert context.today == TODAY
@@ -31,7 +34,8 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert client.calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-02-01", "2024-02-15"),
+        ("events", "2024-02-01", "2024-02-15", None),
+        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
         ("sport_settings",),
     ]
 
@@ -67,6 +71,91 @@ async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
     with pytest.raises(RuntimeError, match="token budget"):
         await extractor.extract("status check", today=TODAY, max_tokens=1)
+
+
+async def test_standard_extraction_builds_goal_races(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "id": 90001,
+                "name": "Spring Half",
+                "start_date_local": "2024-03-01T00:00:00",
+                "category": "RACE_A",
+                "type": "Run",
+            },
+            {
+                "id": 90002,
+                "name": "Club Crit",
+                "start_date_local": "2024-02-08T00:00:00",
+                "category": "RACE_B",
+                "type": "Ride",
+            },
+            {
+                "id": 90003,
+                "name": "Tempo Session",
+                "start_date_local": "2024-02-05T00:00:00",
+                "category": "WORKOUT",
+            },
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    assert [race.category for race in context.goal_races] == ["RACE_B", "RACE_A"]
+    nearest, furthest = context.goal_races
+    assert nearest.event_id == 90002
+    assert nearest.name == "Club Crit"
+    assert nearest.date == date(2024, 2, 8)
+    assert nearest.type == "Ride"
+    assert nearest.days_to_race == 7
+    assert nearest.weeks_to_race == 1
+    assert nearest.phase == "Taper"
+    assert furthest.days_to_race == 29
+    assert furthest.weeks_to_race == 5
+    assert furthest.phase == "Build"
+
+
+@pytest.mark.parametrize(
+    ("days", "expected"),
+    [
+        (0, "Race week"),
+        (7, "Taper"),
+        (8, "Peak"),
+        (28, "Peak"),
+        (29, "Build"),
+        (84, "Build"),
+        (85, "Base"),
+        (120, "Base"),
+    ],
+)
+def test_macro_phase_maps_days_to_race(days: int, expected: str) -> None:
+    assert macro_phase(days) == expected
+
+
+async def test_budget_keeps_recent_activities_and_drops_wellness_first(
+    settings: Settings,
+) -> None:
+    recent = [
+        Activity.model_validate(make_activity("fx-near", 28)),
+        Activity.model_validate(make_activity("fx-nearer", 31)),
+    ]
+    recent.sort(key=lambda activity: activity.start_date_local, reverse=True)
+    probe = CoachContext(
+        focus="status check", today=TODAY, recent_activities=recent, max_tokens=10**9
+    )
+    context = build_within_budget(
+        focus="status check",
+        recent_activities=recent,
+        wellness=[Wellness.model_validate(make_wellness(28))],
+        upcoming_events=[],
+        sport_settings=[],
+        goal_races=[],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=probe.estimated_tokens(),
+        today=TODAY,
+    )
+    assert len(context.recent_activities) == 2
+    assert context.wellness == []
 
 
 @pytest.mark.parametrize(
