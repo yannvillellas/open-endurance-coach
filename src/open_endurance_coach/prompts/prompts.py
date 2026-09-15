@@ -37,6 +37,15 @@ DISCUSSION_EXAMPLE: dict[str, Any] = {
     "mutations": [],
 }
 
+INTAKE_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
+    "summary": "<what you can already say, and the assumption you must not make>",
+    "findings": ["<what the data shows>"],
+    "questions": [],
+    "needs_input": ["<the fact you need before a plan is possible>"],
+    "mutations": [],
+}
+
 RACE_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
@@ -50,8 +59,8 @@ RACE_EXAMPLE: dict[str, Any] = {
             "start_date_local": "2099-01-01",
             "category": "RACE_B",
             "type": "<Run | Ride | Swim | ...>",
-            "moving_time": 4500,
-            "icu_training_load": 90,
+            "moving_time": 0,
+            "icu_training_load": 0,
         },
         {"action": "update_race", "event_id": 0, "category": "RACE_A"},
     ],
@@ -77,7 +86,7 @@ PROPOSAL_POLICY = (
     "race, ask the athlete for it instead of estimating. When you create or update a "
     "race, set moving_time and icu_training_load from the athlete's figures (or your "
     "derived target when they told you to proceed), so no plan is built on an unknown "
-    "race load.\n"
+    "race load. Never copy the example race numbers.\n"
     "Before prescribing anything - workouts, a race, or a full block - list what you "
     "still need to know that would change the plan "
     "(athlete goals, available days, constraints, injury, RPE; race duration, elevation, "
@@ -139,6 +148,8 @@ def _json_contract() -> str:
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         "Copy the workout text format from the example, not the example's numbers.\n"
         f"{WORKOUT_TEXT_FORMAT}"
+        "Example json (material information missing - ask, do not plan):\n"
+        f"{json.dumps(INTAKE_EXAMPLE, indent=2)}\n"
         "Example json (conversation - no calendar change requested):\n"
         f"{json.dumps(DISCUSSION_EXAMPLE, indent=2)}\n"
         "Example json (the athlete asked for a plan or calendar change):\n"

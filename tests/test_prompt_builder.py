@@ -5,6 +5,7 @@ from typing import Any
 from open_endurance_coach.config import Settings
 from open_endurance_coach.prompts.prompts import (
     DISCUSSION_EXAMPLE,
+    INTAKE_EXAMPLE,
     OUTPUT_EXAMPLE,
     RACE_EXAMPLE,
     build_messages,
@@ -70,8 +71,8 @@ def test_race_example_validates_and_is_placeholder_only() -> None:
     assert isinstance(report.mutations[0], CreateRace)
     assert isinstance(report.mutations[1], UpdateRace)
     assert RACE_EXAMPLE["mutations"][0]["category"] == "RACE_B"
-    assert RACE_EXAMPLE["mutations"][0]["moving_time"] == 4500
-    assert RACE_EXAMPLE["mutations"][0]["icu_training_load"] == 90
+    assert RACE_EXAMPLE["mutations"][0]["moving_time"] == 0
+    assert RACE_EXAMPLE["mutations"][0]["icu_training_load"] == 0
     assert "<race name>" in json.dumps(RACE_EXAMPLE)
 
 
@@ -83,7 +84,15 @@ def test_contract_blocks_proposals_on_material_questions() -> None:
     assert "Assume only when the athlete explicitly tells you to" in system
     assert "state the assumption in the summary" in system
     assert "Never list the same question in both questions" in system
+    assert "Never copy the example race numbers" in system
     assert "return Never" not in system
+
+
+def test_intake_example_demonstrates_blocking() -> None:
+    report = DecisionReport.model_validate(INTAKE_EXAMPLE)
+    assert report.intent == "plan"
+    assert report.needs_input
+    assert report.mutations == []
 
 
 def test_examples_declare_needs_input() -> None:
@@ -235,7 +244,7 @@ def test_build_messages_is_deterministic() -> None:
 
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert estimate_text_tokens(system) <= 2048
+    assert estimate_text_tokens(system) <= 2560
 
 
 def test_total_input_stays_under_the_input_ceiling() -> None:
