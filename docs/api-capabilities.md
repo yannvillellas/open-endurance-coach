@@ -50,6 +50,9 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 | Upload structured workout | `POST /api/v1/athlete/{id}/events` with `file_contents` (.zwo/.mrc/.erg) | Server parses steps → `workout_doc`                                                                                  |
 
 - Payload fields for a workout event: `category: WORKOUT`, `start_date_local`, `name`, `description`, `type` (e.g. `Ride`), `moving_time`, `icu_training_load`, optionally `color`, `folders_id`, etc.
+- Payload fields for a race event: `category: RACE_A | RACE_B | RACE_C` (priority), `start_date_local`, `name`, `description`, `type` (any sport), `moving_time`, `icu_training_load`. Verified live 2026-09-15: create/update/delete persist these fields on `RACE_*` (including `icu_training_load`, not silently dropped) and echo them back on `GET`.
+- **Dual write guards:** update/delete fetch the event first and refuse anything outside the mutation's own family — workout mutations accept only `WORKOUT`, race mutations accept only `RACE_A`/`RACE_B`/`RACE_C`. A mutation can never cross between the two.
+- **Idempotent creates:** creates resolve by (name, date) — workout matches are scoped to `WORKOUT`, race matches span any `RACE_*` category so a priority change updates the existing event instead of duplicating it.
 - **Implication:** our writer can either set free-form `description` + estimated `moving_time`/load (server computes load), or emit full `.zwo` `file_contents` for structured workouts. Decision point for iteration 4: start with description-based, upgrade to .zwo later.
 
 ### Webhooks

@@ -140,10 +140,11 @@ class FakeCalendarClient:
     ) -> list[dict[str, Any]]:
         self.list_calls.append((oldest, newest, category))
         rows = []
+        allowed = {part.strip() for part in category.split(",")} if category else None
         for event in self.events:
             if not (oldest <= event["start_date_local"][:10] < newest):
                 continue
-            if category and event.get("category") != category:
+            if allowed is not None and event.get("category") not in allowed:
                 continue
             rows.append(dict(event))
         return rows

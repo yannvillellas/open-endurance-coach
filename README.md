@@ -9,7 +9,7 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 - **Data Extraction:** Standard scope (recent activities, wellness, upcoming events, sport settings) and deep-historical scope (trend queries such as "heart rate improvement on hills over the last 3 months"), both budgeted to fit the model's token limit.
 - **Analysis:** OVHcloud AI Endpoints' free tier (Qwen3.5-397B-A17B, JSON mode, thinking enabled; no API key) — or DeepSeek — enforces Joe Friel's periodization principles and Dr. Andrew Coggan's power analytics, comparing executed training against planned targets and current readiness (CTL/ATL, HRV, sleep).
 - **Draft & Review Loop:** Every analysis produces a validated draft under a strict schema — invalid LLM output is retried, then rejected. The coach solicits missing RPE/fueling data and re-analyzes with the athlete's feedback before anything can be approved.
-- **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and a WORKOUT-only category guard — updates and deletes never touch race or non-workout events. Applying defaults to a dry-run.
+- **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and strict category guards — workout mutations only touch `WORKOUT` events, race mutations only touch `RACE_A/B/C` events, and updates/deletes never cross between the two families. Applying defaults to a dry-run.
 - **Manual-First Triggers:** The CLI drives the loop today. Webhook triggers (activity uploaded/analyzed, calendar updated) and a wellness poller are on the roadmap behind the same engine; an Intervals.icu OAuth app has been created for that step.
 
 ## Chat mode (the main interface)
@@ -89,7 +89,7 @@ Available providers:
 
 ## Safety model
 
-Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes` (or explicit `--yes` in scripts). The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event. Applying defaults to a dry-run.
+Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes` (or explicit `--yes` in scripts). The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only). Applying defaults to a dry-run.
 
 ## Coaching Methodology
 
