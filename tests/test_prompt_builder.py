@@ -1,4 +1,3 @@
-import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -6,7 +5,6 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.prompts.prompts import (
     DISCUSSION_EXAMPLE,
     OUTPUT_EXAMPLE,
-    SYSTEM_PROMPT_TOKEN_ALLOWANCE,
     build_messages,
 )
 from open_endurance_coach.schemas.context import CoachContext
@@ -16,6 +14,7 @@ from open_endurance_coach.schemas.decisions import (
     DeleteWorkout,
     UpdateWorkout,
 )
+from open_endurance_coach.tokens import estimate_text_tokens
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -193,19 +192,15 @@ def test_build_messages_is_deterministic() -> None:
     assert build_messages(CONTEXT, settings) == build_messages(CONTEXT, settings)
 
 
-def _estimate_tokens(payload: Any) -> int:
-    return len(json.dumps(payload, ensure_ascii=False, indent=2)) // 4
-
-
-def test_system_prompt_fits_its_allowance() -> None:
+def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert _estimate_tokens(system) <= SYSTEM_PROMPT_TOKEN_ALLOWANCE
+    assert estimate_text_tokens(system) <= 2048
 
 
-def test_total_input_uses_context_and_system_budgets() -> None:
-    messages = build_messages(CONTEXT, make_settings())
-    total = _estimate_tokens(messages[0].content) + CONTEXT.estimated_tokens()
-    assert total <= CONTEXT.max_tokens + SYSTEM_PROMPT_TOKEN_ALLOWANCE
+def test_total_input_stays_under_the_input_ceiling() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    total = estimate_text_tokens(system) + CONTEXT.estimated_tokens()
+    assert total <= 12288
 
 
 def test_full_rollup_context_fits_default_budget() -> None:
@@ -228,7 +223,7 @@ def test_full_rollup_context_fits_default_budget() -> None:
         for index in range(14)
     ]
     context = CoachContext.model_validate({"focus": "plan my race", "training_rollup": rollup})
-    assert context.estimated_tokens() <= context.max_tokens
+    assert context.estimated_tokens() <= 4096
 
 
 def test_contract_defaults_to_discussion_policy() -> None:

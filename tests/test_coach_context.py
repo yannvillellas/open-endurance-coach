@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Wellness
+from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_payload_tokens
 
 ACTIVITY = {
     "id": "fx000001",
@@ -63,12 +64,10 @@ def test_estimated_tokens_match_indented_prompt_format() -> None:
         {"focus": "status check", "recent_activities": [ACTIVITY], "max_tokens": 4096}
     )
     compact = sum(
-        len(json.dumps(payload, ensure_ascii=False)) // 4 for payload in context.sections().values()
-    )
-    indented = sum(
-        len(json.dumps(payload, ensure_ascii=False, indent=2)) // 4
+        len(json.dumps(payload, ensure_ascii=False)) // CHARS_PER_TOKEN
         for payload in context.sections().values()
     )
+    indented = sum(estimate_payload_tokens(payload) for payload in context.sections().values())
     assert context.estimated_tokens() == indented
     assert indented > compact
 

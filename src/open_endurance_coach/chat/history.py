@@ -4,10 +4,11 @@ from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.records import FeedbackWithReport
+from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 
 
 def _tokens_of(turn: LlmMessage) -> int:
-    return max(1, len(turn.content) // 4)
+    return estimate_text_tokens(turn.content)
 
 
 def assistant_turn(report: DecisionReport) -> LlmMessage:
@@ -51,12 +52,12 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
         if _tokens_of(kept[0]) > max_tokens - 1:
             kept[0] = LlmMessage(
                 role=kept[0].role,
-                content=kept[0].content[: max(1, (max_tokens - 1) * 4)],
+                content=kept[0].content[: max(1, (max_tokens - 1) * CHARS_PER_TOKEN)],
             )
         head = sum(_tokens_of(turn) for turn in kept[:-1])
         kept[-1] = LlmMessage(
             role=kept[-1].role,
-            content=kept[-1].content[: max(1, (max_tokens - head) * 4)],
+            content=kept[-1].content[: max(1, (max_tokens - head) * CHARS_PER_TOKEN)],
         )
     return kept
 

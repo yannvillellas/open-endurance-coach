@@ -6,6 +6,7 @@ from open_endurance_coach.chat.history import ChatSession, seed_turns, trim_hist
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.records import Feedback, FeedbackWithReport
+from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 
 NOW = datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -112,7 +113,7 @@ def test_trim_history_truncates_single_oversized_turn() -> None:
     trimmed = trim_history(turns, 10)
     assert len(trimmed) == 1
     assert trimmed[0].role == "user"
-    assert trimmed[0].content == "x" * 36
+    assert trimmed[0].content == "x" * ((10 - 1) * CHARS_PER_TOKEN)
 
 
 def test_trim_history_cap_holds_even_when_head_turn_is_oversized() -> None:
@@ -121,9 +122,9 @@ def test_trim_history_cap_holds_even_when_head_turn_is_oversized() -> None:
         LlmMessage(role="assistant", content="Summary A."),
     ]
     trimmed = trim_history(turns, 100)
-    assert sum(max(1, len(turn.content) // 4) for turn in trimmed) <= 100
-    assert trimmed[0].content == "y" * 396
-    assert trimmed[1].content == "Summ"
+    assert sum(estimate_text_tokens(turn.content) for turn in trimmed) <= 100
+    assert trimmed[0].content == "y" * ((100 - 1) * CHARS_PER_TOKEN)
+    assert trimmed[1].content == "Sum"
 
 
 def test_trim_history_never_starts_with_assistant_turn() -> None:
@@ -162,8 +163,8 @@ def test_session_seed_respects_token_cap() -> None:
     session = ChatSession()
     session.seed([entry(1, 10, "y" * 4000, REPORT_A)], max_tokens=100)
     assert [turn.role for turn in session.history] == ["user", "assistant"]
-    assert session.history[0].content == "y" * 396
-    assert session.history[1].content == "Summ"
+    assert session.history[0].content == "y" * ((100 - 1) * CHARS_PER_TOKEN)
+    assert session.history[1].content == "Sum"
 
 
 def test_session_append_extends_history_in_order() -> None:
@@ -183,7 +184,8 @@ def test_session_append_trims_to_cap() -> None:
     session.append("x" * 40, "y" * 4000)
     assert [turn.role for turn in session.history] == ["user", "assistant"]
     assert session.history[0].content == "x" * 40
-    assert session.history[1].content == "y" * 360
+    expected = 100 - estimate_text_tokens("x" * 40)
+    assert session.history[1].content == "y" * (expected * CHARS_PER_TOKEN)
 
 
 def test_session_append_without_cap_keeps_everything() -> None:

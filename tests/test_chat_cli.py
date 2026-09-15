@@ -15,6 +15,7 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.tokens import CHARS_PER_TOKEN
 
 from .fakes import (
     FakeCalendarClient,
@@ -595,7 +596,7 @@ def test_chat_session_trims_to_cap(
     history = provider.calls[3]["messages"][2:-1]
     assert [message.role for message in history] == ["user", "assistant"]
     assert history[0].content == "second"
-    assert history[1].content == "B" * 396
+    assert history[1].content == "B" * ((100 - 2) * CHARS_PER_TOKEN)
 
 
 def test_chat_shows_thinking_indicator(patched: Any) -> None:

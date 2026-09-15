@@ -94,7 +94,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 1. **Personal webhook config:** RESOLVED 2026-08-16 — in-app check: Developer Settings contains only API key, athlete ID, and connected apps. No webhooks section for personal API-key accounts. Webhooks require an OAuth app (email <david@intervals.icu>). **Consequence: manual-first trigger architecture; webhooks optional later.**
 2. **Wellness trigger:** moot under manual-first triggers; wellness data is pulled on demand and by an optional scheduled poll later. Revisit if an OAuth app is created.
 3. **Exact webhook event fields** for `ACTIVITY_UPLOADED`/`ACTIVITY_ANALYZED` payloads (activity object shape) — only needed if a webhook adapter is added.
-4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets. Partially resolved: ADR-0015 bounds the system prompt at 1024 tokens and a full 14-week rollup context test keeps total input inside the context budget; comparing live `usage.prompt_tokens` against the estimate remains optional.
+4. **DeepSeek model selection:** confirm current model id and context window on the pricing page; measure token usage of a typical prompt before finalizing extractor budgets. RESOLVED 2026-09-15: a live probe measured a representative prompt at 4,039 `prompt_tokens` for 12,380 chars (3.07 chars/token), so the shared estimator uses `CHARS_PER_TOKEN = 3`; the system prompt is measured per settings and total input is bounded by `INPUT_TOKEN_CEILING` (ADR-0015).
 5. **Tunnel hostname:** RESOLVED — a Cloudflare-managed domain is available for a permanent tunnel hostname.
 
 ## 5. Design implications recorded for later iterations

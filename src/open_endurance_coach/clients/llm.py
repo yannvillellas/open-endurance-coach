@@ -1,10 +1,16 @@
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from open_endurance_coach.config import Settings, describe_providers
+from open_endurance_coach.tokens import estimate_text_tokens
+
+logger = logging.getLogger(__name__)
+
+TOKEN_ESTIMATE_DRIFT_THRESHOLD = 0.25
 
 
 class LlmError(RuntimeError):
@@ -23,6 +29,22 @@ class LlmCompletion:
     reasoning_content: str | None = None
     model: str = ""
     usage: Mapping[str, Any] = field(default_factory=dict)
+
+
+def _warn_on_token_estimate_drift(messages: list[LlmMessage], completion: LlmCompletion) -> None:
+    prompt_tokens = (completion.usage or {}).get("prompt_tokens")
+    if not isinstance(prompt_tokens, int) or prompt_tokens <= 0:
+        return
+    estimated = sum(estimate_text_tokens(message.content) for message in messages)
+    drift = abs(estimated - prompt_tokens) / prompt_tokens
+    if drift > TOKEN_ESTIMATE_DRIFT_THRESHOLD:
+        logger.warning(
+            "token estimate drift: estimated=%d actual=%d (%.0f%%) model=%s",
+            estimated,
+            prompt_tokens,
+            drift * 100,
+            completion.model,
+        )
 
 
 class LlmProvider(Protocol):
@@ -85,7 +107,7 @@ class LlmClient:
         reasoning_effort: str | None = None,
     ) -> LlmCompletion:
         provider = self._providers[self._settings.llm_provider]
-        return await provider.complete(
+        completion = await provider.complete(
             model=self._settings.llm_model,
             messages=messages,
             thinking=self._settings.llm_thinking if thinking is None else thinking,
@@ -98,6 +120,8 @@ class LlmClient:
                 else reasoning_effort
             ),
         )
+        _warn_on_token_estimate_drift(messages, completion)
+        return completion
 
     async def complete_json(
         self,
