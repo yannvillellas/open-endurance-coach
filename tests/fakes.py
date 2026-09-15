@@ -1,9 +1,15 @@
 import json
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
-from open_endurance_coach.clients.llm import LlmCompletion
+from open_endurance_coach.clients.llm import LlmClient, LlmCompletion
+from open_endurance_coach.config import Settings
+from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.store.db import CoachStore
+from open_endurance_coach.writer.calendar import CalendarWriter
 
 
 class FakeClock:
@@ -279,3 +285,56 @@ def report_json(summary: str = "Load stable.", **overrides: Any) -> str:
     }
     payload.update(overrides)
     return json.dumps(payload)
+
+
+CREATE_MUTATION = {
+    "action": "create",
+    "name": "Tempo Session",
+    "start_date_local": "2099-01-01",
+    "moving_time": 3600,
+}
+
+CREATE_RACE_MUTATION = {
+    "action": "create_race",
+    "name": "Autumn Trail Race",
+    "start_date_local": "2099-01-27",
+    "category": "RACE_A",
+    "type": "Run",
+}
+
+
+def make_engine(
+    settings: Settings,
+    tmp_path: Path,
+    provider: FakeLlmProvider,
+    calendar: FakeCalendarClient | None = None,
+) -> tuple[CoachEngine, CoachStore]:
+    llm = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    store = CoachStore(tmp_path / "coach.db")
+    writer = CalendarWriter(calendar) if calendar is not None else None
+    engine = CoachEngine(settings, store, make_intervals_client(), llm, writer=writer)
+    return engine, store
+
+
+class FakeRunner:
+    def __init__(self, engine: CoachEngine) -> None:
+        self.engine = engine
+
+    async def __call__(
+        self,
+        callback: Callable[[CoachEngine], Awaitable[None]],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        await callback(self.engine)
+
+
+def decision_of(store: CoachStore, decision_id: int) -> Any:
+    decision = store.get_decision(decision_id)
+    assert decision is not None
+    return decision

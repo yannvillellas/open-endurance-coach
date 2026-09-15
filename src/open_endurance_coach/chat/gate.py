@@ -16,8 +16,6 @@ class PlanSnapshot:
     action: ConfirmationAction
     plan_text: str
     draft_id: int | None
-    decision_id: int | None = None
-    write: bool = False
 
 
 @dataclass(frozen=True)

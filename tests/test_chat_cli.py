@@ -18,13 +18,16 @@ from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN
 
 from .fakes import (
+    CREATE_MUTATION,
     FakeCalendarClient,
     FakeLlmProvider,
+    FakeRunner,
     completion,
+    decision_of,
+    make_engine,
     make_intervals_client,
     report_json,
 )
-from .test_cli import CREATE_MUTATION, FakeRunner, decision_of, make_engine
 
 runner = CliRunner()
 
@@ -864,11 +867,33 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     assert result.exit_code == 0
     assert "writer exploded" in result.output
     assert "not applied" in result.output
-    assert "coach apply" in result.output
+    assert 'say "retry"' in result.output
     decision = store.get_decision(1)
     assert decision is not None
     assert decision.applied_at is None
     asyncio.run(noop())
+
+
+def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    original = engine.apply
+    attempts: list[int] = []
+
+    async def flaky_apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
+        attempts.append(1)
+        if len(attempts) == 1 and not dry_run:
+            raise RuntimeError("writer exploded")
+        return await original(decision_id, dry_run=dry_run)
+
+    engine.apply = flaky_apply
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\nretry\n")
+    assert result.exit_code == 0
+    assert 'say "retry"' in result.output
+    assert len(attempts) == 2
+    assert len(calendar.created) == 1
+    assert store.list_unapplied_decisions() == []
 
 
 def test_chat_sqlite_error_survives_repl(patched: Any) -> None:

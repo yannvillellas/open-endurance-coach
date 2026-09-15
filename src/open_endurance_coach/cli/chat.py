@@ -57,6 +57,7 @@ _CHANGE_RE = re.compile(
     r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b",
     re.IGNORECASE,
 )
+_RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
 
 
 def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None:
@@ -115,10 +116,26 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     return None
 
 
+async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
+    try:
+        report = await engine.apply()
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
+        return
+    if not report.decisions:
+        console.print("Nothing to apply.")
+        return
+    render_apply(report, write=True)
+    session.append(text, "Applied the recorded calendar changes.")
+
+
 async def _handle_converse(
     engine: CoachEngine, session: ChatSession, text: str
 ) -> ChatState | None:
     try:
+        if _RETRY_RE.match(text):
+            await _retry_apply(engine, session, text)
+            return None
         if _analysis_due(session, text):
             return await _analyze_line(engine, session, text)
         async with thinking():
@@ -140,7 +157,7 @@ async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
         print_error(exc)
         console.print(
             f"[yellow]Decision #{decision.id} was recorded but not applied;"
-            " retry with: coach apply[/yellow]"
+            ' say "retry" to apply it again.[/yellow]'
         )
 
 
@@ -226,7 +243,6 @@ async def _handle_proposal(
             snapshot,
             line,
             executor=execute,
-            chat=True,
             on_feedback=feedback,
             restate=restate,
         )

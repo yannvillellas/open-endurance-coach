@@ -73,7 +73,7 @@ Available providers:
 
 ## Safety model
 
-Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes` (or explicit `--yes` in scripts). The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only). Applying defaults to a dry-run.
+Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only). Applying defaults to a dry-run.
 
 ## Coaching Methodology
 

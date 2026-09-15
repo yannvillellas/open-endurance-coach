@@ -1,9 +1,6 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
-import typer
-from rich.prompt import Prompt
-
 from open_endurance_coach.chat.gate import (
     Cancelled,
     Declined,
@@ -13,7 +10,6 @@ from open_endurance_coach.chat.gate import (
     PlanSnapshot,
     Proceed,
     handle,
-    is_exit_command,
 )
 from open_endurance_coach.cli.rendering import (
     console,
@@ -48,8 +44,6 @@ async def respond(
     line: str,
     *,
     executor: Executor,
-    chat: bool,
-    discuss_message: str | None = None,
     restate: Callable[[Draft], str] = restate_mutations,
     on_feedback: Callable[[str, Draft], Awaitable[bool | None]] | None = None,
 ) -> Done | PlanSnapshot:
@@ -66,10 +60,6 @@ async def respond(
         case Ignored():
             return snapshot
         case Feedback(feedback):
-            if not chat:
-                if discuss_message is not None:
-                    console.print(discuss_message)
-                return snapshot
             assert snapshot.draft_id is not None
             async with thinking():
                 updated = await engine.submit_feedback(snapshot.draft_id, feedback)
@@ -78,43 +68,4 @@ async def respond(
                 return Done()
             return replace(snapshot, plan_text=restate(updated))
         case Discuss():
-            if discuss_message is not None:
-                console.print(discuss_message)
             return snapshot
-
-
-async def run_confirmation(
-    engine: CoachEngine,
-    snapshot: PlanSnapshot,
-    *,
-    executor: Executor,
-) -> None:
-    current = snapshot
-    while True:
-        prompt_plan(current)
-        try:
-            line = Prompt.ask("[bold cyan]you[/bold cyan]")
-        except EOFError:
-            console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
-            if not console.is_terminal:
-                raise typer.Exit(code=1) from None
-            return
-        except KeyboardInterrupt:
-            console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
-            return
-        if is_exit_command(line):
-            console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
-            return
-        step = await respond(
-            engine,
-            current,
-            line,
-            executor=executor,
-            chat=False,
-            discuss_message=(
-                "[yellow]Discussion lives in `coach chat`; reply yes/no/cancel here.[/yellow]"
-            ),
-        )
-        if isinstance(step, Done):
-            return
-        current = step
