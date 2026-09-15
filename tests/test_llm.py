@@ -884,3 +884,67 @@ async def test_complete_warns_when_estimate_drifts_from_usage(
     with caplog.at_level("WARNING"):
         await client.complete(messages)
     assert "token estimate drift" in caplog.text
+
+
+class _SequenceProvider:
+    name = "sequence"
+
+    def __init__(self, completions: list[LlmCompletion]) -> None:
+        self._completions = completions
+        self.thinking: list[bool] = []
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[LlmMessage],
+        thinking: bool,
+        json_mode: bool,
+        max_tokens: int,
+        temperature: float | None,
+        reasoning_effort: str | None,
+    ) -> LlmCompletion:
+        self.thinking.append(thinking)
+        return self._completions.pop(0)
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _sequence_client(
+    settings: Settings, completions: list[LlmCompletion]
+) -> tuple[LlmClient, _SequenceProvider]:
+    provider = _SequenceProvider(completions)
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "sequence", "max_retries": 3}),
+        {"sequence": provider},
+        sleep=RecordingSleep(),
+    )
+    return client, provider
+
+
+async def test_complete_json_retries_without_thinking_when_content_is_empty(
+    settings: Settings,
+) -> None:
+    client, provider = _sequence_client(
+        settings,
+        [
+            LlmCompletion(content="", finish_reason="length"),
+            LlmCompletion(content='{"summary": "ok"}', finish_reason="stop"),
+        ],
+    )
+    content = await client.complete_json([LlmMessage(role="user", content="json please")])
+    assert json.loads(content) == {"summary": "ok"}
+    assert provider.thinking == [True, False]
+
+
+async def test_complete_json_error_reports_the_cause(settings: Settings) -> None:
+    empty = LlmCompletion(
+        content="",
+        reasoning_content="thinking",
+        usage={"completion_tokens": 8192},
+        finish_reason="length",
+    )
+    client, _ = _sequence_client(settings, [empty, empty, empty])
+    with pytest.raises(LlmError, match=r"finish_reason=length.*completion_tokens=8192"):
+        await client.complete_json([LlmMessage(role="user", content="json please")])

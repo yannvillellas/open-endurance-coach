@@ -29,6 +29,7 @@ class LlmCompletion:
     reasoning_content: str | None = None
     model: str = ""
     usage: Mapping[str, Any] = field(default_factory=dict)
+    finish_reason: str | None = None
 
 
 def _warn_on_token_estimate_drift(messages: list[LlmMessage], completion: LlmCompletion) -> None:
@@ -134,10 +135,18 @@ class LlmClient:
         attempts = max(1, attempts)
         last_error: LlmError | None = None
         for attempt in range(attempts):
-            completion = await self.complete(messages, json_mode=True)
+            completion = await self.complete(
+                messages, json_mode=True, thinking=None if attempt == 0 else False
+            )
             content = completion.content
             if not content or not content.strip():
-                last_error = LlmError("empty content returned")
+                usage = completion.usage or {}
+                last_error = LlmError(
+                    "empty content returned"
+                    f" (finish_reason={completion.finish_reason or 'unknown'},"
+                    f" completion_tokens={usage.get('completion_tokens', 'unknown')},"
+                    f" reasoning={'yes' if completion.reasoning_content else 'no'})"
+                )
             else:
                 try:
                     payload = json.loads(content)

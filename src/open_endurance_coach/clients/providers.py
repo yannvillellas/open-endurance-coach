@@ -100,18 +100,21 @@ class _OpenAiCompatibleProvider:
                 f"{self._error_label} returned non-JSON response: {response.text[:200]}"
             ) from exc
         try:
-            choice = data["choices"][0]["message"]
+            first = data["choices"][0]
+            choice = first["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LlmError(
                 f"unexpected {self._error_label} response shape: {str(data)[:200]}"
             ) from exc
         if not isinstance(choice, dict):
             raise LlmError(f"unexpected {self._error_label} response shape: {str(data)[:200]}")
+        finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
         return LlmCompletion(
             content=choice.get("content") or "",
             reasoning_content=choice.get("reasoning_content"),
             model=data.get("model", model),
             usage=data.get("usage") or {},
+            finish_reason=finish_reason,
         )
 
     async def aclose(self) -> None:
