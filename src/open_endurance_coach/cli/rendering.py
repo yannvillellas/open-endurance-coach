@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 
 from rich.console import Console
@@ -6,10 +6,12 @@ from rich.markup import escape
 
 from open_endurance_coach.engine.coach import ReviewView
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
+    Mutation,
+    UpdateRace,
     UpdateWorkout,
-    WorkoutMutation,
 )
 from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import ApplyReport
@@ -56,12 +58,30 @@ def render_review(view: ReviewView) -> None:
             console.print(f'Answer the coach: {hint} "your RPE and notes"')
 
 
-def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
+def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
     lines = ["Proposed changes:"]
     if not mutations:
         lines.append("  (no calendar changes)")
     for mutation in mutations:
-        if isinstance(mutation, CreateWorkout):
+        if isinstance(mutation, CreateRace):
+            line = (
+                f"  - create {mutation.category} {escape(mutation.name)}"
+                f" on {mutation.start_date_local.isoformat()}"
+            )
+            if mutation.description:
+                line += f": {escape(mutation.description)}"
+            lines.append(line)
+        elif isinstance(mutation, UpdateRace):
+            fields = []
+            if mutation.name is not None:
+                fields.append(f"name={escape(mutation.name)}")
+            if mutation.start_date_local is not None:
+                fields.append(f"date={mutation.start_date_local.isoformat()}")
+            if mutation.category is not None:
+                fields.append(f"category={mutation.category}")
+            detail = ", ".join(fields) if fields else "no changes"
+            lines.append(f"  - update race event {escape(str(mutation.event_id))}: {detail}")
+        elif isinstance(mutation, CreateWorkout):
             line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
             if mutation.description:
                 line += f": {escape(mutation.description)}"

@@ -4,8 +4,11 @@ from typing import Any
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsCalendarClient
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
+    DeleteRace,
     DeleteWorkout,
+    UpdateRace,
     UpdateWorkout,
     WorkoutMutation,
 )
@@ -29,6 +32,8 @@ class CalendarWriter:
     ) -> list[MutationOutcome]:
         outcomes = []
         for mutation in decision.report.mutations:
+            if isinstance(mutation, (CreateRace, UpdateRace, DeleteRace)):
+                raise WriterError("race mutations are not supported yet")
             outcomes.append(await self._apply_mutation(mutation, dry_run=dry_run))
         return outcomes
 

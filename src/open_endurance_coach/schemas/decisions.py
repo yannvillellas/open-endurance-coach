@@ -57,10 +57,69 @@ WorkoutMutation = Annotated[
 ]
 
 
+RaceCategory = Literal["RACE_A", "RACE_B", "RACE_C"]
+
+
+class CreateRace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["create_race"]
+    name: str = Field(min_length=1)
+    start_date_local: date
+    category: RaceCategory
+    description: str | None = None
+    type: str | None = None
+    moving_time: int | None = None
+    icu_training_load: float | None = None
+
+
+class UpdateRace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["update_race"]
+    event_id: int | str
+    name: str | None = None
+    start_date_local: date | None = None
+    category: RaceCategory | None = None
+    description: str | None = None
+    type: str | None = None
+    moving_time: int | None = None
+    icu_training_load: float | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> Self:
+        if all(
+            value is None
+            for value in (
+                self.name,
+                self.start_date_local,
+                self.category,
+                self.description,
+                self.type,
+                self.moving_time,
+                self.icu_training_load,
+            )
+        ):
+            raise ValueError("update mutation must change at least one field")
+        return self
+
+
+class DeleteRace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["delete_race"]
+    event_id: int | str
+
+
+RaceMutation = Annotated[CreateRace | UpdateRace | DeleteRace, Field(discriminator="action")]
+
+Mutation = WorkoutMutation | RaceMutation
+
+
 class DecisionReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1)
     findings: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
-    mutations: list[WorkoutMutation] = Field(default_factory=list)
+    mutations: list[Mutation] = Field(default_factory=list)

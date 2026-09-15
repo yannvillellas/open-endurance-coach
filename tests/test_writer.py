@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
     DeleteWorkout,
@@ -193,3 +194,19 @@ async def test_dry_run_makes_no_writes() -> None:
     assert client.created == []
     assert client.updated == []
     assert client.deleted == []
+
+
+async def test_race_mutation_is_refused_until_the_race_writer_lands() -> None:
+    client = FakeCalendarClient([])
+    writer = CalendarWriter(client)
+    decision = make_decision(
+        CreateRace(
+            action="create_race",
+            name="Autumn Trail Race",
+            start_date_local=date(2026, 9, 27),
+            category="RACE_A",
+        )
+    )
+    with pytest.raises(WriterError, match="race mutations are not supported yet"):
+        await writer.apply_decision(decision)
+    assert client.created == []
