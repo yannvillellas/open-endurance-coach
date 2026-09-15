@@ -75,7 +75,7 @@ class CoachEngine:
     async def _extract(
         self, focus: str, *, user_feedback: str | None, today: date | None
     ) -> CoachContext:
-        deep_query = detect_deep_query(focus)
+        deep_query = detect_deep_query(focus, today=today)
         if deep_query is not None:
             extractor = DeepHistoricalExtractor(self._settings, self._read_client)
             return await extractor.extract(

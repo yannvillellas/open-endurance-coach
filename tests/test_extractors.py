@@ -182,11 +182,37 @@ def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) 
     assert query.metric_focus == metric
 
 
-def test_hill_and_hr_query_keeps_ride_filter() -> None:
+def test_hill_query_without_a_sport_keeps_every_type() -> None:
     query = detect_deep_query("heart rate improve on hilly sections")
     assert query is not None
     assert query.metric_focus == "heart_rate"
+    assert query.activity_types == frozenset()
+
+
+def test_hill_query_naming_a_ride_keeps_the_ride_filter() -> None:
+    query = detect_deep_query("heart rate improve on hilly bike sections")
+    assert query is not None
     assert query.activity_types == frozenset({"Ride"})
+
+
+def test_detect_deep_query_on_past_activity_reference() -> None:
+    query = detect_deep_query("check the activity on 2023-01-15", today=TODAY)
+    assert query is not None
+    assert query.lookback_days >= 382
+
+
+def test_detect_deep_query_on_worded_past_reference() -> None:
+    assert detect_deep_query("my race one year ago", today=TODAY) is not None
+    assert detect_deep_query("28th of september 2023 race", today=TODAY) is not None
+
+
+def test_detect_deep_query_ignores_impossible_dates() -> None:
+    assert detect_deep_query("race on 2026-13-45", today=TODAY) is None
+    assert detect_deep_query("31st of april 2023 race", today=TODAY) is None
+
+
+def test_detect_deep_query_ignores_recent_references() -> None:
+    assert detect_deep_query("how was my run on 2024-01-30?", today=TODAY) is None
 
 
 def test_detect_deep_query_returns_none_for_plain_focus() -> None:
@@ -194,10 +220,10 @@ def test_detect_deep_query_returns_none_for_plain_focus() -> None:
     assert detect_deep_query("Analyze this week") is None
 
 
-def test_climb_focus_restricts_to_rides() -> None:
+def test_climb_focus_without_a_sport_keeps_every_type() -> None:
     query = detect_deep_query("progress on climbs over the last 4 weeks")
     assert query is not None
-    assert query.activity_types == frozenset({"Ride"})
+    assert query.activity_types == frozenset()
 
 
 async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Settings) -> None:
@@ -209,7 +235,7 @@ async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Sett
             "icu_intervals": [{"average_heartrate": 165}],
         }
     )
-    focus = "how did my heart rate improve on hills in the last 3 months"
+    focus = "how did my heart rate improve on hills on my bike in the last 3 months"
     extractor = DeepHistoricalExtractor(settings, client)
     context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
     activities_oldest = next(call for call in client.calls if call[0] == "activities")[1]
@@ -218,6 +244,16 @@ async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Sett
     assert context.activity_detail.id == "fx-a"
     assert context.activity_detail.icu_intervals is not None
     assert len(context.recent_activities) == 4
+
+
+async def test_deep_extraction_keeps_every_sport_when_none_is_named(
+    settings: Settings,
+) -> None:
+    client = make_intervals_client()
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert {activity.type for activity in context.recent_activities} == {"Ride", "Run"}
 
 
 async def test_deep_extraction_rejects_non_deep_focus(settings: Settings) -> None:
