@@ -23,6 +23,28 @@ class LlmCompletion:
     reasoning_content: str | None = None
     model: str = ""
     usage: Mapping[str, Any] = field(default_factory=dict)
+    finish_reason: str | None = None
+
+
+def _completion_diagnostics(completion: LlmCompletion) -> str:
+    usage = completion.usage or {}
+    return (
+        f"finish_reason={completion.finish_reason or 'unknown'},"
+        f" completion_tokens={usage.get('completion_tokens', 'unknown')},"
+        f" reasoning_content={'present' if completion.reasoning_content else 'absent'}"
+    )
+
+
+def _output_budget_error(completion: LlmCompletion) -> str:
+    return (
+        "the model exhausted its output budget before producing an answer"
+        f" ({_completion_diagnostics(completion)});"
+        " raise LLM_MAX_TOKENS or lower LLM_REASONING_EFFORT"
+    )
+
+
+def _empty_content_error(completion: LlmCompletion) -> str:
+    return f"empty content returned ({_completion_diagnostics(completion)})"
 
 
 class LlmProvider(Protocol):
@@ -113,7 +135,9 @@ class LlmClient:
             completion = await self.complete(messages, json_mode=True)
             content = completion.content
             if not content or not content.strip():
-                last_error = LlmError("empty content returned")
+                if completion.finish_reason == "length":
+                    raise LlmError(_output_budget_error(completion))
+                last_error = LlmError(_empty_content_error(completion))
             else:
                 try:
                     payload = json.loads(content)

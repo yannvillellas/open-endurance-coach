@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
+from open_endurance_coach.clients.llm import LlmClient, LlmCompletion, LlmError, LlmMessage
 from open_endurance_coach.clients.providers import DeepSeekProvider, OvhProvider
 from open_endurance_coach.config import Settings
 
@@ -831,3 +831,70 @@ def test_llm_client_unknown_provider_reports_key_present(settings: Settings) -> 
     with pytest.raises(LlmError) as excinfo:
         client.select(provider="ova")
     assert "deepseek  ready (API key set)" in str(excinfo.value)
+
+
+class _SequenceProvider:
+    name = "sequence"
+
+    def __init__(self, completions: list[LlmCompletion]) -> None:
+        self._completions = completions
+        self.calls = 0
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[LlmMessage],
+        thinking: bool,
+        json_mode: bool,
+        max_tokens: int,
+        temperature: float | None,
+        reasoning_effort: str | None,
+    ) -> LlmCompletion:
+        self.calls += 1
+        return self._completions.pop(0)
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _sequence_client(
+    settings: Settings, completions: list[LlmCompletion]
+) -> tuple[LlmClient, _SequenceProvider]:
+    provider = _SequenceProvider(completions)
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "sequence", "max_retries": 3}),
+        {"sequence": provider},
+        sleep=RecordingSleep(),
+    )
+    return client, provider
+
+
+async def test_complete_json_fails_fast_when_the_output_budget_is_exhausted(
+    settings: Settings,
+) -> None:
+    empty = LlmCompletion(
+        content="",
+        reasoning_content="thinking",
+        usage={"completion_tokens": 32768},
+        finish_reason="length",
+    )
+    client, provider = _sequence_client(settings, [empty, empty, empty])
+    with pytest.raises(
+        LlmError, match=r"output budget.*finish_reason=length.*completion_tokens=32768"
+    ):
+        await client.complete_json([LlmMessage(role="user", content="json please")])
+    assert provider.calls == 1
+
+
+async def test_complete_json_retries_transient_empty_content(settings: Settings) -> None:
+    client, provider = _sequence_client(
+        settings,
+        [
+            LlmCompletion(content="", finish_reason="stop"),
+            LlmCompletion(content='{"summary": "ok"}', finish_reason="stop"),
+        ],
+    )
+    content = await client.complete_json([LlmMessage(role="user", content="json please")])
+    assert json.loads(content) == {"summary": "ok"}
+    assert provider.calls == 2
