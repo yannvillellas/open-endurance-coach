@@ -264,7 +264,13 @@ class CoachEngine:
     ) -> list[FeedbackWithReport]:
         return self._store.recent_feedback(limit, max_age_days=max_age_days)
 
-    async def submit_feedback(self, draft_id: int, feedback: str) -> Draft:
+    async def submit_feedback(
+        self,
+        draft_id: int,
+        feedback: str,
+        *,
+        history: list[LlmMessage] | None = None,
+    ) -> Draft:
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
@@ -281,7 +287,7 @@ class CoachEngine:
         except ValidationError:
             context = CoachContext.model_validate({**base, "user_feedback": feedback})
         self._store.add_feedback(draft_id, feedback)
-        report = await self._run_llm(context)
+        report = await self._run_llm(context, history=history)
         self._store.update_draft_report(
             draft_id, report=report, user_feedback=feedback, context=context
         )

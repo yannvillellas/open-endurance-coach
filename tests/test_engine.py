@@ -830,3 +830,21 @@ def test_validate_report_rejects_a_zero_race_distance() -> None:
     )
     with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
+
+
+async def test_submit_feedback_includes_the_conversation_history(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json("ok")), completion(report_json("revised"))])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("plan my week")
+    history = [
+        LlmMessage(role="user", content="I can train 4 days and prefer mornings"),
+        LlmMessage(role="assistant", content="noted"),
+    ]
+    await engine.submit_feedback(draft.id, "make it easier", history=history)
+    prompt = provider.calls[1]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "I can train 4 days and prefer mornings" in prompt
+    assert "make it easier" in prompt

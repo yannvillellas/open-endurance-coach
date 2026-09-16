@@ -307,6 +307,10 @@ async def _handle_proposal(
                 "[dim]The coach did not read that as a planning request; nothing is proposed.[/dim]"
             )
             return True
+        console.print(
+            '[dim]Nothing was written: reply exactly "yes" to approve this plan, or keep'
+            " describing the change you want.[/dim]"
+        )
         return None
 
     def restate(draft: Draft) -> str:
@@ -320,6 +324,7 @@ async def _handle_proposal(
             executor=execute,
             on_feedback=feedback,
             restate=restate,
+            history=session.history,
         )
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
