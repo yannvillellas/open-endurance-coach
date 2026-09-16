@@ -848,3 +848,38 @@ async def test_submit_feedback_includes_the_conversation_history(
     assert "Recent conversation:" in prompt
     assert "I can train 4 days and prefer mornings" in prompt
     assert "make it easier" in prompt
+
+
+async def test_history_is_trimmed_to_the_context_budget(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json("ok"))])
+    engine = make_engine(settings, store, provider)
+    history = [
+        LlmMessage(role="user", content="x" * 40000),
+        LlmMessage(role="assistant", content="short answer"),
+        LlmMessage(role="user", content="recent question"),
+    ]
+    context = CoachContext(focus="status", max_tokens=200)
+    await engine.analyze("status", context=context, history=history)
+    prompt = provider.calls[0]["messages"][1].content
+    assert "x" * 40000 not in prompt
+    assert "recent question" in prompt
+    assert "short answer" not in prompt
+
+
+async def test_history_trimming_keeps_the_newest_turns(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json("ok"))])
+    engine = make_engine(settings, store, provider)
+    history = [
+        LlmMessage(role="user", content="oldest " + "x" * 4000),
+        LlmMessage(role="assistant", content="old answer " + "y" * 4000),
+        LlmMessage(role="user", content="newest question"),
+    ]
+    await engine.analyze(
+        "status", context=CoachContext(focus="status", max_tokens=200), history=history
+    )
+    prompt = provider.calls[0]["messages"][1].content
+    assert "newest question" in prompt
+    assert "oldest " not in prompt
+    assert "old answer " not in prompt

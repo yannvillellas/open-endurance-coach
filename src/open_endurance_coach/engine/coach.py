@@ -29,6 +29,7 @@ from open_endurance_coach.store.records import (
     DraftStatus,
     FeedbackWithReport,
 )
+from open_endurance_coach.tokens import estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
@@ -189,12 +190,32 @@ class CoachEngine:
         except ValidationError:
             return context
 
+    @staticmethod
+    def _fit_history(
+        context: CoachContext, history: list[LlmMessage] | None
+    ) -> list[LlmMessage] | None:
+        if not history:
+            return history
+        remaining = max(0, context.max_tokens - context.estimated_tokens())
+        kept: list[LlmMessage] = []
+        total = 0
+        for turn in reversed(history):
+            cost = estimate_text_tokens(turn.content)
+            if total + cost > remaining:
+                break
+            kept.append(turn)
+            total += cost
+        ordered = list(reversed(kept))
+        while ordered and ordered[0].role == "assistant":
+            ordered.pop(0)
+        return ordered
+
     async def _run_llm(
         self, context: CoachContext, *, history: list[LlmMessage] | None = None
     ) -> DecisionReport:
         today = _today(context, self._settings)
         content = await self._llm_client.complete_json(
-            build_messages(context, self._settings, history),
+            build_messages(context, self._settings, self._fit_history(context, history)),
             validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))

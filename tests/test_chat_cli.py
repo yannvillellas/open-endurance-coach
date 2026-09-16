@@ -1458,3 +1458,4 @@ def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None
     assert 'reply exactly "yes"' in result.output
     assert calendar.created == []
     assert len(provider.calls) == 2
+    assert "Recent conversation:" in provider.calls[1]["messages"][1].content
