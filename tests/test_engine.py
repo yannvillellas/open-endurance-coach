@@ -15,12 +15,13 @@ from open_endurance_coach.engine.coach import (
     StaleDecisionError,
     _validate_report,
 )
+from open_endurance_coach.prompts.prompts import system_prompt
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
-from open_endurance_coach.tokens import estimate_text_tokens
+from open_endurance_coach.tokens import INPUT_TOKEN_CEILING, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
@@ -885,8 +886,8 @@ async def test_history_trimming_keeps_the_newest_turns(settings: Settings, tmp_p
     provider = FakeLlmProvider([completion(report_json("ok"))])
     engine = make_engine(settings, store, provider)
     history = [
-        LlmMessage(role="user", content="oldest " + "x" * 4000),
-        LlmMessage(role="assistant", content="old answer " + "y" * 4000),
+        LlmMessage(role="user", content="oldest " + "x" * 30000),
+        LlmMessage(role="assistant", content="old answer " + "y" * 30000),
         LlmMessage(role="user", content="newest question"),
     ]
     await engine.analyze(
@@ -960,3 +961,24 @@ def test_validate_report_rejects_dates_beyond_the_planning_horizon() -> None:
                 _validate_report(payload, today=today)
         else:
             _validate_report(payload, today=today)
+
+
+async def test_total_prompt_stays_under_the_input_ceiling(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json("ok"))])
+    engine = make_engine(settings, store, provider)
+    context = CoachContext(
+        focus="status",
+        max_tokens=8192,
+        recent_activities=[
+            Activity.model_validate(make_activity(f"fx-{index}", index)) for index in range(1, 31)
+        ],
+    )
+    history = [LlmMessage(role="user", content="h" * 6000) for _ in range(3)]
+    await engine.analyze("status", context=context, history=history)
+    messages = provider.calls[0]["messages"]
+    total = sum(estimate_text_tokens(message.content) for message in messages)
+    assert total <= INPUT_TOKEN_CEILING
+    assert total > estimate_text_tokens(system_prompt(settings))

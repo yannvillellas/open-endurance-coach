@@ -172,6 +172,10 @@ def _json_contract() -> str:
     )
 
 
+def system_prompt(settings: Settings) -> str:
+    return _system_message(settings)
+
+
 def _system_message(settings: Settings) -> str:
     parts = [METHODOLOGY, settings.coach_tone + "\n"]
     if settings.athlete_profile:
