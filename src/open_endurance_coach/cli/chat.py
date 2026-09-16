@@ -35,7 +35,7 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import WorkoutMutation
+from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
@@ -104,7 +104,7 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
         print_error(exc)
 
 
-def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:
+def _open_proposal(draft_id: int, mutations: list[Mutation]) -> ChatState:
     snapshot = PlanSnapshot(
         plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
         draft_id=draft_id,

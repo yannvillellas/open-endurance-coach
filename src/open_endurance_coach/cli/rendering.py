@@ -1,14 +1,17 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 
 from rich.console import Console
 from rich.markup import escape
 
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
+    DeleteRace,
+    Mutation,
+    UpdateRace,
     UpdateWorkout,
-    WorkoutMutation,
 )
 from open_endurance_coach.writer.records import ApplyReport
 
@@ -37,12 +40,49 @@ def render_report(report: DecisionReport) -> None:
         console.print(f"  [yellow]? {escape(question)}[/yellow]")
 
 
-def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
+def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
     lines = ["Proposed changes:"]
     if not mutations:
         lines.append("  (no calendar changes)")
     for mutation in mutations:
-        if isinstance(mutation, CreateWorkout):
+        if isinstance(mutation, CreateRace):
+            line = (
+                f"  - create {mutation.category} {escape(mutation.name)}"
+                f" on {mutation.start_date_local.isoformat()}"
+            )
+            details = []
+            if mutation.type:
+                details.append(escape(mutation.type))
+            if mutation.moving_time is not None:
+                details.append(f"moving_time={mutation.moving_time}")
+            if mutation.icu_training_load is not None:
+                details.append(f"load={mutation.icu_training_load:g}")
+            if details:
+                line += f" ({', '.join(details)})"
+            if mutation.description:
+                line += f": {escape(mutation.description)}"
+            lines.append(line)
+        elif isinstance(mutation, UpdateRace):
+            fields = []
+            if mutation.name is not None:
+                fields.append(f"name={escape(mutation.name)}")
+            if mutation.start_date_local is not None:
+                fields.append(f"date={mutation.start_date_local.isoformat()}")
+            if mutation.category is not None:
+                fields.append(f"category={mutation.category}")
+            if mutation.type is not None:
+                fields.append(f"type={escape(mutation.type)}")
+            if mutation.moving_time is not None:
+                fields.append(f"moving_time={mutation.moving_time}")
+            if mutation.description is not None:
+                fields.append(f"description={escape(mutation.description)}")
+            if mutation.icu_training_load is not None:
+                fields.append(f"load={mutation.icu_training_load:g}")
+            detail = ", ".join(fields) if fields else "no changes"
+            lines.append(f"  - update race event {escape(str(mutation.event_id))}: {detail}")
+        elif isinstance(mutation, DeleteRace):
+            lines.append(f"  - delete race event {escape(str(mutation.event_id))}")
+        elif isinstance(mutation, CreateWorkout):
             line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
             details = []
             if mutation.type:

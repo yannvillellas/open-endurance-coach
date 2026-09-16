@@ -1,12 +1,14 @@
+import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
-from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.engine.coach import CoachEngine, _validate_report
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
@@ -504,3 +506,30 @@ async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
     with pytest.raises(LlmError, match="validation failed"):
         await engine.analyze("plan my week", today=TODAY)
+
+
+async def test_approve_rejects_a_mutation_that_is_now_in_the_past(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    paris_today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    yesterday = paris_today - timedelta(days=1)
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(mutations=[{**CREATE_MUTATION, "start_date_local": yesterday.isoformat()}])
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    with pytest.raises(ValueError, match="on or after today"):
+        engine.approve(draft_id)
+
+
+async def test_validate_report_rejects_a_past_dated_update(settings: Settings) -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[{"action": "update", "event_id": 7, "start_date_local": "2024-01-01"}]
+        )
+    )
+    with pytest.raises(ValueError, match="on or after today"):
+        _validate_report(payload, today=date(2024, 2, 1))

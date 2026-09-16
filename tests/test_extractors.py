@@ -33,7 +33,7 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert client.calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-02-01", "2024-02-15"),
+        ("events", "2024-02-01", "2024-02-15", None),
         ("sport_settings",),
     ]
 

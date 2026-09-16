@@ -1,11 +1,15 @@
 from datetime import date
+from typing import Any
 
 import pytest
 
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
+    DeleteRace,
     DeleteWorkout,
+    UpdateRace,
     UpdateWorkout,
 )
 from open_endurance_coach.store.records import Decision
@@ -178,3 +182,200 @@ async def test_mixed_decision_applies_in_order() -> None:
     assert len(client.created) == 1
     assert client.updated == [("10001", {"moving_time": 4200})]
     assert client.deleted == ["10001"]
+
+
+def make_race_create(**overrides: object) -> CreateRace:
+    payload: dict[str, object] = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": date(2026, 9, 27),
+        "category": "RACE_A",
+    }
+    payload.update(overrides)
+    return CreateRace.model_validate(payload)
+
+
+async def test_create_race_posts_race_category_payload() -> None:
+    client = FakeCalendarClient()
+    writer = CalendarWriter(client)
+    mutation = make_race_create(type="Run")
+    outcomes = await writer.apply_decision(make_decision(mutation))
+    assert client.created[0] == {
+        "category": "RACE_A",
+        "name": "Autumn Trail Race",
+        "start_date_local": "2026-09-27T00:00:00",
+        "type": "Run",
+        "id": 20000,
+    }
+    assert outcomes[0].action == "create_race"
+    assert outcomes[0].target == "created"
+
+
+async def test_create_race_updates_same_name_and_date_across_race_categories() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert client.updated == [
+        (
+            "10001",
+            {
+                "category": "RACE_A",
+                "name": "Autumn Trail Race",
+                "start_date_local": "2026-09-27T00:00:00",
+            },
+        )
+    ]
+    assert outcomes[0].target == "updated"
+    assert outcomes[0].event_id == 10001
+
+
+async def test_create_race_ignores_same_name_workout_event() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="WORKOUT")]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert len(client.created) == 1
+    assert outcomes[0].target == "created"
+
+
+async def test_update_race_puts_only_changed_fields_including_category() -> None:
+    client = FakeCalendarClient([make_event(10001, "2026-09-27", category="RACE_B")])
+    writer = CalendarWriter(client)
+    mutation = UpdateRace(action="update_race", event_id=10001, category="RACE_A", moving_time=7200)
+    outcomes = await writer.apply_decision(make_decision(mutation))
+    assert client.updated == [("10001", {"category": "RACE_A", "moving_time": 7200})]
+    assert outcomes[0].action == "update_race"
+    assert outcomes[0].target == "updated"
+
+
+async def test_update_race_refuses_non_race_event() -> None:
+    client = FakeCalendarClient([make_event(10001, "2026-09-27", category="WORKOUT")])
+    writer = CalendarWriter(client)
+    mutation = UpdateRace(action="update_race", event_id=10001, category="RACE_A")
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(mutation))
+    assert client.updated == []
+
+
+async def test_update_race_missing_event_raises() -> None:
+    client = FakeCalendarClient()
+    writer = CalendarWriter(client)
+    mutation = UpdateRace(action="update_race", event_id=10001, category="RACE_A")
+    with pytest.raises(WriterError, match="not found"):
+        await writer.apply_decision(make_decision(mutation))
+
+
+async def test_delete_race_removes_race_event() -> None:
+    client = FakeCalendarClient([make_event(10001, "2026-09-27", category="RACE_A")])
+    writer = CalendarWriter(client)
+    mutation = DeleteRace(action="delete_race", event_id=10001)
+    outcomes = await writer.apply_decision(make_decision(mutation))
+    assert client.deleted == ["10001"]
+    assert outcomes[0].action == "delete_race"
+    assert outcomes[0].target == "deleted"
+
+
+async def test_delete_race_refuses_workout_event() -> None:
+    client = FakeCalendarClient([make_event(10001, "2026-09-27", category="WORKOUT")])
+    writer = CalendarWriter(client)
+    mutation = DeleteRace(action="delete_race", event_id=10001)
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(mutation))
+    assert client.deleted == []
+
+
+async def test_delete_race_missing_event_is_skipped() -> None:
+    client = FakeCalendarClient()
+    writer = CalendarWriter(client)
+    mutation = DeleteRace(action="delete_race", event_id=10001)
+    outcomes = await writer.apply_decision(make_decision(mutation))
+    assert client.deleted == []
+    assert outcomes[0].target == "skipped"
+
+
+async def test_mixed_workout_and_race_decision_applies_in_order() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_A")]
+    )
+    writer = CalendarWriter(client)
+    decision = make_decision(
+        CreateWorkout(action="create", name="Taper Opener", start_date_local=date(2026, 9, 22)),
+        make_race_create(),
+    )
+    outcomes = await writer.apply_decision(decision)
+    assert [outcome.action for outcome in outcomes] == ["create", "create_race"]
+    assert len(client.created) == 1
+    assert client.updated == [
+        (
+            "10001",
+            {
+                "category": "RACE_A",
+                "name": "Autumn Trail Race",
+                "start_date_local": "2026-09-27T00:00:00",
+            },
+        )
+    ]
+
+
+class _LeakyCategoryClient(FakeCalendarClient):
+    """Returns the same event for any category filter, like a misbehaving server."""
+
+    def __init__(self, event: dict[str, Any]) -> None:
+        super().__init__([event])
+        self._event = event
+
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        return [dict(self._event)]
+
+
+async def test_create_workout_refuses_a_same_name_race_event() -> None:
+    event = make_event(10001, "2024-02-05", name="Tempo Session", category="RACE_B")
+    writer = CalendarWriter(_LeakyCategoryClient(event))
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+    with pytest.raises(WriterError, match="non-WORKOUT"):
+        await writer.apply_decision(make_decision(mutation))
+
+
+async def test_create_race_refuses_a_same_name_workout_event() -> None:
+    event = make_event(10001, "2024-02-05", name="Autumn Trail", category="WORKOUT")
+    writer = CalendarWriter(_LeakyCategoryClient(event))
+    mutation = CreateRace(
+        action="create_race",
+        name="Autumn Trail",
+        start_date_local=date(2024, 2, 5),
+        category="RACE_A",
+    )
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(mutation))
+
+
+async def test_create_workout_updates_a_leaked_category_less_event() -> None:
+    client = _LeakyCategoryClient(
+        {"id": 10001, "name": "Tempo Session", "start_date_local": "2026-09-22T00:00:00"}
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2026, 9, 22))
+        )
+    )
+    assert client.created == []
+    assert outcomes[0].target == "updated"
+
+
+async def test_create_race_updates_a_leaked_category_less_event() -> None:
+    client = _LeakyCategoryClient(
+        {"id": 10001, "name": "Autumn Trail Race", "start_date_local": "2026-09-27T00:00:00"}
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert outcomes[0].target == "updated"

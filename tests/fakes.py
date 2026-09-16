@@ -58,9 +58,16 @@ class FakeIntervalsClient:
         self.calls.append(("wellness", oldest, newest))
         return list(self.wellness)
 
-    async def list_events(self, oldest: str, newest: str) -> list[dict[str, Any]]:
-        self.calls.append(("events", oldest, newest))
-        return list(self.events)
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append(("events", oldest, newest, category))
+        allowed = {part.strip() for part in category.split(",")} if category else None
+        return [
+            dict(event)
+            for event in self.events
+            if allowed is None or event.get("category") in allowed
+        ]
 
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         self.calls.append(("sport_settings",))
@@ -143,11 +150,12 @@ class FakeCalendarClient:
     async def list_events(
         self, oldest: str, newest: str, category: str | None = None
     ) -> list[dict[str, Any]]:
+        allowed = {part.strip() for part in category.split(",")} if category else None
         rows = []
         for event in self.events:
             if not (oldest <= event["start_date_local"][:10] < newest):
                 continue
-            if category and event.get("category") != category:
+            if allowed is not None and event.get("category") not in allowed:
                 continue
             rows.append(dict(event))
         return rows
