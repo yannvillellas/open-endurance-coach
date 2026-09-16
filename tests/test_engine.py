@@ -18,7 +18,7 @@ from open_endurance_coach.engine.coach import (
 )
 from open_endurance_coach.prompts.prompts import system_prompt
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
+from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, UpdateWorkout
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
@@ -1054,4 +1054,6 @@ def test_validate_report_accepts_string_event_ids() -> None:
         report_json(mutations=[{"action": "update", "event_id": "e20001", "moving_time": 3600}])
     )
     report = _validate_report(payload, today=date(2024, 2, 1))
-    assert report.mutations[0].event_id == "e20001"
+    mutation = report.mutations[0]
+    assert isinstance(mutation, UpdateWorkout)
+    assert mutation.event_id == "e20001"
