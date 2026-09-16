@@ -208,6 +208,8 @@ class CoachEngine:
         ordered = list(reversed(kept))
         while ordered and ordered[0].role == "assistant":
             ordered.pop(0)
+        if not ordered and history:
+            logger.warning("dropping the whole conversation history to fit the context budget")
         return ordered
 
     async def _run_llm(

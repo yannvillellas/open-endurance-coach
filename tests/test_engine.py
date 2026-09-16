@@ -883,3 +883,17 @@ async def test_history_trimming_keeps_the_newest_turns(settings: Settings, tmp_p
     assert "newest question" in prompt
     assert "oldest " not in prompt
     assert "old answer " not in prompt
+
+
+async def test_full_history_drop_is_logged(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json("ok"))])
+    engine = make_engine(settings, store, provider)
+    history = [LlmMessage(role="user", content="x" * 40000)]
+    with caplog.at_level("WARNING"):
+        await engine.analyze(
+            "status", context=CoachContext(focus="status", max_tokens=50), history=history
+        )
+    assert "dropping the whole conversation history" in caplog.text
