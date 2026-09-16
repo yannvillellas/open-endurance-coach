@@ -379,3 +379,38 @@ async def test_create_race_updates_a_leaked_category_less_event() -> None:
     outcomes = await writer.apply_decision(make_decision(make_race_create()))
     assert client.created == []
     assert outcomes[0].target == "updated"
+
+
+async def test_create_ignores_a_same_name_event_on_the_next_day() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2099-01-02", name="Tempo Session", category="WORKOUT")]
+    )
+    writer = CalendarWriter(client)
+    outcome = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2099, 1, 1))
+        )
+    )
+    assert outcome[0].target == "created"
+    assert [event["start_date_local"] for event in client.created] == ["2099-01-01T00:00:00"]
+
+
+async def test_create_race_ignores_a_same_name_race_on_the_next_day() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2099-01-02", name="Autumn Trail Race", category="RACE_A")]
+    )
+    writer = CalendarWriter(client)
+    outcome = await writer.apply_decision(
+        make_decision(
+            CreateRace(
+                action="create_race",
+                name="Autumn Trail Race",
+                start_date_local=date(2099, 1, 1),
+                category="RACE_B",
+                moving_time=3600,
+                icu_training_load=90,
+            )
+        )
+    )
+    assert outcome[0].target == "created"
+    assert [event["start_date_local"] for event in client.created] == ["2099-01-01T00:00:00"]

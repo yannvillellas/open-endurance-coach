@@ -1,15 +1,15 @@
 from datetime import date, timedelta
-from typing import Any, assert_never, get_args
+from typing import Any, assert_never
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsCalendarClient
 from open_endurance_coach.schemas.decisions import (
+    RACE_CATEGORIES,
     CreateRace,
     CreateWorkout,
     DeleteRace,
     DeleteWorkout,
     Mutation,
-    RaceCategory,
     UpdateRace,
     UpdateWorkout,
 )
@@ -18,7 +18,6 @@ from open_endurance_coach.store.records import Decision
 from .records import MutationOutcome
 
 WORKOUT_CATEGORY = "WORKOUT"
-RACE_CATEGORIES: tuple[str, ...] = get_args(RaceCategory)
 _RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
 
 
@@ -30,9 +29,11 @@ class CalendarWriter:
     def __init__(self, client: IntervalsCalendarClient) -> None:
         self._client = client
 
-    async def apply_decision(self, decision: Decision) -> list[MutationOutcome]:
+    async def apply_decision(
+        self, decision: Decision, *, mutations: list[Mutation] | None = None
+    ) -> list[MutationOutcome]:
         outcomes = []
-        for mutation in decision.report.mutations:
+        for mutation in mutations if mutations is not None else decision.report.mutations:
             outcomes.append(await self._apply_mutation(mutation))
         return outcomes
 
@@ -88,7 +89,9 @@ class CalendarWriter:
             day.isoformat(), (day + timedelta(days=1)).isoformat(), category=WORKOUT_CATEGORY
         )
         for row in rows:
-            if row.get("name") == name:
+            if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
+                day.isoformat()
+            ):
                 return row
         return None
 
@@ -164,7 +167,9 @@ class CalendarWriter:
             category=_RACE_CATEGORY_FILTER,
         )
         for row in rows:
-            if row.get("name") == name:
+            if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
+                day.isoformat()
+            ):
                 return row
         return None
 

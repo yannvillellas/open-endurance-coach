@@ -464,3 +464,71 @@ def test_budget_keeps_goal_races_while_other_sections_are_trimmed() -> None:
     assert [item.name for item in context.goal_races] == ["Autumn Trail Race"]
     assert context.recent_activities == []
     assert context.wellness == []
+
+
+async def test_deep_extraction_carries_goal_races_and_rollup(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "name": "Trail Race",
+                "start_date_local": "2024-02-20T00:00:00",
+                "category": "RACE_B",
+                "type": "Run",
+            }
+        ]
+    )
+    focus = "how much did my heart rate improve over the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert [race.name for race in context.goal_races] == ["Trail Race"]
+    assert len(context.training_rollup) == 2
+    race_call = next(call for call in client.calls if call[0] == "events" and call[3] is not None)
+    assert race_call[1:] == ("2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C")
+    summary_call = next(call for call in client.calls if call[0] == "athlete_summary")
+    assert summary_call[1:] == ("2023-11-03", "2024-02-01")
+
+
+async def test_irregular_summary_spacing_degrades_to_no_rollup(settings: Settings) -> None:
+    client = make_intervals_client(
+        athlete_summary=[make_summary_week("2024-01-22"), make_summary_week("2024-01-24")]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    assert context.training_rollup == []
+
+
+def test_budget_keeps_pinned_activities_under_pressure() -> None:
+    activities = [
+        Activity.model_validate(make_activity(f"fx-{index}", index)) for index in range(1, 10)
+    ]
+    pinned = activities[0]
+    target = CoachContext(focus="f", recent_activities=[pinned], today=TODAY)
+    context = build_within_budget(
+        focus="f",
+        recent_activities=activities,
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        activity_keep_ids={pinned.id},
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=target.estimated_tokens(),
+        today=TODAY,
+    )
+    assert [activity.id for activity in context.recent_activities] == [pinned.id]
+
+
+def test_day_month_with_a_relative_year_resolves_to_last_year() -> None:
+    query = detect_deep_query(
+        "Could you check the race of the 28th of september last year.",
+        today=date(2026, 9, 16),
+    )
+    assert query is not None
+    assert query.reference == date(2025, 9, 28)
+    assert query.lookback_days >= 360
+
+
+def test_bare_relative_year_keeps_the_generic_lookback() -> None:
+    query = detect_deep_query("what did I do last year", today=date(2026, 9, 16))
+    assert query is not None
+    assert query.reference == date(2025, 9, 16)

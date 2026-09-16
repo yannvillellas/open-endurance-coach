@@ -197,7 +197,7 @@ class FakeCalendarClient:
         allowed = {part.strip() for part in category.split(",")} if category else None
         rows = []
         for event in self.events:
-            if not (oldest <= event["start_date_local"][:10] < newest):
+            if not (oldest <= event["start_date_local"][:10] <= newest):
                 continue
             if allowed is not None and event.get("category") not in allowed:
                 continue

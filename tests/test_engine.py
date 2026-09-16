@@ -8,7 +8,12 @@ import pytest
 
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
-from open_endurance_coach.engine.coach import CoachEngine, _validate_report
+from open_endurance_coach.engine.coach import (
+    CoachEngine,
+    PlaceholderMutationError,
+    StaleDecisionError,
+    _validate_report,
+)
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
@@ -514,8 +519,8 @@ async def test_approve_rejects_a_mutation_that_is_now_in_the_past(
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    paris_today = datetime.now(ZoneInfo("Europe/Paris")).date()
-    yesterday = paris_today - timedelta(days=1)
+    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    yesterday = race_today - timedelta(days=1)
     report = DecisionReport.model_validate(
         json.loads(
             report_json(mutations=[{**CREATE_MUTATION, "start_date_local": yesterday.isoformat()}])
@@ -533,4 +538,275 @@ async def test_validate_report_rejects_a_past_dated_update(settings: Settings) -
         )
     )
     with pytest.raises(ValueError, match="on or after today"):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+async def test_approve_rejects_a_race_mutation_that_is_now_in_the_past(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create_race",
+                        "name": "Old Race",
+                        "start_date_local": (race_today - timedelta(days=1)).isoformat(),
+                        "category": "RACE_A",
+                        "moving_time": 3600,
+                        "icu_training_load": 90,
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    with pytest.raises(ValueError, match="on or after today"):
+        engine.approve(draft_id)
+
+
+async def test_apply_refuses_a_decision_that_became_past_dated(
+    settings: Settings, tmp_path: Path
+) -> None:
+    calendar = FakeCalendarClient()
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider(), writer=CalendarWriter(calendar))
+    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Old Session",
+                        "start_date_local": (race_today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    decision = store.approve_draft(draft_id)
+    with pytest.raises(StaleDecisionError, match="no mutations left to apply"):
+        await engine.apply(decision.id)
+    assert calendar.created == []
+
+
+async def test_discard_stale_decisions_removes_now_past_approvals(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Old Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_draft(draft_id)
+    assert engine.discard_stale_decisions() == [(1, "dates that have passed")]
+    assert store.list_unapplied_decisions() == []
+
+
+def test_validate_report_rejects_placeholder_race_values() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create_race",
+                    "name": "Race",
+                    "start_date_local": "2099-01-01",
+                    "category": "RACE_A",
+                    "moving_time": 0,
+                    "icu_training_load": 90,
+                }
+            ]
+        )
+    )
+    with pytest.raises(ValueError, match="race duration/load must be real values"):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_placeholder_event_id() -> None:
+    payload = json.loads(
+        report_json(mutations=[{"action": "update", "event_id": 0, "moving_time": 3600}])
+    )
+    with pytest.raises(ValueError, match="event_id 0 is a placeholder"):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_digit_string_placeholder_event_id() -> None:
+    for placeholder in ("0", "-1", "  "):
+        payload = json.loads(
+            report_json(
+                mutations=[{"action": "update", "event_id": placeholder, "moving_time": 3600}]
+            )
+        )
+        with pytest.raises(PlaceholderMutationError):
+            _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_a_race_create_without_load() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create_race",
+                    "name": "Race",
+                    "start_date_local": "2099-01-01",
+                    "category": "RACE_A",
+                }
+            ]
+        )
+    )
+    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+async def test_apply_skips_past_dated_mutations_and_writes_the_rest(
+    settings: Settings, tmp_path: Path
+) -> None:
+    calendar = FakeCalendarClient()
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider(), writer=CalendarWriter(calendar))
+    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Past Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    },
+                    {
+                        "action": "create",
+                        "name": "Future Session",
+                        "start_date_local": (today + timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    },
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    decision = store.approve_draft(draft_id)
+    applied = await engine.apply(decision.id)
+    assert applied.decisions[0].skipped == ["past-dated"]
+    assert [outcome.target for outcome in applied.decisions[0].outcomes] == ["created"]
+    assert [event["name"] for event in calendar.created] == ["Future Session"]
+
+
+async def test_discard_keeps_a_mixed_decision_with_future_mutations(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Past Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    },
+                    {
+                        "action": "create",
+                        "name": "Future Session",
+                        "start_date_local": (today + timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    },
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_draft(draft_id)
+    assert engine.discard_stale_decisions() == []
+    assert len(store.list_unapplied_decisions()) == 1
+
+
+async def test_apply_placeholder_only_decision_raises_placeholder_error(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(
+        settings, store, FakeLlmProvider(), writer=CalendarWriter(FakeCalendarClient())
+    )
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create_race",
+                        "name": "Race",
+                        "start_date_local": "2099-01-01",
+                        "category": "RACE_A",
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    decision = store.approve_draft(draft_id)
+    with pytest.raises(PlaceholderMutationError, match="only contains placeholder mutations"):
+        await engine.apply(decision.id)
+
+
+async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider())
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create_race",
+                        "name": "Race",
+                        "start_date_local": "2099-01-01",
+                        "category": "RACE_A",
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_draft(draft_id)
+    assert engine.discard_stale_decisions() == [(1, "placeholder values")]
+
+
+def test_validate_report_rejects_negative_race_values() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create_race",
+                    "name": "Race",
+                    "start_date_local": "2099-01-01",
+                    "category": "RACE_A",
+                    "moving_time": -60,
+                    "icu_training_load": 90,
+                }
+            ]
+        )
+    )
+    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))

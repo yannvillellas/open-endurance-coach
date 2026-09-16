@@ -25,6 +25,7 @@ def build_within_budget(
     *,
     goal_races: list[GoalRace] | None = None,
     training_rollup: list[TrainingWeek] | None = None,
+    activity_keep_ids: set[str] | None = None,
     user_feedback: str | None,
     activity_detail: Activity | None,
     max_tokens: int,
@@ -35,6 +36,7 @@ def build_within_budget(
     events = list(upcoming_events)
     races = list(goal_races or [])
     rollup = list(training_rollup or [])
+    keep_ids = activity_keep_ids or set()
     while True:
         payload: dict[str, Any] = {
             "focus": focus,
@@ -53,12 +55,14 @@ def build_within_budget(
         if probe.estimated_tokens() <= max_tokens:
             return CoachContext.model_validate(payload)
         if activities and _activity_droppable(activities, today):
-            oldest_index = min(
-                range(len(activities)),
-                key=lambda index: activities[index].start_date_local,
-            )
-            activities.pop(oldest_index)
-        elif rollup:
+            droppable = [
+                index for index, activity in enumerate(activities) if activity.id not in keep_ids
+            ]
+            if droppable:
+                oldest_index = min(droppable, key=lambda index: activities[index].start_date_local)
+                activities.pop(oldest_index)
+                continue
+        if rollup:
             rollup.pop(0)
         elif wellness_rows:
             wellness_rows.pop()

@@ -1,6 +1,7 @@
+import logging
 from datetime import date, datetime, timedelta
 from itertools import pairwise
-from typing import Any, get_args
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from open_endurance_coach.clients.protocols import IntervalsReadClient
@@ -13,7 +14,7 @@ from open_endurance_coach.schemas.context import (
     SportWeek,
     TrainingWeek,
 )
-from open_endurance_coach.schemas.decisions import RaceCategory
+from open_endurance_coach.schemas.decisions import RACE_CATEGORIES
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 ACTIVITY_LOOKBACK_DAYS = 14
@@ -22,7 +23,7 @@ UPCOMING_DAYS = 14
 RACE_HORIZON_DAYS = 120
 ROLLUP_LOOKBACK_DAYS = 90
 DEFAULT_MAX_TOKENS = 8192
-RACE_CATEGORIES: tuple[RaceCategory, ...] = get_args(RaceCategory)
+logger = logging.getLogger(__name__)
 RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
 
 
@@ -129,7 +130,11 @@ async def fetch_training_rollup(client: IntervalsReadClient, current: date) -> l
         start=(current - timedelta(days=ROLLUP_LOOKBACK_DAYS)).isoformat(),
         end=current.isoformat(),
     )
-    return training_rollup(rows, today=current)
+    try:
+        return training_rollup(rows, today=current)
+    except ValueError as exc:
+        logger.warning("dropping the training rollup: %s", exc)
+        return []
 
 
 class StandardExtractor:

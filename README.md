@@ -6,10 +6,11 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 ## Current Capabilities
 
-- **Data Extraction:** Standard scope (recent activities, wellness, upcoming events, sport settings, goal races over a 120-day horizon with macro phase anchors, and a 90-day weekly training rollup with CTL/ATL/ramp and per-sport load) and deep-historical scope (trend queries such as "heart rate improvement on hills over the last 3 months"), both budgeted to fit the model's token limit.
+- **Data Extraction:** Standard scope (recent activities, wellness, upcoming events, sport settings, goal races over a 120-day horizon with macro phase anchors, and a 90-day weekly training rollup with CTL/ATL/ramp and per-sport load) and deep-historical scope (trend queries such as "heart rate improvement on hills over the last 3 months"), which carries the same goal-race and rollup context so a trend answer can be tied back to the race being trained for. Both are budgeted to fit the model's token limit.
 - **Analysis:** OVHcloud AI Endpoints' free tier (Qwen3.5-397B-A17B, JSON mode, thinking enabled; no API key) — or DeepSeek — enforces Joe Friel's periodization principles and Dr. Andrew Coggan's power analytics, comparing executed training against planned targets and current readiness (CTL/ATL, HRV, sleep).
-- **Draft & Review Loop:** Every analysis produces a validated draft under a strict schema — invalid LLM output is retried, then rejected. The coach solicits missing RPE/fueling data and re-analyzes with the athlete's feedback before anything can be approved.
-- **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and a WORKOUT-only category guard — updates and deletes never touch race or non-workout events.
+- **Draft & Review Loop:** Every analysis produces a validated draft under a strict schema — invalid LLM output is retried, then rejected. The coach asks for anything material it is missing (availability, constraints, injury, RPE, race details) and re-analyzes with your answer before anything can be approved.
+- **Race-Aware Planning:** With a goal race in the calendar the coach plans backwards from it — states the macro phases (Base, Build, Peak, Taper) with weekly load targets, then proposes concrete workouts for the next 7–14 days. Races are first-class events (`RACE_A/B/C`) it can create or adjust; missing race details (distance, climbing, expected load) are asked for, never estimated.
+- **Calendar Writer:** Approved decisions are applied to Intervals.icu with idempotent create/update and strict category guards — workout mutations only touch `WORKOUT` events, race mutations only touch `RACE_A/B/C` events (an unlabelled event matched by name+date is adopted by the mutation's family), and updates/deletes never cross between the two families.
 - **Manual-First Triggers:** The CLI drives the loop today. Webhook triggers (activity uploaded/analyzed, calendar updated) and a wellness poller are on the roadmap behind the same engine; an Intervals.icu OAuth app has been created for that step.
 
 ## Chat mode (the main interface)
@@ -18,8 +19,8 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 - **Free text runs a full analysis.** Every message is classified from the data snapshot: a fresh snapshot is extracted when needed (first message, requests like "analyze/review/check my week", or trend questions), otherwise the cached snapshot is reused.
 - **The coach decides what you need.** Every message is classified as _chat_ (answer from the analysis already in the session), _analysis_ (review executed training), or _plan_ (propose calendar changes). A full analysis is reused for follow-ups — there is no re-analysis until you ask for one or the question needs historical depth. If a change would help during a chat, he offers it instead of interrupting you with a confirmation gate.
-- **Material questions block proposals.** If an answer would change the plan (missing figures the plan depends on, available training days, an injury, an immovable constraint), the coach asks and does _not_ propose calendar changes until you answer — or say `proceed with assumptions` and he states the assumption in the plan.
-- **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes.
+- **Material questions block proposals, for any plan** — a training block, a race event, or both. If an answer would change the plan (available training days, constraints, injury, RPE, race duration/climbing/expected load), the coach asks and does _not_ propose calendar changes until you answer — or say `proceed with assumptions` and he states the assumption in the plan.
+- **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes. If a decision is approved but the write fails, say `retry`; a decision that is still unapplied at the next startup is offered again, or discarded with a notice once its dates have passed.
 - **Memory**: sessions are seeded with recent exchanges (last 10 feedback rows from the last 90 days, up to 2048 tokens, self-trimmed). Start clean with `coach --fresh`. Stored history is pruned automatically to `HISTORY_DAYS` (default 180) at startup; `/forget` wipes it now, or `/forget N` keeps only the last N days.
 - Session commands only: `/provider` and `/model` show or switch the LLM, `/forget [days]`, `/help`, `/exit` — everything else is conversation.
 
@@ -80,7 +81,7 @@ Available providers:
 
 ## Safety model
 
-Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event.
+Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only).
 
 ## Coaching Methodology
 

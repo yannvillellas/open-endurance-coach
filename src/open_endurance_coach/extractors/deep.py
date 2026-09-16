@@ -13,11 +13,14 @@ from open_endurance_coach.extractors.standard import (
     DEFAULT_MAX_TOKENS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
+    fetch_goal_races,
+    fetch_training_rollup,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
+REFERENCE_WINDOW_DAYS = 3
 
 _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
@@ -42,6 +45,7 @@ _ISO_DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
 _WORDED_DATE_RE = re.compile(
     r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\s+(20\d{2})\b", re.IGNORECASE
 )
+_DAY_MONTH_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\b", re.IGNORECASE)
 _PAST_REFERENCE_RE = re.compile(
     r"\b(last year|previous year|a year ago|one year ago|years ago)\b", re.IGNORECASE
 )
@@ -89,6 +93,14 @@ def _referenced_date(focus: str, today: date) -> date | None:
             except ValueError:
                 return None
     if _PAST_REFERENCE_RE.search(focus):
+        day_month = _DAY_MONTH_RE.search(focus)
+        if day_month is not None:
+            month = _MONTHS.get(day_month.group(2).lower())
+            if month is not None:
+                try:
+                    return date(today.year - 1, month, int(day_month.group(1)))
+                except ValueError:
+                    return None
         return today - timedelta(days=365)
     return None
 
@@ -98,6 +110,7 @@ class DeepQuery:
     lookback_days: int
     metric_focus: str | None = None
     activity_types: frozenset[str] = frozenset()
+    reference: date | None = None
 
 
 def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | None:
@@ -122,7 +135,12 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
     else:
         metric = None
     activity_types = _RIDE_TYPES if metric is not None and _RIDE_RE.search(focus) else frozenset()
-    return DeepQuery(lookback_days=lookback, metric_focus=metric, activity_types=activity_types)
+    return DeepQuery(
+        lookback_days=lookback,
+        metric_focus=metric,
+        activity_types=activity_types,
+        reference=reference,
+    )
 
 
 class DeepHistoricalExtractor:
@@ -159,6 +177,16 @@ class DeepHistoricalExtractor:
         activities = [Activity.model_validate(item) for item in activities_raw]
         if query.activity_types:
             activities = [a for a in activities if a.type in query.activity_types]
+        keep_ids: set[str] = set()
+        if query.reference is not None:
+            window = timedelta(days=REFERENCE_WINDOW_DAYS)
+            keep_ids = {
+                activity.id
+                for activity in activities
+                if query.reference - window
+                <= activity.start_date_local.date()
+                <= query.reference + window
+            }
         activities = sorted(activities, key=self._relevance(query), reverse=True)
         activity_detail = None
         if activities:
@@ -170,6 +198,8 @@ class DeepHistoricalExtractor:
         events_raw = await self._client.list_events(
             current.isoformat(), (current + timedelta(days=UPCOMING_DAYS)).isoformat()
         )
+        goal_races = await fetch_goal_races(self._client, current)
+        rollup = await fetch_training_rollup(self._client, current)
         settings_raw = await self._client.get_sport_settings()
         return build_within_budget(
             focus=focus,
@@ -183,8 +213,11 @@ class DeepHistoricalExtractor:
                 (Event.model_validate(item) for item in events_raw),
                 key=lambda event: event.start_date_local,
             ),
+            goal_races=goal_races,
+            training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
             user_feedback=user_feedback,
+            activity_keep_ids=keep_ids,
             activity_detail=activity_detail,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
             today=current,

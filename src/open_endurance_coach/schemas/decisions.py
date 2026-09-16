@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -53,6 +53,7 @@ class DeleteWorkout(BaseModel):
 
 
 RaceCategory = Literal["RACE_A", "RACE_B", "RACE_C"]
+RACE_CATEGORIES: tuple[RaceCategory, ...] = get_args(RaceCategory)
 
 
 class CreateRace(BaseModel):
