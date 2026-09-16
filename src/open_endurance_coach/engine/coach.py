@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -143,8 +144,10 @@ class CoachEngine:
         read_client: IntervalsReadClient,
         llm_client: LlmClient,
         writer: CalendarWriter | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings
+        self._clock = clock or (lambda: datetime.now(ZoneInfo(settings.app_timezone)))
         self._store = store
         self._read_client = read_client
         self._llm_client = llm_client
@@ -271,7 +274,7 @@ class CoachEngine:
         return draft
 
     def today(self) -> date:
-        return datetime.now(ZoneInfo(self._settings.app_timezone)).date()
+        return self._clock().date()
 
     def unapplied_decisions(self) -> list[Decision]:
         return self._store.list_unapplied_decisions()

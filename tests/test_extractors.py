@@ -9,9 +9,7 @@ from open_endurance_coach.extractors.standard import StandardExtractor, macro_ph
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import make_activity, make_intervals_client, make_summary_week, make_wellness
-
-TODAY = date(2024, 2, 1)
+from .fakes import TODAY, make_activity, make_intervals_client, make_summary_week, make_wellness
 
 
 async def test_standard_extraction_populates_all_sections(settings: Settings) -> None:

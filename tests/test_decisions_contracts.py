@@ -214,7 +214,7 @@ def test_race_mutation_rejects_non_race_category() -> None:
         )
 
 
-def test_workout_mutation_rejects_race_category() -> None:
+def test_workout_mutations_reject_an_unknown_category_field() -> None:
     with pytest.raises(ValidationError):
         CreateWorkout.model_validate({**CREATE_PAYLOAD, "category": "RACE_A"})
     with pytest.raises(ValidationError):

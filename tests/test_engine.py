@@ -2,7 +2,6 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -27,6 +26,8 @@ from open_endurance_coach.tokens import INPUT_TOKEN_CEILING, estimate_text_token
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
+    CREATE_MUTATION,
+    TODAY,
     FakeCalendarClient,
     FakeClock,
     FakeIntervalsClient,
@@ -36,22 +37,11 @@ from .fakes import (
     make_activity,
     make_activity_list,
     make_intervals_client,
+    near_future,
     report_json,
 )
 
-TODAY = date(2024, 2, 1)
-
-
-def _near_future(days: int = 30) -> str:
-    return (datetime.now(ZoneInfo("Europe/Paris")).date() + timedelta(days=days)).isoformat()
-
-
-CREATE_MUTATION = {
-    "action": "create",
-    "name": "Tempo Session",
-    "start_date_local": _near_future(),
-    "moving_time": 3600,
-}
+CLOCK = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
 
 
 def make_engine(
@@ -66,7 +56,14 @@ def make_engine(
         {"fake": provider},
         sleep=RecordingSleep(),
     )
-    return CoachEngine(settings, store, client or make_intervals_client(), llm, writer=writer)
+    return CoachEngine(
+        settings,
+        store,
+        client or make_intervals_client(),
+        llm,
+        writer=writer,
+        clock=lambda: CLOCK,
+    )
 
 
 def make_activity_model(activity_id: str, day: int, **overrides: Any) -> Activity:
@@ -205,7 +202,7 @@ async def test_submit_feedback_trims_an_over_budget_context(
     feedback = "A very long feedback text that must fit the context budget"
     probe = CoachContext(
         focus="status check",
-        today=datetime.now(ZoneInfo(settings.app_timezone)).date(),
+        today=CLOCK.date(),
     )
     context = probe.model_copy(
         update={
@@ -535,7 +532,7 @@ async def test_approve_rejects_a_mutation_that_is_now_in_the_past(
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    race_today = CLOCK.date()
     yesterday = race_today - timedelta(days=1)
     report = DecisionReport.model_validate(
         json.loads(
@@ -562,7 +559,7 @@ async def test_approve_rejects_a_race_mutation_that_is_now_in_the_past(
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    race_today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -590,7 +587,7 @@ async def test_apply_refuses_a_decision_that_became_past_dated(
     calendar = FakeCalendarClient()
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider(), writer=CalendarWriter(calendar))
-    race_today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    race_today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -617,7 +614,7 @@ async def test_discard_stale_decisions_removes_now_past_approvals(
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -699,7 +696,7 @@ async def test_apply_skips_past_dated_mutations_and_writes_the_rest(
     calendar = FakeCalendarClient()
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider(), writer=CalendarWriter(calendar))
-    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -733,7 +730,7 @@ async def test_discard_keeps_a_mixed_decision_with_future_mutations(
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    today = datetime.now(ZoneInfo(settings.app_timezone)).date()
+    today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -774,7 +771,7 @@ async def test_apply_placeholder_only_decision_raises_placeholder_error(
                     {
                         "action": "create_race",
                         "name": "Race",
-                        "start_date_local": _near_future(),
+                        "start_date_local": near_future(),
                         "category": "RACE_A",
                     }
                 ]
@@ -797,7 +794,7 @@ async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_pa
                     {
                         "action": "create_race",
                         "name": "Race",
-                        "start_date_local": _near_future(),
+                        "start_date_local": near_future(),
                         "category": "RACE_A",
                     }
                 ]
@@ -1010,13 +1007,13 @@ async def test_partial_apply_retry_is_idempotent(settings: Settings, tmp_path: P
                     {
                         "action": "create",
                         "name": "First Session",
-                        "start_date_local": _near_future(1),
+                        "start_date_local": near_future(1),
                         "moving_time": 3600,
                     },
                     {
                         "action": "create",
                         "name": "Second Session",
-                        "start_date_local": _near_future(2),
+                        "start_date_local": near_future(2),
                         "moving_time": 3600,
                     },
                 ]
