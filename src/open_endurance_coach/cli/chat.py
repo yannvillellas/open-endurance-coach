@@ -66,9 +66,15 @@ _BARE_COMMAND_RE = re.compile(
     re.IGNORECASE,
 )
 _ASSUME_RE = re.compile(
-    r"\b(proceed with assumptions|use assumptions|assume|i don'?t know|no idea|not sure yet)\b",
-    re.IGNORECASE,
+    r"\b(proceed with assumptions|use assumptions|assume it|assume so)\b", re.IGNORECASE
 )
+_NEGATED_ASSUME_RE = re.compile(
+    r"\b(?:don'?t|do not|never)\b[\s\w]{0,24}?\b(?:assume|assumptions)\b", re.IGNORECASE
+)
+
+
+def _assumes_answers(focus: str) -> bool:
+    return _ASSUME_RE.search(focus) is not None and _NEGATED_ASSUME_RE.search(focus) is None
 
 
 def _print_needs_input(questions: list[str]) -> None:
@@ -112,11 +118,11 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
-    today = session.context.today if session.context is not None else None
+    today = engine.today()
     if session.context is not None and _needs_fresh_context(focus, today):
         cached = None
     elif session.context is not None:
-        cached = session.context.model_copy(update={"focus": focus})
+        cached = session.context.model_copy(update={"focus": focus, "today": today})
     else:
         cached = None
     async with thinking():
@@ -133,7 +139,7 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
     needs_input = draft.report.needs_input
-    assumed = _ASSUME_RE.search(focus) is not None
+    assumed = _assumes_answers(focus)
     if draft.report.mutations:
         if draft.report.intent != "plan":
             console.print(
@@ -153,6 +159,9 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
 
 
 async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
+    if session.pending_decision_id is None:
+        console.print("Nothing to apply.")
+        return
     try:
         report = await engine.apply(session.pending_decision_id)
     except RECOVERABLE_EXCEPTIONS as exc:
@@ -161,9 +170,15 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     if not report.decisions:
         console.print("Nothing to apply.")
         return
-    session.pending_decision_id = None
     render_apply(report)
     session.append(text, "Applied the recorded calendar changes.")
+    remaining = engine.unapplied_decisions()
+    session.pending_decision_id = remaining[0].id if remaining else None
+    if remaining:
+        console.print(
+            f"[yellow]Decision #{remaining[0].id} is still unapplied."
+            ' Say "retry" to apply it.[/yellow]'
+        )
 
 
 async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> ChatState | None:
@@ -178,7 +193,12 @@ async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> 
 
 
 async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
-    decision = engine.approve(draft_id)
+    try:
+        decision = engine.approve(draft_id)
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
+        session.pending_decision_id = None
+        return
     try:
         render_apply(await engine.apply(decision.id))
         session.pending_decision_id = None
@@ -231,15 +251,22 @@ async def _handle_proposal(
                 context = CoachContext.model_validate(
                     {
                         **context_base.model_dump(),
+                        "focus": line,
+                        "today": engine.today(),
                         "current_proposal": draft.report,
                     }
                 )
             except ValidationError:
-                context = context_base
+                context = context_base.model_copy(update={"focus": line, "today": engine.today()})
             async with thinking():
                 answer = await engine.analyze(line, context=context, history=session.history)
             render_report(answer.report)
             session.append(line, assistant_turn(answer.report).content)
+            if answer.report.needs_input and not _assumes_answers(line):
+                _print_needs_input(answer.report.needs_input)
+                return state
+            if answer.report.mutations:
+                return _open_proposal(answer.id, answer.report.mutations)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -252,9 +279,19 @@ async def _handle_proposal(
         await _apply_proposal(current, session, draft_id)
 
     async def feedback(line: str, updated: Draft) -> bool | None:
+        if updated.report.needs_input and not _assumes_answers(line):
+            _print_needs_input(updated.report.needs_input)
+            questions = "; ".join(updated.report.needs_input)
+            session.append(line, f"{assistant_turn(updated.report).content}\nNeeds: {questions}")
+            return True
         session.append(line, assistant_turn(updated.report).content)
         if not updated.report.mutations:
             console.print("[yellow]No changes proposed anymore.[/yellow]")
+            return True
+        if updated.report.intent != "plan":
+            console.print(
+                "[dim]The coach did not read that as a planning request; nothing is proposed.[/dim]"
+            )
             return True
         return None
 
@@ -292,6 +329,7 @@ async def _run_command(
                 return None
             days = int(args[0])
         removed = engine.prune_history(days)
+        session.pending_decision_id = None
         if days is None:
             session.history = []
             session.context = None
@@ -313,6 +351,14 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
             console.print(
                 f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
             )
+    unapplied = engine.unapplied_decisions()
+    if unapplied:
+        oldest = unapplied[0]
+        session.pending_decision_id = oldest.id
+        console.print(
+            f"[yellow]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
+            ' was recorded but never applied. Say "retry" to apply it.[/yellow]'
+        )
     if not fresh:
         session.seed(
             engine.recent_history(

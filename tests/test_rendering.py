@@ -93,12 +93,19 @@ def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_mutations_plan_text_lists_each_mutation() -> None:
     mutations: list[WorkoutMutation] = [
-        CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)),
+        CreateWorkout(
+            action="create",
+            name="Tempo Session",
+            start_date_local=date(2024, 2, 5),
+            type="Ride",
+            moving_time=3600,
+            icu_training_load=84,
+        ),
         UpdateWorkout(action="update", event_id=10001, moving_time=4200),
     ]
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
-    assert "- create Tempo Session on 2024-02-05" in text
+    assert "- create Tempo Session on 2024-02-05 (Ride, moving_time=3600, load=84)" in text
     assert "- update event 10001: moving_time=4200" in text
 
 

@@ -44,6 +44,15 @@ def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
     for mutation in mutations:
         if isinstance(mutation, CreateWorkout):
             line = f"  - create {escape(mutation.name)} on {mutation.start_date_local.isoformat()}"
+            details = []
+            if mutation.type:
+                details.append(escape(mutation.type))
+            if mutation.moving_time is not None:
+                details.append(f"moving_time={mutation.moving_time}")
+            if mutation.icu_training_load is not None:
+                details.append(f"load={mutation.icu_training_load:g}")
+            if details:
+                line += f" ({', '.join(details)})"
             if mutation.description:
                 line += f": {escape(mutation.description)}"
             lines.append(line)
@@ -58,7 +67,7 @@ def mutations_plan_text(mutations: list[WorkoutMutation]) -> str:
             if mutation.description is not None:
                 fields.append(f"description={escape(mutation.description)}")
             if mutation.icu_training_load is not None:
-                fields.append(f"load={mutation.icu_training_load}")
+                fields.append(f"load={mutation.icu_training_load:g}")
             detail = ", ".join(fields) if fields else "no changes"
             lines.append(f"  - update event {escape(str(mutation.event_id))}: {detail}")
         else:

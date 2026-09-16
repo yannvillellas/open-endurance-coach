@@ -449,3 +449,18 @@ def test_prune_before_deletes_dependents_created_after_the_cutoff(tmp_path: Path
     assert store.list_drafts() == []
     assert store.list_feedback(draft_id) == []
     assert store.list_decisions() == []
+
+
+def test_rejected_legacy_drafts_are_dropped_on_open(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    store = CoachStore(path)
+    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "rejected feedback")
+    store._connection.execute("UPDATE drafts SET status = 'rejected' WHERE id = ?", (draft_id,))
+    store._connection.commit()
+    store.close()
+
+    reopened = CoachStore(path)
+    assert reopened.list_drafts() == []
+    assert reopened.list_feedback(draft_id) == []
+    reopened.close()

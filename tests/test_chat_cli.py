@@ -1148,3 +1148,184 @@ def test_chat_fresh_skips_seeding(patched: Any) -> None:
     assert "Remembering" not in result.output
     assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
     assert "Recent conversation:" in provider.calls[1]["messages"][1].content
+
+
+def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[CREATE_MUTATION], needs_input=["What is your goal time?"])
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my block - don't assume anything\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_negated_use_assumptions_does_not_override(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[CREATE_MUTATION], needs_input=["What is your goal time?"])
+            )
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="plan my block - don't use assumptions\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+
+
+def test_chat_revision_with_needs_input_keeps_the_gate_closed(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(
+                report_json("Need more.", mutations=[CREATE_MUTATION], needs_input=["Goal time?"])
+            ),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
+
+
+def test_chat_revision_to_chat_intent_closes_the_gate(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Just advice.", intent="chat", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\n/exit\n")
+    assert result.exit_code == 0
+    assert "did not read that as a planning request" in result.output
+    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 1
+
+
+def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nhow about 45 minutes instead?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert len(provider.calls) == 2
+    prompt = provider.calls[1]["messages"][1].content
+    assert "Current message:\nhow about 45 minutes instead?" in prompt
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
+
+
+def test_chat_retry_with_nothing_pending_does_not_write(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    engine, store = patched(provider, calendar=calendar)
+
+    async def broken_apply(decision_id: int | None = None) -> Any:
+        raise AssertionError("apply must not be called")
+
+    engine.apply = broken_apply
+    result = runner.invoke(cli_main.app, [], input="retry\n/exit\n")
+    assert result.exit_code == 0
+    assert "Nothing to apply." in result.output
+    assert "recorded but never applied" not in result.output
+    assert calendar.created == []
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_startup_offers_an_unapplied_decision_after_restart(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    original = engine.apply
+
+    async def broken_apply(decision_id: int | None = None) -> Any:
+        raise RuntimeError("writer exploded")
+
+    engine.apply = broken_apply
+    first = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
+    assert first.exit_code == 0
+    assert len(store.list_unapplied_decisions()) == 1
+
+    engine.apply = original
+    second = runner.invoke(cli_main.app, [], input="retry\n/exit\n")
+    assert second.exit_code == 0
+    assert "was recorded but never applied" in second.output
+    assert len(calendar.created) == 1
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_gate_question_with_needs_input_keeps_the_gate_closed(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(
+                report_json(
+                    "Need more.",
+                    mutations=[CREATE_MUTATION],
+                    needs_input=["What is your goal time?"],
+                )
+            ),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nwhat does this train exactly?\nno\n"
+    )
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "What is your goal time?" in result.output
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 1
+
+
+def test_chat_retry_applies_each_unapplied_decision_in_order(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    _, store = patched(provider, calendar=calendar)
+    for index in range(2):
+        mutation = dict(CREATE_MUTATION, name=f"Session {index}")
+        draft_id = store.save_draft(
+            focus=f"f{index}",
+            report=DecisionReport.model_validate(json.loads(report_json(mutations=[mutation]))),
+            context=CoachContext(focus=f"f{index}"),
+        )
+        store.approve_draft(draft_id)
+
+    result = runner.invoke(cli_main.app, [], input="retry\nretry\n/exit\n")
+    assert result.exit_code == 0
+    assert "was recorded but never applied" in result.output
+    assert "Decision #2 is still unapplied" in result.output
+    assert len(calendar.created) == 2
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_forget_clears_the_retry_pointer(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    _, store = patched(provider, calendar=calendar)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json(mutations=[CREATE_MUTATION]))),
+        context=CoachContext(focus="f"),
+    )
+    store.approve_draft(draft_id)
+
+    result = runner.invoke(cli_main.app, [], input="/forget\nretry\n/exit\n")
+    assert result.exit_code == 0
+    assert "Forgot" in result.output
+    assert "Nothing to apply." in result.output
+    assert "decision not found" not in result.output
+    assert calendar.created == []

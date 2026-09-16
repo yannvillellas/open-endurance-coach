@@ -54,6 +54,13 @@ class CoachStore:
         }
         if "applied_at" not in columns:
             self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
+        self._connection.executescript(
+            "DELETE FROM feedback WHERE draft_id IN"
+            " (SELECT id FROM drafts WHERE status = 'rejected');"
+            "DELETE FROM decisions WHERE draft_id IN"
+            " (SELECT id FROM drafts WHERE status = 'rejected');"
+            "DELETE FROM drafts WHERE status = 'rejected';"
+        )
         self._connection.commit()
 
     def prune_before(self, cutoff: datetime) -> dict[str, int]:

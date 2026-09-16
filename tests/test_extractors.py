@@ -95,10 +95,16 @@ def test_hill_query_without_a_sport_keeps_every_type() -> None:
     assert query.activity_types == frozenset()
 
 
-def test_hill_query_naming_a_ride_keeps_the_ride_filter() -> None:
+def test_hill_query_naming_a_ride_keeps_the_ride_family() -> None:
     query = detect_deep_query("heart rate improve on hilly bike sections")
     assert query is not None
-    assert query.activity_types == frozenset({"Ride"})
+    assert {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide"} <= query.activity_types
+
+
+def test_gravel_ride_named_in_a_hill_trend_keeps_the_ride_family() -> None:
+    query = detect_deep_query("how did my heart rate improve on hilly gravel sections")
+    assert query is not None
+    assert "GravelRide" in query.activity_types
 
 
 def test_detect_deep_query_on_past_activity_reference() -> None:
@@ -245,3 +251,13 @@ def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None
         today=date(2024, 2, 1),
     )
     assert [activity.id for activity in context.recent_activities] == ["fx-new-easy"]
+
+
+def test_recent_reference_within_the_standard_window_is_not_deep() -> None:
+    assert detect_deep_query("what did I do on 2024-01-25?", today=date(2024, 2, 1)) is None
+
+
+def test_reference_older_than_the_standard_window_is_deep() -> None:
+    query = detect_deep_query("what did I do on 2024-01-18?", today=date(2024, 2, 1))
+    assert query is not None
+    assert query.lookback_days >= 21

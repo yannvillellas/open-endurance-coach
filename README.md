@@ -67,6 +67,7 @@ All settings come from environment variables or a `.env` file (see `.env.example
 | `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                                                                    |
 | `CHAT_HISTORY_MAX_TOKENS`          | `2048`           | Chat memory budget (self-trimmed) (>= 1)                                                                                      |
 | `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for feedback rows loaded as chat memory (>= 1)                                                                     |
+| `HISTORY_DAYS`                     | `180`            | Stored history kept (drafts, decisions, feedback, seen activities); 0 = keep forever (>= 0)                                    |
 
 To use DeepSeek instead, either set `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` in `.env`, or override a single run without editing anything: `coach -p deepseek` (`-p` for short; the matching default model is selected automatically; add `--model`/`-m` to force one). DeepSeek model IDs: `deepseek-flash` (DeepSeek-V4.1-Flash, the default) and `deepseek-v4-pro` (DeepSeek-V4-Pro) — e.g. `coach -p deepseek -m deepseek-v4-pro` or `LLM_MODEL=deepseek-v4-pro`; `/model deepseek-v4-pro` switches mid-session. Inside the chat, the active provider and model are printed on startup and `/provider [name]` / `/model [name]` switch them mid-session. A provider can only be selected when it is usable: an unknown name (e.g. `ova`) lists the available providers with their credential status, and DeepSeek without a key reports `No API key for provider 'deepseek'; set DEEPSEEK_API_KEY` immediately.
 
@@ -79,7 +80,7 @@ Available providers:
 
 ## Safety model
 
-Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only).
+Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates) and refuses to update or delete anything that is not a WORKOUT-category event.
 
 ## Coaching Methodology
 

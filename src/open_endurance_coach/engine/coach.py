@@ -142,6 +142,12 @@ class CoachEngine:
             raise ValueError(f"draft not found: {draft_id}")
         return draft
 
+    def today(self) -> date:
+        return datetime.now(ZoneInfo(self._settings.app_timezone)).date()
+
+    def unapplied_decisions(self) -> list[Decision]:
+        return self._store.list_unapplied_decisions()
+
     def llm_selection(self) -> tuple[str, str]:
         return (self._llm_client.provider_name, self._llm_client.model_name)
 
