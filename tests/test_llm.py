@@ -951,3 +951,17 @@ async def test_complete_warns_when_estimate_drifts_from_usage(
     with caplog.at_level("WARNING"):
         await client.complete(messages)
     assert "token estimate drift" in caplog.text
+
+
+async def test_complete_json_fails_fast_on_truncated_non_empty_content(
+    settings: Settings,
+) -> None:
+    truncated = LlmCompletion(
+        content='{"summary": "cut off',
+        usage={"completion_tokens": 32768},
+        finish_reason="length",
+    )
+    client, provider = _sequence_client(settings, [truncated, truncated, truncated])
+    with pytest.raises(LlmError, match=r"output budget.*finish_reason=length"):
+        await client.complete_json([LlmMessage(role="user", content="json please")])
+    assert provider.calls == 1
