@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
 
@@ -13,10 +14,13 @@ from open_endurance_coach.cli.rendering import (
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
+    DeleteRace,
+    Mutation,
+    UpdateRace,
     UpdateWorkout,
-    WorkoutMutation,
 )
 from open_endurance_coach.store.records import Draft, DraftStatus
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
@@ -52,9 +56,9 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     from datetime import date
 
     from open_endurance_coach.cli.rendering import mutations_plan_text
-    from open_endurance_coach.schemas.decisions import CreateWorkout, WorkoutMutation
+    from open_endurance_coach.schemas.decisions import CreateWorkout, Mutation
 
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(
             action="create",
             name="Aerobic Swim",
@@ -92,7 +96,7 @@ def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_mutations_plan_text_lists_each_mutation() -> None:
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(
             action="create",
             name="Tempo Session",
@@ -145,7 +149,7 @@ def test_plan_texts_escape_llm_markup() -> None:
     from open_endurance_coach.cli.rendering import apply_plan_text, mutations_plan_text
     from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
 
-    mutations: list[WorkoutMutation] = [
+    mutations: list[Mutation] = [
         CreateWorkout(
             action="create",
             name="Weird [bold]Session[/bold]",
@@ -195,3 +199,53 @@ def test_print_error_escapes_exception_text(capsys: pytest.CaptureFixture[str]) 
     out = capsys.readouterr().out
     assert "error:" in out
     assert "bad [bold]payload[/bold]" in out
+
+
+def test_mutations_plan_text_renders_race_create_with_type_and_category() -> None:
+    mutations: list[Mutation] = [
+        CreateRace(
+            action="create_race",
+            name="Autumn Trail Race",
+            start_date_local=date(2026, 9, 27),
+            category="RACE_A",
+            type="TrailRun",
+            moving_time=10800,
+            distance=10900,
+            icu_training_load=142,
+            description="hilly loop",
+        ),
+    ]
+    text = mutations_plan_text(mutations)
+    assert (
+        "- create RACE_A Autumn Trail Race on 2026-09-27"
+        " (TrailRun, moving_time=10800, distance=10900m, load=142): hilly loop" in text
+    )
+
+
+def test_mutations_plan_text_renders_race_update_and_delete() -> None:
+    mutations: list[Mutation] = [
+        UpdateRace(
+            action="update_race",
+            event_id=20001,
+            category="RACE_B",
+            type="Run",
+            moving_time=7200,
+        ),
+        DeleteRace(action="delete_race", event_id=20002),
+    ]
+    text = mutations_plan_text(mutations)
+    assert "- update race event 20001: category=RACE_B, type=Run, moving_time=7200" in text
+    assert "- delete race event 20002" in text
+
+
+def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
+    from open_endurance_coach.cli.rendering import render_apply
+    from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
+
+    report = ApplyReport(
+        decisions=[AppliedDecision(decision_id=7, outcomes=[], skipped=["past-dated"])]
+    )
+    render_apply(report)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Decision #7: 1 mutation(s) skipped (past-dated)" in out
+    assert "only partially updated" in out

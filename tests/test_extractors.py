@@ -1,15 +1,15 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
-from open_endurance_coach.extractors.standard import StandardExtractor
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
+from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import make_activity, make_intervals_client, make_wellness
+from .fakes import make_activity, make_intervals_client, make_summary_week, make_wellness
 
 TODAY = date(2024, 2, 1)
 
@@ -33,7 +33,9 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert client.calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-02-01", "2024-02-15"),
+        ("events", "2024-02-01", "2024-02-15", None),
+        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
+        ("athlete_summary", "2023-11-03", "2024-02-01"),
         ("sport_settings",),
     ]
 
@@ -261,3 +263,272 @@ def test_reference_older_than_the_standard_window_is_deep() -> None:
     query = detect_deep_query("what did I do on 2024-01-18?", today=date(2024, 2, 1))
     assert query is not None
     assert query.lookback_days >= 21
+
+
+async def test_standard_extraction_builds_goal_races(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "id": 90001,
+                "name": "Spring Half",
+                "start_date_local": "2024-03-01T00:00:00",
+                "category": "RACE_A",
+                "type": "Run",
+            },
+            {
+                "id": 90002,
+                "name": "Club Crit",
+                "start_date_local": "2024-02-08T00:00:00",
+                "category": "RACE_B",
+                "type": "Ride",
+            },
+            {
+                "id": 90003,
+                "name": "Tempo Session",
+                "start_date_local": "2024-02-05T00:00:00",
+                "category": "WORKOUT",
+            },
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    assert [race.category for race in context.goal_races] == ["RACE_B", "RACE_A"]
+    nearest, furthest = context.goal_races
+    assert nearest.event_id == 90002
+    assert nearest.name == "Club Crit"
+    assert nearest.date == date(2024, 2, 8)
+    assert nearest.type == "Ride"
+    assert nearest.days_to_race == 7
+    assert nearest.weeks_to_race == 1
+    assert nearest.phase == "Taper"
+    assert furthest.days_to_race == 29
+    assert furthest.weeks_to_race == 5
+    assert furthest.phase == "Build"
+
+
+@pytest.mark.parametrize(
+    ("days", "expected"),
+    [
+        (0, "Race week"),
+        (7, "Taper"),
+        (8, "Peak"),
+        (28, "Peak"),
+        (29, "Build"),
+        (84, "Build"),
+        (85, "Base"),
+        (120, "Base"),
+    ],
+)
+def test_macro_phase_maps_days_to_race(days: int, expected: str) -> None:
+    assert macro_phase(days) == expected
+
+
+def test_training_rollup_is_ascending_with_partial_current_week() -> None:
+    weeks = training_rollup(
+        [make_summary_week("2024-01-30"), make_summary_week("2024-01-23")], today=TODAY
+    )
+    assert [week.week_start for week in weeks] == [date(2024, 1, 23), date(2024, 1, 30)]
+    assert weeks[0].partial is False
+    assert weeks[-1].partial is True
+    assert weeks[-1].fitness == 30.0
+    assert [sport.category for sport in weeks[-1].sports] == ["Ride", "Run"]
+
+
+def test_training_rollup_zero_fills_missing_weeks() -> None:
+    weeks = training_rollup(
+        [make_summary_week("2024-01-30"), make_summary_week("2024-01-16")], today=TODAY
+    )
+    assert [week.week_start for week in weeks] == [
+        date(2024, 1, 16),
+        date(2024, 1, 23),
+        date(2024, 1, 30),
+    ]
+    gap = weeks[1]
+    assert (gap.sessions, gap.time_s, gap.load, gap.fitness) == (0, 0, None, None)
+    assert gap.sports == []
+
+
+def test_training_rollup_skips_zero_session_sports() -> None:
+    weeks = training_rollup(
+        [
+            make_summary_week(
+                "2024-01-30",
+                sports=[
+                    {"category": "Ride", "count": 0, "time": 0, "training_load": 0},
+                    {"category": "Run", "count": 1, "time": 2400, "training_load": 30},
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+    assert [sport.category for sport in weeks[0].sports] == ["Run"]
+    assert weeks[0].sports[0].sessions == 1
+
+
+def test_training_rollup_rejects_non_weekly_spacing() -> None:
+    with pytest.raises(ValueError, match="bucket spacing"):
+        training_rollup(
+            [make_summary_week("2024-01-30"), make_summary_week("2024-01-28")], today=TODAY
+        )
+
+
+def test_training_rollup_returns_empty_without_rows() -> None:
+    assert training_rollup([], today=TODAY) == []
+
+
+def test_budget_keeps_the_newest_rollup_weeks_when_trimming() -> None:
+    weeks = [
+        TrainingWeek(
+            week_start=date(2024, 1, 1) + timedelta(days=7 * index),
+            sessions=5,
+            time_s=14400,
+            load=320.0,
+        )
+        for index in range(6)
+    ]
+    full = CoachContext(focus="f", training_rollup=weeks).estimated_tokens()
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        training_rollup=weeks,
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=full - 40,
+    )
+    assert len(context.training_rollup) < len(weeks)
+    assert context.training_rollup[-1].week_start == weeks[-1].week_start
+    assert context.training_rollup[0].week_start == weeks[1].week_start
+
+
+async def test_standard_extraction_includes_the_training_rollup(settings: Settings) -> None:
+    extractor = StandardExtractor(settings, make_intervals_client())
+    context = await extractor.extract("status check", today=TODAY)
+    assert [week.week_start.isoformat() for week in context.training_rollup] == [
+        "2024-01-22",
+        "2024-01-29",
+    ]
+    assert [week.partial for week in context.training_rollup] == [False, True]
+    assert context.training_rollup[-1].form == 2.0
+
+
+async def test_past_dated_race_is_not_a_goal_race(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "id": 9001,
+                "name": "Old Race",
+                "start_date_local": "2024-01-04T00:00:00",
+                "category": "RACE_A",
+            },
+            {
+                "id": 9002,
+                "name": "Coming Race",
+                "start_date_local": "2024-03-03T00:00:00",
+                "category": "RACE_B",
+            },
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    assert [race.name for race in context.goal_races] == ["Coming Race"]
+
+
+def test_budget_keeps_goal_races_while_other_sections_are_trimmed() -> None:
+    race = GoalRace(
+        event_id=1,
+        name="Autumn Trail Race",
+        date=date(2024, 2, 20),
+        category="RACE_B",
+        days_to_race=19,
+        weeks_to_race=3,
+        phase="Peak",
+    )
+    activities = [Activity.model_validate(make_activity("fx-old", 1))]
+    wellness = [Wellness.model_validate(make_wellness(28))]
+    target = CoachContext(focus="f", goal_races=[race], today=TODAY)
+    context = build_within_budget(
+        focus="f",
+        recent_activities=activities,
+        wellness=wellness,
+        upcoming_events=[],
+        sport_settings=[],
+        goal_races=[race],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=target.estimated_tokens(),
+        today=TODAY,
+    )
+    assert [item.name for item in context.goal_races] == ["Autumn Trail Race"]
+    assert context.recent_activities == []
+    assert context.wellness == []
+
+
+async def test_deep_extraction_carries_goal_races_and_rollup(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            {
+                "name": "Trail Race",
+                "start_date_local": "2024-02-20T00:00:00",
+                "category": "RACE_B",
+                "type": "Run",
+            }
+        ]
+    )
+    focus = "how much did my heart rate improve over the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert [race.name for race in context.goal_races] == ["Trail Race"]
+    assert len(context.training_rollup) == 2
+    race_call = next(call for call in client.calls if call[0] == "events" and call[3] is not None)
+    assert race_call[1:] == ("2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C")
+    summary_call = next(call for call in client.calls if call[0] == "athlete_summary")
+    assert summary_call[1:] == ("2023-11-03", "2024-02-01")
+
+
+async def test_irregular_summary_spacing_degrades_to_no_rollup(settings: Settings) -> None:
+    client = make_intervals_client(
+        athlete_summary=[make_summary_week("2024-01-22"), make_summary_week("2024-01-24")]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    assert context.training_rollup == []
+
+
+def test_budget_keeps_pinned_activities_under_pressure() -> None:
+    activities = [
+        Activity.model_validate(make_activity(f"fx-{index}", index)) for index in range(1, 10)
+    ]
+    pinned = activities[0]
+    target = CoachContext(focus="f", recent_activities=[pinned], today=TODAY)
+    context = build_within_budget(
+        focus="f",
+        recent_activities=activities,
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        activity_keep_ids={pinned.id},
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=target.estimated_tokens(),
+        today=TODAY,
+    )
+    assert [activity.id for activity in context.recent_activities] == [pinned.id]
+
+
+def test_day_month_with_a_relative_year_resolves_to_last_year() -> None:
+    query = detect_deep_query(
+        "Could you check the race of the 28th of september last year.",
+        today=date(2026, 9, 16),
+    )
+    assert query is not None
+    assert query.reference == date(2025, 9, 28)
+    assert query.lookback_days >= 360
+
+
+def test_bare_relative_year_keeps_the_generic_lookback() -> None:
+    query = detect_deep_query("what did I do last year", today=date(2026, 9, 16))
+    assert query is not None
+    assert query.reference == date(2025, 9, 16)

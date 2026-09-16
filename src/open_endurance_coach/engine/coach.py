@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -12,7 +13,15 @@ from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect
 from open_endurance_coach.extractors.standard import StandardExtractor
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
+from open_endurance_coach.schemas.decisions import (
+    CreateRace,
+    CreateWorkout,
+    DecisionReport,
+    DeleteRace,
+    DeleteWorkout,
+    UpdateRace,
+    UpdateWorkout,
+)
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Decision,
@@ -23,6 +32,8 @@ from open_endurance_coach.store.records import (
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
+logger = logging.getLogger(__name__)
+
 
 def _today(context: CoachContext, settings: Settings) -> date:
     if context.today is not None:
@@ -30,17 +41,100 @@ def _today(context: CoachContext, settings: Settings) -> date:
     return datetime.now(ZoneInfo(settings.app_timezone)).date()
 
 
+class StaleDecisionError(ValueError):
+    """The decision's dated mutations are in the past."""
+
+
+class PlaceholderMutationError(ValueError):
+    """The decision still carries example placeholder values."""
+
+
+def _is_placeholder_event_id(event_id: int | str) -> bool:
+    if isinstance(event_id, int):
+        return event_id <= 0
+    stripped = event_id.strip()
+    if stripped == "":
+        return True
+    digits = stripped.lstrip("+-")
+    return digits.isdigit() and int(stripped) <= 0
+
+
+def _is_stale(mutation: Any, *, today: date) -> bool:
+    return (
+        isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace))
+        and mutation.start_date_local is not None
+        and mutation.start_date_local < today
+    )
+
+
+def _bad_race_number(value: float | None, *, required: bool) -> bool:
+    if value is None:
+        return required
+    return value <= 0
+
+
+def _is_placeholder(mutation: Any) -> bool:
+    if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
+        _is_placeholder_event_id(mutation.event_id)
+    ):
+        return True
+    if (
+        isinstance(mutation, (CreateRace, UpdateRace))
+        and mutation.distance is not None
+        and mutation.distance <= 0
+    ):
+        return True
+    if isinstance(mutation, CreateRace):
+        return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
+            mutation.icu_training_load, required=True
+        )
+    return isinstance(mutation, UpdateRace) and (
+        _bad_race_number(mutation.moving_time, required=False)
+        or _bad_race_number(mutation.icu_training_load, required=False)
+    )
+
+
+def _filter_valid_mutations(report: DecisionReport, *, today: date) -> tuple[list[Any], list[str]]:
+    kept: list[Any] = []
+    dropped: list[str] = []
+    for mutation in report.mutations:
+        if _is_stale(mutation, today=today):
+            dropped.append("past-dated")
+        elif _is_placeholder(mutation):
+            dropped.append("placeholder")
+        else:
+            kept.append(mutation)
+    return kept, dropped
+
+
+def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
+    if any(_is_stale(mutation, today=today) for mutation in report.mutations):
+        raise StaleDecisionError(
+            "mutations must be dated on or after today; example dates are placeholders"
+        )
+
+
+def _reject_placeholders(report: DecisionReport) -> None:
+    for mutation in report.mutations:
+        if _is_placeholder(mutation):
+            if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)):
+                raise PlaceholderMutationError(
+                    "event_id 0 is a placeholder; use the real event id from the athlete data"
+                )
+            raise PlaceholderMutationError(
+                "race duration/load must be real values; ask the athlete instead of"
+                " copying the example zeros"
+            )
+
+
+def _assert_valid_mutations(report: DecisionReport, *, today: date) -> None:
+    _reject_placeholders(report)
+    _reject_past_dates(report, today=today)
+
+
 def _validate_report(payload: Any, *, today: date) -> DecisionReport:
     report = DecisionReport.model_validate(payload)
-    past = [
-        mutation
-        for mutation in report.mutations
-        if isinstance(mutation, CreateWorkout) and mutation.start_date_local < today
-    ]
-    if past:
-        raise ValueError(
-            "create mutations must be dated on or after today; example dates are placeholders"
-        )
+    _assert_valid_mutations(report, today=today)
     return report
 
 
@@ -179,6 +273,7 @@ class CoachEngine:
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
         base = draft.context.model_dump()
+        base["today"] = self.today()
         try:
             context = CoachContext.model_validate(
                 {**base, "user_feedback": feedback, "current_proposal": draft.report}
@@ -194,9 +289,33 @@ class CoachEngine:
         assert updated is not None
         return updated
 
+    def _assert_current_dates(self, report: DecisionReport) -> None:
+        _assert_valid_mutations(report, today=self.today())
+
+    def discard_decision(self, decision_id: int) -> None:
+        self._store.discard_decision(decision_id)
+
+    def discard_stale_decisions(self) -> list[tuple[int, str]]:
+        discarded: list[tuple[int, str]] = []
+        today = self.today()
+        for decision in self._store.list_unapplied_decisions():
+            kept, dropped = _filter_valid_mutations(decision.report, today=today)
+            if not dropped or kept:
+                continue
+            reason = (
+                "placeholder values"
+                if set(dropped) == {"placeholder"}
+                else "dates that have passed"
+            )
+            self._store.discard_decision(decision.id)
+            discarded.append((decision.id, reason))
+        return discarded
+
     def approve(self, draft_id: int) -> Decision:
-        if self._store.get_draft(draft_id) is None:
+        draft = self._store.get_draft(draft_id)
+        if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
+        self._assert_current_dates(draft.report)
         return self._store.approve_draft(draft_id)
 
     async def apply(self, decision_id: int | None = None) -> ApplyReport:
@@ -219,7 +338,26 @@ class CoachEngine:
             decisions = self._store.list_unapplied_decisions()
         applied: list[AppliedDecision] = []
         for decision in decisions:
-            outcomes = await self._writer.apply_decision(decision)
-            applied.append(AppliedDecision(decision_id=decision.id, outcomes=outcomes))
+            kept, dropped = _filter_valid_mutations(decision.report, today=self.today())
+            if dropped and not kept:
+                reason = ", ".join(sorted(set(dropped)))
+                if set(dropped) == {"placeholder"}:
+                    raise PlaceholderMutationError(
+                        f"decision {decision.id} only contains placeholder mutations ({reason})"
+                    )
+                raise StaleDecisionError(
+                    f"decision {decision.id} has no mutations left to apply ({reason})"
+                )
+            if dropped:
+                logger.warning(
+                    "skipping %d %s mutation(s) of decision %s",
+                    len(dropped),
+                    "/".join(sorted(set(dropped))),
+                    decision.id,
+                )
+            outcomes = await self._writer.apply_decision(decision, mutations=kept)
+            applied.append(
+                AppliedDecision(decision_id=decision.id, outcomes=outcomes, skipped=dropped)
+            )
             self._store.mark_decision_applied(decision.id)
         return ApplyReport(decisions=applied)

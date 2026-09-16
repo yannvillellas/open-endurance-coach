@@ -63,6 +63,10 @@ class CoachStore:
         )
         self._connection.commit()
 
+    def discard_decision(self, decision_id: int) -> None:
+        self._connection.execute("DELETE FROM decisions WHERE id = ?", (decision_id,))
+        self._connection.commit()
+
     def prune_before(self, cutoff: datetime) -> dict[str, int]:
         stamp = cutoff.isoformat()
         statements = {

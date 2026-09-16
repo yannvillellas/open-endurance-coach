@@ -1,12 +1,16 @@
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
 
+from open_endurance_coach.chat.history import ChatSession
+from open_endurance_coach.cli import chat as cli_chat
 from open_endurance_coach.cli import main as cli_main
 from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.config import Settings
@@ -1328,4 +1332,112 @@ def test_chat_forget_clears_the_retry_pointer(patched: Any) -> None:
     assert "Forgot" in result.output
     assert "Nothing to apply." in result.output
     assert "decision not found" not in result.output
+    assert calendar.created == []
+
+
+def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
+    race = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": "2099-01-27",
+        "category": "RACE_A",
+        "type": "Run",
+        "moving_time": 4200,
+        "icu_training_load": 90,
+    }
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[race]))])
+    _, store = patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="plan my race\nyes\n")
+    assert result.exit_code == 0
+    assert calendar.created[0]["category"] == "RACE_A"
+    assert calendar.created[0]["moving_time"] == 4200
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    race = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": "2099-01-27",
+        "category": "RACE_A",
+        "type": "Run",
+        "moving_time": 4200,
+        "icu_training_load": 90,
+    }
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(mutations=[race], needs_input=["What is your expected finish time?"])
+            )
+        ]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
+    assert result.exit_code == 0
+    assert "needs answers before proposing calendar changes" in result.output
+    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert calendar.created == []
+
+
+def test_chat_startup_discards_a_stale_approved_decision(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    _, store = patched(provider, calendar=calendar)
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Old Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_draft(draft_id)
+
+    result = runner.invoke(cli_main.app, [], input="retry\n/exit\n")
+    assert result.exit_code == 0
+    assert "was approved with dates that have passed; discarded" in result.output
+    assert "was recorded but never applied" not in result.output
+    assert "Nothing to apply." in result.output
+    assert store.list_unapplied_decisions() == []
+
+
+def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    engine, store = patched(provider, calendar=calendar)
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Tomorrow Session",
+                        "start_date_local": (today + timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    decision = store.approve_draft(draft_id)
+    session = ChatSession(cap=100)
+    session.pending_decision_id = decision.id
+    engine.today = lambda: today + timedelta(days=2)
+
+    asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
+
+    assert session.pending_decision_id is None
+    assert store.list_unapplied_decisions() == []
     assert calendar.created == []

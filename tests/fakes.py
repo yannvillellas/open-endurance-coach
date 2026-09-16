@@ -36,12 +36,14 @@ class FakeIntervalsClient:
         events: list[dict[str, Any]],
         sport_settings: list[dict[str, Any]],
         detail: dict[str, Any] | None = None,
+        athlete_summary: list[dict[str, Any]] | None = None,
     ) -> None:
         self.activities = activities
         self.wellness = wellness
         self.events = events
         self.sport_settings = sport_settings
         self.detail = detail or {}
+        self.athlete_summary = athlete_summary or []
         self.calls: list[tuple[Any, ...]] = []
 
     async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
@@ -58,13 +60,26 @@ class FakeIntervalsClient:
         self.calls.append(("wellness", oldest, newest))
         return list(self.wellness)
 
-    async def list_events(self, oldest: str, newest: str) -> list[dict[str, Any]]:
-        self.calls.append(("events", oldest, newest))
-        return list(self.events)
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append(("events", oldest, newest, category))
+        allowed = {part.strip() for part in category.split(",")} if category else None
+        return [
+            dict(event)
+            for event in self.events
+            if allowed is None or event.get("category") in allowed
+        ]
 
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         self.calls.append(("sport_settings",))
         return list(self.sport_settings)
+
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append(("athlete_summary", start, end))
+        return list(self.athlete_summary)
 
 
 def make_activity(
@@ -100,6 +115,38 @@ def make_activity_list() -> list[dict[str, Any]]:
     ]
 
 
+def make_summary_week(
+    day: str,
+    *,
+    fitness: float = 30.0,
+    fatigue: float = 28.0,
+    form: float = 2.0,
+    ramp_rate: float = 0.5,
+    load: int = 74,
+    time_s: int = 4950,
+    count: int = 2,
+    sports: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "date": day,
+        "fitness": fitness,
+        "fatigue": fatigue,
+        "form": form,
+        "rampRate": ramp_rate,
+        "training_load": load,
+        "time": time_s,
+        "count": count,
+        "byCategory": (
+            sports
+            if sports is not None
+            else [
+                {"category": "Ride", "count": 1, "time": 2435, "training_load": 42},
+                {"category": "Run", "count": 1, "time": 2515, "training_load": 32},
+            ]
+        ),
+    }
+
+
 def make_intervals_client(**overrides: Any) -> FakeIntervalsClient:
     payloads: dict[str, Any] = {
         "activities": make_activity_list(),
@@ -109,6 +156,10 @@ def make_intervals_client(**overrides: Any) -> FakeIntervalsClient:
             {"name": "Long Ride", "start_date_local": "2024-02-10T00:00:00"},
         ],
         "sport_settings": [{"id": 1, "ftp": 250.0}],
+        "athlete_summary": [
+            make_summary_week("2024-01-22"),
+            make_summary_week("2024-01-29"),
+        ],
         "detail": {
             "start_date_local": "2024-01-20T08:00:00",
             "type": "Ride",
@@ -143,11 +194,12 @@ class FakeCalendarClient:
     async def list_events(
         self, oldest: str, newest: str, category: str | None = None
     ) -> list[dict[str, Any]]:
+        allowed = {part.strip() for part in category.split(",")} if category else None
         rows = []
         for event in self.events:
-            if not (oldest <= event["start_date_local"][:10] < newest):
+            if not (oldest <= event["start_date_local"][:10] <= newest):
                 continue
-            if category and event.get("category") != category:
+            if allowed is not None and event.get("category") not in allowed:
                 continue
             rows.append(dict(event))
         return rows

@@ -46,6 +46,33 @@ INTAKE_EXAMPLE: dict[str, Any] = {
     "mutations": [],
 }
 
+RACE_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
+    "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
+    "findings": ["<what the weekly rollup and readiness say about the current phase>"],
+    "questions": ["<optional question for the athlete>"],
+    "needs_input": [],
+    "mutations": [
+        {
+            "action": "create_race",
+            "name": "<race name>",
+            "start_date_local": "2099-01-01",
+            "category": "RACE_B",
+            "type": "<Run | TrailRun | Ride | Swim | Hike | ...>",
+            "moving_time": 0,
+            "distance": 0,
+            "icu_training_load": 0,
+        },
+        {
+            "action": "update_race",
+            "event_id": 0,
+            "category": "RACE_A",
+            "moving_time": 0,
+            "icu_training_load": 0,
+        },
+    ],
+}
+
 PROPOSAL_POLICY = (
     'Classify the athlete\'s request in intent: "chat" for questions, advice, '
     'explanation or discussion; "analysis" for a review of executed training; '
@@ -54,13 +81,31 @@ PROPOSAL_POLICY = (
     'mutations list unless intent is "plan": for chat and analysis put the answer in '
     "summary/findings and, if a change would help, offer it as a question - never "
     "encode a change the athlete did not ask for.\n"
-    "Before prescribing anything - workouts or a full block - list what you still "
-    "need to know that would change the plan (goals, available days, constraints, "
-    "injury, RPE). Put those questions in needs_input and, when it is non-empty, "
-    "return no mutations and ask - never assume on the athlete's behalf, even when "
-    "the data lets you estimate. Assume only when the athlete explicitly tells you "
-    "to: then state the assumption in the summary and plan. Never list the same "
-    "question in both questions and needs_input.\n"
+    "The examples below show the shape only. Their values are placeholders: every "
+    "field must come from the athlete data, the example workout text is the only "
+    "thing to imitate, and a mutation that sets a date before today is "
+    "rejected.\n"
+    "When goal_races is present, plan backwards from the nearest race: state the macro "
+    "phases (Base, Build, Peak, Taper) with weekly load targets in the summary, then "
+    "propose concrete workouts for the next 7-14 days only - do not schedule sessions "
+    "beyond the visible calendar window.\n"
+    "Race events use category RACE_A (season objective), RACE_B (important) or RACE_C "
+    "(training race). If a distance, elevation gain or expected load is missing from a "
+    "race, ask the athlete for it instead of estimating. When you create or update a "
+    "race, set moving_time, distance (metres) and icu_training_load from the athlete's "
+    "figures (or your derived target when they told you to proceed), so no plan is "
+    "built on an unknown race load. Use the canonical sport as type - Run, TrailRun "
+    "(trail races), VirtualRun, Ride, VirtualRide, GravelRide, MountainBikeRide, Swim, "
+    "Hike, Other - never the example placeholder. Never copy the example race "
+    "numbers.\n"
+    "Before prescribing anything - workouts, a race, or a full block - list what you "
+    "still need to know that would change the plan "
+    "(athlete goals, available days, constraints, injury, RPE; race duration, elevation, "
+    "expected load). Put those questions in needs_input and, when it is non-empty, return "
+    "no mutations and ask - never assume on the athlete's behalf, even when the data lets "
+    "you estimate. Assume only when the athlete explicitly tells you to: then state the "
+    "assumption in the summary and plan. Never list the same question in both questions "
+    "and needs_input.\n"
 )
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
@@ -108,9 +153,6 @@ def _json_contract() -> str:
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
         f"{PROPOSAL_POLICY}"
-        "The examples below show the shape only: their values are placeholders, every "
-        "field must come from the athlete data, the example workout text is the only "
-        "thing to imitate, and a mutation that sets a date before today is rejected.\n"
         "Any start_date_local you set must be on or after today (the athlete's local "
         "date), taken from the upcoming schedule - never copy the example dates.\n"
         "If current_proposal is present in the athlete data, revise that proposal "
@@ -123,6 +165,8 @@ def _json_contract() -> str:
         f"{json.dumps(DISCUSSION_EXAMPLE, indent=2)}\n"
         "Example json (the athlete asked for a plan or calendar change):\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
+        "Example json (a goal race is in the athlete data - plan backwards from it):\n"
+        f"{json.dumps(RACE_EXAMPLE, indent=2)}\n"
     )
 
 

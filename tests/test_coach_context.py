@@ -130,6 +130,8 @@ def test_section_tokens_reports_per_section() -> None:
         "activity_detail",
         "wellness",
         "upcoming_events",
+        "goal_races",
+        "training_rollup",
         "sport_settings",
         "user_feedback",
     }
@@ -148,3 +150,53 @@ def test_max_tokens_must_be_positive() -> None:
 def test_unknown_extra_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         CoachContext.model_validate({"focus": "x", "hallucinated": 1})
+
+
+def test_goal_races_serialize_into_sections() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "goal_races": [
+                {
+                    "event_id": 90001,
+                    "name": "Spring Half",
+                    "date": "2024-03-01",
+                    "category": "RACE_A",
+                    "type": "Run",
+                    "days_to_race": 29,
+                    "weeks_to_race": 5,
+                    "phase": "Build",
+                }
+            ],
+        }
+    )
+    assert context.sections()["goal_races"] == [
+        {
+            "event_id": 90001,
+            "name": "Spring Half",
+            "date": "2024-03-01",
+            "category": "RACE_A",
+            "type": "Run",
+            "days_to_race": 29,
+            "weeks_to_race": 5,
+            "phase": "Build",
+        }
+    ]
+    assert context.section_tokens()["goal_races"] > 0
+
+
+def test_goal_race_rejects_unknown_category_and_extras() -> None:
+    base = {
+        "name": "Spring Half",
+        "date": "2024-03-01",
+        "category": "RACE_A",
+        "days_to_race": 29,
+        "weeks_to_race": 5,
+        "phase": "Build",
+    }
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "category": "WORKOUT"}]})
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "phase": "Recovery"}]})
+    with pytest.raises(ValidationError):
+        CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "hallucinated": True}]})

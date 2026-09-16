@@ -250,3 +250,29 @@ async def test_redirects_are_followed(settings: Settings) -> None:
     assert len(captured) == 2
     assert result == [{"id": "i1"}]
     await client.aclose()
+
+
+async def test_get_athlete_summary_sends_window(settings: Settings) -> None:
+    client, captured = make_client(
+        settings, [httpx.Response(200, json=[{"date": "2024-01-30"}, {"date": "2024-01-23"}])]
+    )
+    result = await client.get_athlete_summary(start="2024-01-01", end="2024-01-31")
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert captured[0].url.params["start"] == "2024-01-01"
+    assert captured[0].url.params["end"] == "2024-01-31"
+    await client.aclose()
+
+
+async def test_get_athlete_summary_omits_absent_window(settings: Settings) -> None:
+    client, captured = make_client(settings, [httpx.Response(200, json=[])])
+    await client.get_athlete_summary()
+    assert "start" not in captured[0].url.params
+    await client.aclose()
+
+
+async def test_get_athlete_summary_rejects_non_list_payload(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"unexpected": True})])
+    with pytest.raises(IntervalsApiError, match="unexpected athlete-summary payload"):
+        await client.get_athlete_summary()
+    await client.aclose()

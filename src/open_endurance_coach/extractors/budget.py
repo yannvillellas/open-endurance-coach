@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from typing import Any
 
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 RECENT_ACTIVITY_KEEP_DAYS = 7
@@ -23,6 +23,9 @@ def build_within_budget(
     upcoming_events: list[Event],
     sport_settings: list[SportSettings],
     *,
+    goal_races: list[GoalRace] | None = None,
+    training_rollup: list[TrainingWeek] | None = None,
+    activity_keep_ids: set[str] | None = None,
     user_feedback: str | None,
     activity_detail: Activity | None,
     max_tokens: int,
@@ -31,6 +34,9 @@ def build_within_budget(
     activities = list(recent_activities)
     wellness_rows = list(wellness)
     events = list(upcoming_events)
+    races = list(goal_races or [])
+    rollup = list(training_rollup or [])
+    keep_ids = activity_keep_ids or set()
     while True:
         payload: dict[str, Any] = {
             "focus": focus,
@@ -39,6 +45,8 @@ def build_within_budget(
             "activity_detail": activity_detail,
             "wellness": wellness_rows,
             "upcoming_events": events,
+            "goal_races": races,
+            "training_rollup": rollup,
             "sport_settings": sport_settings,
             "user_feedback": user_feedback,
             "max_tokens": max_tokens,
@@ -47,11 +55,15 @@ def build_within_budget(
         if probe.estimated_tokens() <= max_tokens:
             return CoachContext.model_validate(payload)
         if activities and _activity_droppable(activities, today):
-            oldest_index = min(
-                range(len(activities)),
-                key=lambda index: activities[index].start_date_local,
-            )
-            activities.pop(oldest_index)
+            droppable = [
+                index for index, activity in enumerate(activities) if activity.id not in keep_ids
+            ]
+            if droppable:
+                oldest_index = min(droppable, key=lambda index: activities[index].start_date_local)
+                activities.pop(oldest_index)
+                continue
+        if rollup:
+            rollup.pop(0)
         elif wellness_rows:
             wellness_rows.pop()
         elif events:
@@ -60,6 +72,8 @@ def build_within_budget(
             activity_detail = None
         elif user_feedback is not None:
             user_feedback = None
+        elif races:
+            races.pop()
         elif activities:
             activities.pop()
         else:

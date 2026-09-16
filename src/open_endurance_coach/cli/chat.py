@@ -32,10 +32,14 @@ from open_endurance_coach.cli.rendering import (
     thinking,
 )
 from open_endurance_coach.config import Settings
-from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.engine.coach import (
+    CoachEngine,
+    PlaceholderMutationError,
+    StaleDecisionError,
+)
 from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import WorkoutMutation
+from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
@@ -104,7 +108,7 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
         print_error(exc)
 
 
-def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:
+def _open_proposal(draft_id: int, mutations: list[Mutation]) -> ChatState:
     snapshot = PlanSnapshot(
         plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
         draft_id=draft_id,
@@ -126,7 +130,12 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     else:
         cached = None
     async with thinking():
-        draft = await engine.analyze(focus, context=cached, history=session.history)
+        draft = await engine.analyze(
+            focus,
+            context=cached,
+            history=session.history,
+            today=today if cached is None else None,
+        )
     report = draft.report
     if report.needs_input:
         blocking = {question.strip().casefold() for question in report.needs_input}
@@ -164,6 +173,11 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
         return
     try:
         report = await engine.apply(session.pending_decision_id)
+    except (StaleDecisionError, PlaceholderMutationError) as exc:
+        console.print(f"[yellow]Decision #{session.pending_decision_id} discarded: {exc}[/yellow]")
+        engine.discard_decision(session.pending_decision_id)
+        session.pending_decision_id = None
+        return
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return
@@ -351,6 +365,10 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
             console.print(
                 f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
             )
+    for stale_id, reason in engine.discard_stale_decisions():
+        console.print(
+            f"[yellow]Decision #{stale_id} was approved with {reason}; discarded.[/yellow]"
+        )
     unapplied = engine.unapplied_decisions()
     if unapplied:
         oldest = unapplied[0]

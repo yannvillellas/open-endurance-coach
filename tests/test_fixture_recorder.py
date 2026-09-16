@@ -1,14 +1,16 @@
+from datetime import date
 from typing import Any
 
 import pytest
 
+from open_endurance_coach.config import Settings
 from open_endurance_coach.fixtures.record import record_fixtures
 
 
 class FakeIntervalsClient:
     def __init__(self, payloads: dict[str, Any]) -> None:
         self._payloads = payloads
-        self.calls: list[str] = []
+        self.calls: list[Any] = []
         self.activity_requests: list[str] = []
 
     async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
@@ -34,8 +36,10 @@ class FakeIntervalsClient:
         self.calls.append("get_sport_settings")
         return self._payloads["sport_settings"]
 
-    async def get_athlete_summary(self) -> list[dict[str, Any]]:
-        self.calls.append("get_athlete_summary")
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append(("get_athlete_summary", start, end))
         return self._payloads["athlete_summary"]
 
 
@@ -137,3 +141,13 @@ async def test_record_fixtures_raises_when_no_activities(settings: Any) -> None:
     client = FakeIntervalsClient(payloads)
     with pytest.raises(RuntimeError, match="no activities"):
         await record_fixtures(settings, client)
+
+
+async def test_record_fixtures_requests_the_rollup_window(settings: Settings) -> None:
+    source = FakeIntervalsClient(make_payloads())
+    await record_fixtures(settings, source)
+    summary_calls = [call for call in source.calls if isinstance(call, tuple)]
+    assert len(summary_calls) == 1
+    _, start, end = summary_calls[0]
+    assert start is not None and end is not None
+    assert (date.fromisoformat(end) - date.fromisoformat(start)).days == 90
