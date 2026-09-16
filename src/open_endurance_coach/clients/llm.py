@@ -142,6 +142,9 @@ class LlmClient:
                 else reasoning_effort
             ),
         )
+        cached = (completion.usage or {}).get("prompt_cache_hit_tokens")
+        if cached is not None:
+            logger.debug("prompt cache hit tokens: %s", cached)
         _warn_on_token_estimate_drift(messages, completion)
         return completion
 

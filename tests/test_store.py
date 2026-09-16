@@ -225,30 +225,6 @@ def test_approve_twice_raises(tmp_path: Path) -> None:
     assert len(store.list_decisions()) == 1
 
 
-def test_reject_draft_flips_status(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.reject_draft(draft_id)
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.REJECTED
-    assert store.list_decisions() == []
-
-
-def test_reject_missing_draft_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.reject_draft(404)
-
-
-def test_reject_approved_draft_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.approve_draft(draft_id)
-    with pytest.raises(ValueError, match="pending"):
-        store.reject_draft(draft_id)
-
-
 def test_store_persists_across_reopen(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     from tests.fakes import FakeClock
@@ -430,3 +406,61 @@ def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
     assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
     unfiltered = store.recent_feedback(10)
     assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]
+
+
+def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    old_draft = store.save_draft(focus="old", report=make_report(), context=make_context())
+    store.add_feedback(old_draft, "old feedback")
+    store.mark_activities_seen(["fx-old"])
+    store.approve_draft(old_draft)
+
+    clock.now = NOW + timedelta(days=200)
+    recent_draft = store.save_draft(focus="recent", report=make_report(), context=make_context())
+    store.add_feedback(recent_draft, "recent feedback")
+    store.mark_activities_seen(["fx-recent"])
+
+    counts = store.prune_before(NOW + timedelta(days=100))
+
+    assert counts == {"feedback": 1, "decisions": 1, "drafts": 1, "seen_activities": 1}
+    assert [draft.focus for draft in store.list_drafts()] == ["recent"]
+    assert [row.feedback.content for row in store.recent_feedback(10)] == ["recent feedback"]
+    assert store.list_decisions() == []
+    assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
+
+
+def test_prune_before_deletes_dependents_created_after_the_cutoff(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+
+    clock.now = NOW + timedelta(days=200)
+    store.add_feedback(draft_id, "late feedback")
+    store.approve_draft(draft_id)
+
+    counts = store.prune_before(NOW + timedelta(days=100))
+
+    assert counts == {"feedback": 1, "decisions": 1, "drafts": 1, "seen_activities": 0}
+    assert store.list_drafts() == []
+    assert store.list_feedback(draft_id) == []
+    assert store.list_decisions() == []
+
+
+def test_rejected_legacy_drafts_are_dropped_on_open(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    store = CoachStore(path)
+    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "rejected feedback")
+    store._connection.execute("UPDATE drafts SET status = 'rejected' WHERE id = ?", (draft_id,))
+    store._connection.commit()
+    store.close()
+
+    reopened = CoachStore(path)
+    assert reopened.list_drafts() == []
+    assert reopened.list_feedback(draft_id) == []
+    reopened.close()

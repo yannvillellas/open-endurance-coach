@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     # it must match the athlete's Intervals.icu account timezone.
     app_timezone: str = "Europe/Paris"
     database_path: str = "data/coach.db"
-    http_port: int = 8000
 
     athlete_profile: str = ""
     coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
@@ -55,6 +54,7 @@ class Settings(BaseSettings):
     chat_history_turns: int = Field(default=10, ge=1)
     chat_history_max_tokens: int = Field(default=2048, ge=1)
     chat_history_max_age_days: int = Field(default=90, ge=1)
+    history_days: int = Field(default=180, ge=0)
 
     requests_per_second: float = 8.0
     max_retries: int = 3

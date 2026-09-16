@@ -54,7 +54,41 @@ class CoachStore:
         }
         if "applied_at" not in columns:
             self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
+        self._connection.executescript(
+            "DELETE FROM feedback WHERE draft_id IN"
+            " (SELECT id FROM drafts WHERE status = 'rejected');"
+            "DELETE FROM decisions WHERE draft_id IN"
+            " (SELECT id FROM drafts WHERE status = 'rejected');"
+            "DELETE FROM drafts WHERE status = 'rejected';"
+        )
         self._connection.commit()
+
+    def prune_before(self, cutoff: datetime) -> dict[str, int]:
+        stamp = cutoff.isoformat()
+        statements = {
+            "feedback": (
+                "DELETE FROM feedback WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
+            "decisions": (
+                "DELETE FROM decisions WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
+            "drafts": "DELETE FROM drafts WHERE created_at < ?",
+            "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
+        }
+        counts: dict[str, int] = {}
+        try:
+            for name, statement in statements.items():
+                cursor = self._connection.execute(statement, (stamp,))
+                counts[name] = cursor.rowcount
+            self._connection.commit()
+        except sqlite3.Error:
+            self._connection.rollback()
+            raise
+        if sum(counts.values()):
+            self._connection.execute("VACUUM")
+        return counts
 
     def close(self) -> None:
         self._connection.close()
@@ -253,19 +287,6 @@ class CoachStore:
             applied_at=None,
             report=draft.report,
         )
-
-    def reject_draft(self, draft_id: int) -> None:
-        draft = self.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
-            raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts can be rejected"
-            )
-        self._connection.execute(
-            "UPDATE drafts SET status = ? WHERE id = ?", (DraftStatus.REJECTED.value, draft_id)
-        )
-        self._connection.commit()
 
     def _decision_from_row(self, row: sqlite3.Row) -> Decision:
         applied_at = row["applied_at"]

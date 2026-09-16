@@ -12,18 +12,14 @@ from open_endurance_coach.chat.dispatch import (
 from open_endurance_coach.chat.gate import PlanSnapshot
 from open_endurance_coach.chat.state import ChatState
 
-_CONFIRMING = ChatState(
-    plan=PlanSnapshot(action="approve", plan_text="Draft #3 - approve", draft_id=3)
-)
+_CONFIRMING = ChatState(plan=PlanSnapshot(plan_text="Draft #3 - approve", draft_id=3))
 
 
 @pytest.mark.parametrize(
     ("line", "name", "args"),
     [
         ("/help", "help", []),
-        ("/analyze", "analyze", []),
-        ("/analyze how was my week", "analyze", ["how", "was", "my", "week"]),
-        ("/clear", "clear", []),
+        ("/forget", "forget", []),
         ("/provider", "provider", []),
         ("/provider deepseek", "provider", ["deepseek"]),
         ("/model", "model", []),
@@ -37,9 +33,8 @@ def test_slash_commands_dispatch_to_commands(line: str, name: str, args: list[st
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
-        ("/ANALYZE 3", Command("analyze", ["3"])),
-        ("/Analyze 3", Command("analyze", ["3"])),
-        ("/CLEAR", Command("clear", [])),
+        ("/HELP", Command("help", [])),
+        ("/FORGET", Command("forget", [])),
     ],
 )
 def test_command_names_are_case_insensitive(line: str, expected: Command) -> None:
@@ -52,7 +47,7 @@ def test_exit_commands(line: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "line", ["/bogus", "/feedbackx 1 hi", "/", "  /  ", "/approve 3", "/review"]
+    "line", ["/bogus", "/feedbackx 1 hi", "/", "  /  ", "/approve 3", "/review", "/analyze"]
 )
 def test_unknown_slash_commands_are_reported_verbatim(line: str) -> None:
     assert dispatch(line, ChatState()) == UnknownCommand(line.strip())

@@ -8,7 +8,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
@@ -142,43 +142,6 @@ async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path)
     assert "Legs heavy" in provider.calls[0]["messages"][1].content
 
 
-async def test_review_solicits_missing_rpe(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    context = CoachContext(
-        focus="status check",
-        recent_activities=[
-            make_activity_model("fx-a", 20),
-            make_activity_model("fx-b", 18, icu_rpe=7.0),
-        ],
-    )
-    draft_id = store.save_draft(
-        focus="status check", report=DecisionReport(summary="ok"), context=context
-    )
-    engine = make_engine(settings, store, FakeLlmProvider())
-    view = engine.review(draft_id)
-    assert view.draft.id == draft_id
-    assert view.requested_feedback == [
-        "RPE missing for Synthetic Workout on 2024-01-20: how hard did it feel (1-10)?",
-        "Fueling: carb intake and hydration for the sessions above?",
-    ]
-
-
-async def test_review_no_solicitations_when_rpe_logged(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    context = CoachContext(
-        focus="status check",
-        recent_activities=[
-            make_activity_model("fx-a", 20, icu_rpe=7.0),
-            make_activity_model("fx-b", 18, perceived_exertion=6.0),
-        ],
-    )
-    draft_id = store.save_draft(
-        focus="status check", report=DecisionReport(summary="ok"), context=context
-    )
-    engine = make_engine(settings, store, FakeLlmProvider())
-    assert engine.review(draft_id).requested_feedback == []
-
-
 async def test_review_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
@@ -299,50 +262,10 @@ async def test_approve_records_decision(settings: Settings, tmp_path: Path) -> N
     assert store.list_decisions() == [decision]
 
 
-async def test_approve_with_override_mutations(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
-    engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    override: list[WorkoutMutation] = [
-        CreateWorkout(action="create", name="Custom Session", start_date_local=date(2024, 2, 6))
-    ]
-    decision = engine.approve(draft.id, mutations=override)
-    assert decision.report.mutations == override
-    assert decision.report.summary == "Mutations overridden by the athlete."
-    assert decision.report.findings == []
-    assert decision.report.questions == []
-
-
 async def test_approve_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
         engine.approve(404)
-
-
-async def test_reject_flips_status(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(report_json())])
-    engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    engine.reject(draft.id)
-    rejected = store.get_draft(draft.id)
-    assert rejected is not None
-    assert rejected.status is DraftStatus.REJECTED
-    assert store.list_decisions() == []
-
-
-async def test_pending_drafts_lists_only_pending(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    engine = make_engine(settings, store, FakeLlmProvider())
-    first = store.save_draft(
-        focus="first", report=DecisionReport(summary="ok"), context=CoachContext(focus="first")
-    )
-    second = store.save_draft(
-        focus="second", report=DecisionReport(summary="ok"), context=CoachContext(focus="second")
-    )
-    store.approve_draft(first)
-    assert [draft.id for draft in engine.pending_drafts()] == [second]
 
 
 async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -> None:
@@ -375,23 +298,6 @@ async def test_apply_applies_unapplied_decisions_and_marks_applied(
     assert store.get_decision(1) is not None
     assert applied_decision(store, 1).applied_at is not None
     assert store.list_unapplied_decisions() == []
-
-
-async def test_apply_dry_run_writes_nothing_and_leaves_unapplied(
-    settings: Settings, tmp_path: Path
-) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
-    engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    engine.approve(draft.id)
-    calendar = FakeCalendarClient()
-    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
-    report = await writer_engine.apply(dry_run=True)
-    assert report.decisions[0].outcomes[0].target == "created"
-    assert calendar.created == []
-    assert applied_decision(store, 1).applied_at is None
-    assert len(store.list_unapplied_decisions()) == 1
 
 
 async def test_apply_specific_decision_only(settings: Settings, tmp_path: Path) -> None:
@@ -438,88 +344,65 @@ async def test_apply_marks_empty_decision_applied(settings: Settings, tmp_path: 
     assert applied_decision(store, 1).applied_at is not None
 
 
-async def test_converse_reuses_context_without_extraction(
+async def test_analyze_reuses_a_provided_context_without_extraction(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     client = FakeIntervalsClient([], [], [], [])
-    provider = FakeLlmProvider([completion("Keep load stable.")])
+    provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider, client=client)
-    context = CoachContext(focus="how was my week", today=TODAY)
-    reply = await engine.converse("what do you think?", context=context, today=TODAY)
-    assert reply == "Keep load stable."
-    assert client.calls == []
-    assert store.list_drafts() == []
-    recorded = provider.calls[0]
-    assert recorded["json_mode"] is False
-    assert recorded["thinking"] is True
-    messages = recorded["messages"]
-    assert [message.role for message in messages] == ["system", "user", "user"]
-    assert messages[-1].content == "what do you think?"
-    assert "how was my week" in messages[1].content
-
-
-async def test_converse_extracts_and_surfaces_unseen_without_marking_seen(
-    settings: Settings, tmp_path: Path
-) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("Trend looks fine.")])
-    engine = make_engine(settings, store, provider)
-    reply = await engine.converse("how was my week?", today=TODAY)
-    assert reply == "Trend looks fine."
-    messages = provider.calls[0]["messages"]
-    assert "New activities since last review" in messages[1].content
-    assert store.is_activity_seen("fx-a") is False
-    assert store.list_drafts() == []
-
-
-async def test_converse_deep_query_uses_deep_extractor(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    client = make_intervals_client()
-    provider = FakeLlmProvider([completion("Hills improving.")])
-    engine = make_engine(settings, store, provider, client=client)
-    reply = await engine.converse(
-        "how much did my heart rate improve on hilly sections over the last 3 months",
-        today=TODAY,
+    context = CoachContext(focus="how was my week", today=TODAY).model_copy(
+        update={"focus": "what do you think?"}
     )
-    assert reply == "Hills improving."
-    assert any(call[0] == "detail" for call in client.calls)
+    draft = await engine.analyze("what do you think?", context=context, today=TODAY)
+    assert client.calls == []
+    assert draft.context.focus == "what do you think?"
+    recorded = provider.calls[0]
+    assert recorded["json_mode"] is True
+    assert [message.role for message in recorded["messages"]] == ["system", "user"]
+    assert "what do you think?" in recorded["messages"][1].content
 
 
-async def test_converse_includes_history_between_data_and_turn(
-    settings: Settings, tmp_path: Path
-) -> None:
+async def test_analyze_includes_history_in_the_prompt(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("Good point.")])
+    provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
     history = [
         LlmMessage(role="user", content="past question"),
         LlmMessage(role="assistant", content="past answer"),
     ]
-    await engine.converse("follow up", context=CoachContext(focus="f"), history=history)
-    messages = provider.calls[0]["messages"]
-    assert messages[2] == history[0]
-    assert messages[3] == history[1]
-    assert messages[4].content == "follow up"
+    await engine.analyze("follow up", context=CoachContext(focus="f"), history=history)
+    prompt = provider.calls[0]["messages"][1].content
+    assert "Recent conversation:" in prompt
+    assert "user: past question" in prompt
+    assert "assistant: past answer" in prompt
 
 
-async def test_converse_today_anchor_reaches_prompt(settings: Settings, tmp_path: Path) -> None:
-    store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("ok")])
-    engine = make_engine(settings, store, provider)
-    await engine.converse("hi", context=CoachContext(focus="f", today=TODAY))
-    messages = provider.calls[0]["messages"]
-    assert "Today's date (athlete local): 2024-02-01" in messages[1].content
-
-
-async def test_converse_empty_content_raises_without_writes(
+async def test_analyze_keeps_a_stable_prompt_prefix_between_turns(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("")])
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    context = CoachContext(focus="first", today=TODAY)
+    await engine.analyze("first", context=context, today=TODAY)
+    moved = context.model_copy(update={"focus": "second"})
+    await engine.analyze("second", context=moved, today=TODAY)
+    first_prompt = provider.calls[0]["messages"][1].content
+    second_prompt = provider.calls[1]["messages"][1].content
+    assert first_prompt.split("Current message:")[0] == second_prompt.split("Current message:")[0]
+    assert '"focus"' not in first_prompt
+    assert "Current message:\nsecond" in second_prompt
+
+
+async def test_analyze_empty_content_raises_without_writes(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="empty content"):
-        await engine.converse("hi", context=CoachContext(focus="f"))
+        await engine.analyze("hi", context=CoachContext(focus="f"))
     assert store.list_drafts() == []
 
 

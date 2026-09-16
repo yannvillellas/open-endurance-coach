@@ -133,15 +133,8 @@ class IntervalsClient:
             )
         return response
 
-    async def list_activities(
-        self,
-        oldest: str,
-        newest: str,
-        fields: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"oldest": oldest, "newest": newest}
-        if fields:
-            params["fields"] = ",".join(fields)
+    async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+        params = {"oldest": oldest, "newest": newest}
         response = await self._request("GET", self._athlete_path("/activities"), params=params)
         return response.json()
 
@@ -187,10 +180,6 @@ class IntervalsClient:
 
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         response = await self._request("GET", self._athlete_path("/sport-settings"))
-        return response.json()
-
-    async def get_athlete(self) -> dict[str, Any]:
-        response = await self._request("GET", self._athlete_path(""))
         return response.json()
 
     async def get_athlete_summary(self) -> list[dict[str, Any]]:

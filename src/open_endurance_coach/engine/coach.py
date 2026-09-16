@@ -1,20 +1,18 @@
 import json
-from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
-from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
+from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
-from open_endurance_coach.prompts.chat import build_chat_messages
 from open_endurance_coach.prompts.prompts import build_messages
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, WorkoutMutation
+from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Decision,
@@ -24,12 +22,6 @@ from open_endurance_coach.store.records import (
 )
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
-
-
-@dataclass(frozen=True)
-class ReviewView:
-    draft: Draft
-    requested_feedback: list[str]
 
 
 def _today(context: CoachContext, settings: Settings) -> date:
@@ -103,10 +95,12 @@ class CoachEngine:
         except ValidationError:
             return context
 
-    async def _run_llm(self, context: CoachContext) -> DecisionReport:
+    async def _run_llm(
+        self, context: CoachContext, *, history: list[LlmMessage] | None = None
+    ) -> DecisionReport:
         today = _today(context, self._settings)
         content = await self._llm_client.complete_json(
-            build_messages(context, self._settings),
+            build_messages(context, self._settings, history),
             validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))
@@ -128,9 +122,12 @@ class CoachEngine:
         *,
         user_feedback: str | None = None,
         today: date | None = None,
+        context: CoachContext | None = None,
+        history: list[LlmMessage] | None = None,
     ) -> Draft:
-        context = await self.build_context(focus, user_feedback=user_feedback, today=today)
-        report = await self._run_llm(context)
+        if context is None:
+            context = await self.build_context(focus, user_feedback=user_feedback, today=today)
+        report = await self._run_llm(context, history=history)
         draft_id = self._store.save_draft(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
@@ -139,32 +136,17 @@ class CoachEngine:
         assert draft is not None
         return draft
 
-    async def converse(
-        self,
-        text: str,
-        *,
-        history: list[LlmMessage] | None = None,
-        context: CoachContext | None = None,
-        today: date | None = None,
-    ) -> str:
-        if context is None:
-            context = self._surface_unseen(
-                await self._extract(text, user_feedback=None, today=today)
-            )
-        messages = build_chat_messages(context, self._settings, history=history, text=text)
-        completion = await self._llm_client.complete(messages, json_mode=False)
-        if not completion.content.strip():
-            raise LlmError("empty content returned")
-        return completion.content
-
-    def review(self, draft_id: int) -> ReviewView:
+    def review(self, draft_id: int) -> Draft:
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
-        return ReviewView(draft=draft, requested_feedback=self._solicitations(draft.context))
+        return draft
 
-    def pending_drafts(self) -> list[Draft]:
-        return self._store.list_drafts(DraftStatus.PENDING)
+    def today(self) -> date:
+        return datetime.now(ZoneInfo(self._settings.app_timezone)).date()
+
+    def unapplied_decisions(self) -> list[Decision]:
+        return self._store.list_unapplied_decisions()
 
     def llm_selection(self) -> tuple[str, str]:
         return (self._llm_client.provider_name, self._llm_client.model_name)
@@ -175,28 +157,18 @@ class CoachEngine:
         self._llm_client.select(provider=provider, model=model)
         return self.llm_selection()
 
+    def prune_history(
+        self, days: int | None = None, *, now: datetime | None = None
+    ) -> dict[str, int]:
+        cutoff = now or datetime.now(UTC)
+        if days is not None:
+            cutoff = cutoff - timedelta(days=days)
+        return self._store.prune_before(cutoff)
+
     def recent_history(
         self, limit: int, *, max_age_days: int | None = None
     ) -> list[FeedbackWithReport]:
         return self._store.recent_feedback(limit, max_age_days=max_age_days)
-
-    @staticmethod
-    def _solicitations(context: CoachContext) -> list[str]:
-        missing = [
-            activity
-            for activity in context.recent_activities
-            if activity.icu_rpe is None
-            and activity.perceived_exertion is None
-            and activity.session_rpe is None
-        ]
-        lines = [
-            f"RPE missing for {activity.name} on {activity.start_date_local.date().isoformat()}:"
-            " how hard did it feel (1-10)?"
-            for activity in missing
-        ]
-        if missing:
-            lines.append("Fueling: carb intake and hydration for the sessions above?")
-        return lines
 
     async def submit_feedback(self, draft_id: int, feedback: str) -> Draft:
         draft = self._store.get_draft(draft_id)
@@ -222,26 +194,12 @@ class CoachEngine:
         assert updated is not None
         return updated
 
-    def approve(self, draft_id: int, *, mutations: list[WorkoutMutation] | None = None) -> Decision:
-        draft = self._store.get_draft(draft_id)
-        if draft is None:
+    def approve(self, draft_id: int) -> Decision:
+        if self._store.get_draft(draft_id) is None:
             raise ValueError(f"draft not found: {draft_id}")
-        if mutations is not None:
-            overridden = DecisionReport(
-                summary="Mutations overridden by the athlete.",
-                findings=[],
-                questions=[],
-                mutations=mutations,
-            )
-            self._store.update_draft_report(
-                draft_id, report=overridden, user_feedback=draft.user_feedback
-            )
         return self._store.approve_draft(draft_id)
 
-    def reject(self, draft_id: int) -> None:
-        self._store.reject_draft(draft_id)
-
-    async def apply(self, decision_id: int | None = None, *, dry_run: bool = False) -> ApplyReport:
+    async def apply(self, decision_id: int | None = None) -> ApplyReport:
         """Apply approved decisions to the calendar.
 
         If a mutation fails, earlier mutations of the same decision stay applied while
@@ -261,8 +219,7 @@ class CoachEngine:
             decisions = self._store.list_unapplied_decisions()
         applied: list[AppliedDecision] = []
         for decision in decisions:
-            outcomes = await self._writer.apply_decision(decision, dry_run=dry_run)
+            outcomes = await self._writer.apply_decision(decision)
             applied.append(AppliedDecision(decision_id=decision.id, outcomes=outcomes))
-            if not dry_run:
-                self._store.mark_decision_applied(decision.id)
+            self._store.mark_decision_applied(decision.id)
         return ApplyReport(decisions=applied)

@@ -9,6 +9,7 @@ from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.standard import (
+    ACTIVITY_LOOKBACK_DAYS,
     DEFAULT_MAX_TOKENS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
@@ -22,7 +23,21 @@ _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
 _HILL_RE = re.compile(r"\b(hills?|hilly|climbs?|elevation)\b", re.IGNORECASE)
 _HEART_RATE_RE = re.compile(r"\b(heart ?rate|hr)\b", re.IGNORECASE)
-_RIDE_RE = re.compile(r"\b(ride|rides|riding|bike|biking|cycle|cycling|zwift)\b", re.IGNORECASE)
+_RIDE_RE = re.compile(
+    r"\b(ride|rides|riding|bike|biking|cycle|cycling|zwift|gravel|mtb)\b", re.IGNORECASE
+)
+_RIDE_TYPES = frozenset(
+    {
+        "Ride",
+        "VirtualRide",
+        "GravelRide",
+        "MountainBikeRide",
+        "EBikeRide",
+        "TrackRide",
+        "Cyclocross",
+        "Velomobile",
+    }
+)
 _ISO_DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
 _WORDED_DATE_RE = re.compile(
     r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\s+(20\d{2})\b", re.IGNORECASE
@@ -88,7 +103,7 @@ class DeepQuery:
 def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | None:
     current = today or date.today()
     reference = _referenced_date(focus, current)
-    stale_reference = reference is not None and (current - reference).days > 30
+    stale_reference = reference is not None and (current - reference).days >= ACTIVITY_LOOKBACK_DAYS
     if not _TREND_RE.search(focus) and not stale_reference:
         return None
     lookback = DEFAULT_DEEP_LOOKBACK_DAYS
@@ -102,17 +117,11 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
         lookback = max(lookback, (current - reference).days + 7)
     if _HEART_RATE_RE.search(focus):
         metric = "heart_rate"
-        activity_types = (
-            frozenset({"Ride"})
-            if _HILL_RE.search(focus) and _RIDE_RE.search(focus)
-            else frozenset()
-        )
     elif _HILL_RE.search(focus):
         metric = "elevation"
-        activity_types = frozenset({"Ride"}) if _RIDE_RE.search(focus) else frozenset()
     else:
         metric = None
-        activity_types = frozenset()
+    activity_types = _RIDE_TYPES if metric is not None and _RIDE_RE.search(focus) else frozenset()
     return DeepQuery(lookback_days=lookback, metric_focus=metric, activity_types=activity_types)
 
 

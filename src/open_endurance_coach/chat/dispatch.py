@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from open_endurance_coach.chat.gate import EXIT_NAMES
 from open_endurance_coach.chat.state import ChatMode, ChatState
 
-_COMMANDS = frozenset({"help", "analyze", "clear", "provider", "model"})
+_COMMANDS = frozenset({"help", "forget", "provider", "model"})
 
 
 @dataclass(frozen=True)
