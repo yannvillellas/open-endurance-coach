@@ -82,6 +82,8 @@ class CalendarWriter:
             "start_date_local": self._date_string(mutation.start_date_local),
         }
         self._add_detail_fields(payload, mutation)
+        if mutation.distance is not None:
+            payload["distance"] = mutation.distance
         return payload
 
     async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
@@ -209,6 +211,8 @@ class CalendarWriter:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         if mutation.category is not None:
             payload["category"] = mutation.category
+        if mutation.distance is not None:
+            payload["distance"] = mutation.distance
         self._add_detail_fields(payload, mutation)
         await self._client.update_event(str(mutation.event_id), payload)
         return MutationOutcome(action="update_race", target="updated", event_id=mutation.event_id)

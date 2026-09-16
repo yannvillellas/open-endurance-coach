@@ -286,6 +286,7 @@ def test_race_example_validates_and_is_placeholder_only() -> None:
     assert "<race name>" in json.dumps(RACE_EXAMPLE)
     assert RACE_EXAMPLE["mutations"][1]["moving_time"] == 0
     assert RACE_EXAMPLE["mutations"][1]["icu_training_load"] == 0
+    assert RACE_EXAMPLE["mutations"][0]["distance"] == 0
 
 
 def test_contract_teaches_backwards_planning_and_asking() -> None:
@@ -296,7 +297,8 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
     assert "RACE_A (season objective), RACE_B (important) or RACE_C" in system
     assert "ask the athlete for it instead of estimating" in system
     assert "Never copy the example race numbers" in system
-    assert "set moving_time and icu_training_load" in system
+    assert "set moving_time, distance (metres) and icu_training_load" in system
+    assert "TrailRun" in system
 
 
 def test_system_prompt_stays_small() -> None:

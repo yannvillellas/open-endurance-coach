@@ -78,6 +78,12 @@ def _is_placeholder(mutation: Any) -> bool:
         _is_placeholder_event_id(mutation.event_id)
     ):
         return True
+    if (
+        isinstance(mutation, (CreateRace, UpdateRace))
+        and mutation.distance is not None
+        and mutation.distance <= 0
+    ):
+        return True
     if isinstance(mutation, CreateRace):
         return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
             mutation.icu_training_load, required=True

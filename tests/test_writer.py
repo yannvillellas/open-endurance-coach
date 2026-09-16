@@ -414,3 +414,35 @@ async def test_create_race_ignores_a_same_name_race_on_the_next_day() -> None:
     )
     assert outcome[0].target == "created"
     assert [event["start_date_local"] for event in client.created] == ["2099-01-01T00:00:00"]
+
+
+async def test_create_race_payload_includes_distance() -> None:
+    client = FakeCalendarClient()
+    writer = CalendarWriter(client)
+    await writer.apply_decision(
+        make_decision(
+            CreateRace(
+                action="create_race",
+                name="Autumn Trail Race",
+                start_date_local=date(2099, 1, 1),
+                category="RACE_B",
+                type="TrailRun",
+                moving_time=3728,
+                distance=10900,
+                icu_training_load=104,
+            )
+        )
+    )
+    assert client.created[0]["distance"] == 10900
+    assert client.created[0]["type"] == "TrailRun"
+
+
+async def test_update_race_payload_includes_distance() -> None:
+    client = FakeCalendarClient(
+        [make_event(10001, "2099-01-01", name="Autumn Trail Race", category="RACE_B")]
+    )
+    writer = CalendarWriter(client)
+    await writer.apply_decision(
+        make_decision(UpdateRace(action="update_race", event_id=10001, distance=10900))
+    )
+    assert client.updated[0][1]["distance"] == 10900

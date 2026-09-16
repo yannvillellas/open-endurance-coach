@@ -58,8 +58,9 @@ RACE_EXAMPLE: dict[str, Any] = {
             "name": "<race name>",
             "start_date_local": "2099-01-01",
             "category": "RACE_B",
-            "type": "<Run | Ride | Swim | ...>",
+            "type": "<Run | TrailRun | Ride | Swim | Hike | ...>",
             "moving_time": 0,
+            "distance": 0,
             "icu_training_load": 0,
         },
         {
@@ -91,9 +92,12 @@ PROPOSAL_POLICY = (
     "Race events use category RACE_A (season objective), RACE_B (important) or RACE_C "
     "(training race). If a distance, elevation gain or expected load is missing from a "
     "race, ask the athlete for it instead of estimating. When you create or update a "
-    "race, set moving_time and icu_training_load from the athlete's figures (or your "
-    "derived target when they told you to proceed), so no plan is built on an unknown "
-    "race load. Never copy the example race numbers.\n"
+    "race, set moving_time, distance (metres) and icu_training_load from the athlete's "
+    "figures (or your derived target when they told you to proceed), so no plan is "
+    "built on an unknown race load. Use the canonical sport as type - Run, TrailRun "
+    "(trail races), VirtualRun, Ride, VirtualRide, GravelRide, MountainBikeRide, Swim, "
+    "Hike, Other - never the example placeholder. Never copy the example race "
+    "numbers.\n"
     "Before prescribing anything - workouts, a race, or a full block - list what you "
     "still need to know that would change the plan "
     "(athlete goals, available days, constraints, injury, RPE; race duration, elevation, "

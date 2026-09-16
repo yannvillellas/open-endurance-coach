@@ -208,8 +208,9 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
             name="Autumn Trail Race",
             start_date_local=date(2026, 9, 27),
             category="RACE_A",
-            type="Run",
+            type="TrailRun",
             moving_time=10800,
+            distance=10900,
             icu_training_load=142,
             description="hilly loop",
         ),
@@ -217,7 +218,7 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
     text = mutations_plan_text(mutations)
     assert (
         "- create RACE_A Autumn Trail Race on 2026-09-27"
-        " (Run, moving_time=10800, load=142): hilly loop" in text
+        " (TrailRun, moving_time=10800, distance=10900m, load=142): hilly loop" in text
     )
 
 

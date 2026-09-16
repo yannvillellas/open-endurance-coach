@@ -810,3 +810,23 @@ def test_validate_report_rejects_negative_race_values() -> None:
     )
     with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_a_zero_race_distance() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create_race",
+                    "name": "Race",
+                    "start_date_local": "2099-01-01",
+                    "category": "RACE_A",
+                    "moving_time": 3600,
+                    "distance": 0,
+                    "icu_training_load": 90,
+                }
+            ]
+        )
+    )
+    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
+        _validate_report(payload, today=date(2024, 2, 1))

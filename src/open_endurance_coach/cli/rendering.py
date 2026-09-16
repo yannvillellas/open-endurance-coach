@@ -55,6 +55,8 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
                 details.append(escape(mutation.type))
             if mutation.moving_time is not None:
                 details.append(f"moving_time={mutation.moving_time}")
+            if mutation.distance is not None:
+                details.append(f"distance={mutation.distance:g}m")
             if mutation.icu_training_load is not None:
                 details.append(f"load={mutation.icu_training_load:g}")
             if details:
@@ -74,6 +76,8 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
                 fields.append(f"type={escape(mutation.type)}")
             if mutation.moving_time is not None:
                 fields.append(f"moving_time={mutation.moving_time}")
+            if mutation.distance is not None:
+                fields.append(f"distance={mutation.distance:g}m")
             if mutation.description is not None:
                 fields.append(f"description={escape(mutation.description)}")
             if mutation.icu_training_load is not None:
