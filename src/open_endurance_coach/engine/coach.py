@@ -29,6 +29,7 @@ from open_endurance_coach.store.records import (
     DraftStatus,
     FeedbackWithReport,
 )
+from open_endurance_coach.tokens import estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
@@ -189,12 +190,34 @@ class CoachEngine:
         except ValidationError:
             return context
 
+    @staticmethod
+    def _fit_history(
+        context: CoachContext, history: list[LlmMessage] | None
+    ) -> list[LlmMessage] | None:
+        if not history:
+            return history
+        remaining = max(0, context.max_tokens - context.estimated_tokens())
+        kept: list[LlmMessage] = []
+        total = 0
+        for turn in reversed(history):
+            cost = estimate_text_tokens(turn.content)
+            if total + cost > remaining:
+                break
+            kept.append(turn)
+            total += cost
+        ordered = list(reversed(kept))
+        while ordered and ordered[0].role == "assistant":
+            ordered.pop(0)
+        if not ordered and history:
+            logger.warning("dropping the whole conversation history to fit the context budget")
+        return ordered
+
     async def _run_llm(
         self, context: CoachContext, *, history: list[LlmMessage] | None = None
     ) -> DecisionReport:
         today = _today(context, self._settings)
         content = await self._llm_client.complete_json(
-            build_messages(context, self._settings, history),
+            build_messages(context, self._settings, self._fit_history(context, history)),
             validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))
@@ -264,7 +287,13 @@ class CoachEngine:
     ) -> list[FeedbackWithReport]:
         return self._store.recent_feedback(limit, max_age_days=max_age_days)
 
-    async def submit_feedback(self, draft_id: int, feedback: str) -> Draft:
+    async def submit_feedback(
+        self,
+        draft_id: int,
+        feedback: str,
+        *,
+        history: list[LlmMessage] | None = None,
+    ) -> Draft:
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
@@ -281,7 +310,7 @@ class CoachEngine:
         except ValidationError:
             context = CoachContext.model_validate({**base, "user_feedback": feedback})
         self._store.add_feedback(draft_id, feedback)
-        report = await self._run_llm(context)
+        report = await self._run_llm(context, history=history)
         self._store.update_draft_report(
             draft_id, report=report, user_feedback=feedback, context=context
         )

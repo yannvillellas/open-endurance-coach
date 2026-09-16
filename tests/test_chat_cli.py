@@ -1441,3 +1441,21 @@ def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
     assert session.pending_decision_id is None
     assert store.list_unapplied_decisions() == []
     assert calendar.created == []
+
+
+def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Revised.", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n1 hour, yes please\n/exit\n")
+    assert result.exit_code == 0
+    assert "Nothing was written" in result.output
+    assert 'reply exactly "yes"' in result.output
+    assert calendar.created == []
+    assert len(provider.calls) == 2
+    assert "Recent conversation:" in provider.calls[1]["messages"][1].content

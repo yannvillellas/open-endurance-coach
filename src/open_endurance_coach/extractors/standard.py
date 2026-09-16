@@ -105,6 +105,7 @@ def goal_race(event: Event, *, today: date) -> GoalRace | None:
         weeks_to_race=(days + 6) // 7,
         phase=macro_phase(days),
         moving_time=event.moving_time,
+        distance=event.distance,
         icu_training_load=event.icu_training_load,
     )
 

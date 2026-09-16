@@ -106,6 +106,7 @@ class Event(BaseModel):
     end_date_local: datetime | None = None
     type: str | None = None
     moving_time: int | None = None
+    distance: float | None = None
     icu_training_load: float | None = None
     workout_doc: dict[str, Any] | None = None
     plan_folder_id: int | str | None = None

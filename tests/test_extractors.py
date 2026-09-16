@@ -274,6 +274,9 @@ async def test_standard_extraction_builds_goal_races(settings: Settings) -> None
                 "start_date_local": "2024-03-01T00:00:00",
                 "category": "RACE_A",
                 "type": "Run",
+                "moving_time": 5400,
+                "distance": 21097.5,
+                "icu_training_load": 150,
             },
             {
                 "id": 90002,
@@ -304,6 +307,9 @@ async def test_standard_extraction_builds_goal_races(settings: Settings) -> None
     assert furthest.days_to_race == 29
     assert furthest.weeks_to_race == 5
     assert furthest.phase == "Build"
+    assert furthest.distance == 21097.5
+    assert furthest.moving_time == 5400
+    assert furthest.icu_training_load == 150
 
 
 @pytest.mark.parametrize(
