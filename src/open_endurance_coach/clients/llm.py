@@ -103,6 +103,14 @@ class LlmClient:
                 f"Unknown LLM provider: {settings.llm_provider!r}\n"
                 f"Available providers:\n{available}"
             )
+        if settings.llm_reasoning_effort and not getattr(
+            providers[settings.llm_provider], "supports_reasoning_effort", False
+        ):
+            logger.warning(
+                "LLM_REASONING_EFFORT=%s has no effect on provider %s; ignoring it",
+                settings.llm_reasoning_effort,
+                settings.llm_provider,
+            )
 
     @property
     def provider_name(self) -> str:

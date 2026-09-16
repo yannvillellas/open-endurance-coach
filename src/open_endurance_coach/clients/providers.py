@@ -17,7 +17,8 @@ class _OpenAiCompatibleProvider:
     _error_label = "LLM"
     _min_429_backoff = 0.0
     _rate_limit_hint: str | None = None
-    _sends_thinking = True
+    supports_thinking = True
+    supports_reasoning_effort = False
 
     def __init__(
         self,
@@ -53,9 +54,9 @@ class _OpenAiCompatibleProvider:
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "max_tokens": max_tokens,
         }
-        if self._sends_thinking:
+        if self.supports_thinking:
             payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
-            if thinking and reasoning_effort:
+            if thinking and reasoning_effort and self.supports_reasoning_effort:
                 payload["reasoning_effort"] = reasoning_effort
             if not thinking and temperature is not None:
                 payload["temperature"] = temperature
@@ -142,9 +143,10 @@ class DeepSeekProvider(_OpenAiCompatibleProvider):
 
 class OvhProvider(_OpenAiCompatibleProvider):
     name = "ovh"
+    supports_thinking = False
+    supports_reasoning_effort = False
     _error_label = "OVHcloud AI Endpoints"
     _min_429_backoff = OVH_MIN_429_BACKOFF_SECONDS
-    _sends_thinking = False
     _rate_limit_hint = (
         "The OVHcloud anonymous free tier allows about 2 requests/minute per IP."
         " Wait a minute, set OVH_API_KEY for the paid tier, or select another provider"

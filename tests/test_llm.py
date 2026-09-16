@@ -152,10 +152,13 @@ async def test_complete_json_validator_receives_parsed_payload(settings: Setting
 
 
 def make_provider(
-    settings: Settings, handler: Any, sleep: RecordingSleep | None = None
-) -> tuple[DeepSeekProvider, RecordingSleep]:
+    settings: Settings,
+    handler: Any,
+    sleep: RecordingSleep | None = None,
+    provider: type[DeepSeekProvider] | type[OvhProvider] = DeepSeekProvider,
+) -> tuple[DeepSeekProvider | OvhProvider, RecordingSleep]:
     sleep = sleep or RecordingSleep()
-    return DeepSeekProvider(settings, transport=httpx.MockTransport(handler), sleep=sleep), sleep
+    return provider(settings, transport=httpx.MockTransport(handler), sleep=sleep), sleep
 
 
 def ok_response() -> httpx.Response:
@@ -965,3 +968,62 @@ async def test_complete_json_fails_fast_on_truncated_non_empty_content(
     with pytest.raises(LlmError, match=r"output budget.*finish_reason=length"):
         await client.complete_json([LlmMessage(role="user", content="json please")])
     assert provider.calls == 1
+
+
+async def test_deepseek_payload_declares_thinking_without_reasoning_effort(
+    settings: Settings,
+) -> None:
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return ok_response()
+
+    provider, _ = make_provider(settings, handler, provider=DeepSeekProvider)
+    await provider.complete(
+        model="deepseek-flash",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=0.2,
+        reasoning_effort="low",
+    )
+    assert bodies[0]["thinking"] == {"type": "enabled"}
+    assert "reasoning_effort" not in bodies[0]
+    assert "temperature" not in bodies[0]
+
+
+async def test_ovh_payload_never_sends_thinking(settings: Settings) -> None:
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return ok_response()
+
+    provider, _ = make_provider(settings, handler, provider=OvhProvider)
+    await provider.complete(
+        model="qwen",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=True,
+        json_mode=False,
+        max_tokens=100,
+        temperature=0.2,
+        reasoning_effort="low",
+    )
+    assert "thinking" not in bodies[0]
+    assert "reasoning_effort" not in bodies[0]
+    assert bodies[0]["temperature"] == 0.2
+
+
+def test_reasoning_effort_is_warned_when_unsupported(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = _SequenceProvider([])
+    with caplog.at_level("WARNING"):
+        LlmClient(
+            settings.model_copy(update={"llm_provider": "sequence", "llm_reasoning_effort": "low"}),
+            {"sequence": provider},
+            sleep=RecordingSleep(),
+        )
+    assert "has no effect on provider sequence" in caplog.text
