@@ -230,6 +230,11 @@ Live probe with the production analysis prompt (`build_messages` over a standard
 | OVHcloud | `Qwen3.5-397B-A17B` | 2,187         | 7,025             | hidden; no `reasoning_content` or token detail                  | `stop`          |
 
 - Both providers accepted `max_tokens=65536` with no ceiling rejection.
+- **Provider flags are explicit capability flags, not shared assumptions:** DeepSeek receives the
+  `thinking` flag (`enabled`/`disabled`); OVHcloud reasons server-side and never receives it. Neither
+  provider is sent `reasoning_effort` until a live probe confirms it is accepted — setting
+  `LLM_REASONING_EFFORT` for a provider without that capability logs a warning instead of silently
+  dropping the setting.
 - **Reasoning tokens are billed inside `completion_tokens` on both providers**, and on OVH they are not exposed at all. A modest 2,187-token prompt therefore used 7,025 output tokens — ~86% of the old `LLM_MAX_TOKENS=8192` budget — so any larger context truncated and returned empty `content`.
 - OVH ignores the `thinking` flag (`OvhProvider._sends_thinking = False`), so a retry with thinking disabled cannot help it; `LLM_MAX_TOKENS` is the only client-side lever.
 - `LLM_MAX_TOKENS` therefore defaults to 32768 (>4x the measured OVH normal case). A higher cap does not force generation, so it adds no latency or cost in the normal case; it only removes the truncation cliff. Truncation is detected via `finish_reason="length"` and fails fast with an actionable error rather than retrying.
