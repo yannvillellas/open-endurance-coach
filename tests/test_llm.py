@@ -216,9 +216,9 @@ async def test_provider_honors_retry_after_on_429(settings: Settings) -> None:
     assert sleep.calls == [5.0]
 
 
-async def test_provider_429_http_date_retry_after_falls_back(settings: Settings) -> None:
+async def test_provider_429_http_date_retry_after_clamps_a_past_date(settings: Settings) -> None:
     responses = [
-        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2020 07:28:00 GMT"}, json={}),
         ok_response(),
     ]
 
@@ -1027,3 +1027,23 @@ def test_reasoning_effort_is_warned_when_unsupported(
             sleep=RecordingSleep(),
         )
     assert "has no effect on provider sequence" in caplog.text
+
+
+async def test_provider_error_does_not_echo_the_response_body(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"message": "bad request", "athlete": "secret data"})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError) as excinfo:
+        await provider.complete(
+            model="deepseek-flash",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    message = str(excinfo.value)
+    assert "bad request" in message
+    assert "secret data" not in message

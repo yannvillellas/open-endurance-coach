@@ -214,7 +214,7 @@ def test_race_mutation_rejects_non_race_category() -> None:
         )
 
 
-def test_workout_mutation_rejects_race_category() -> None:
+def test_workout_mutations_reject_an_unknown_category_field() -> None:
     with pytest.raises(ValidationError):
         CreateWorkout.model_validate({**CREATE_PAYLOAD, "category": "RACE_A"})
     with pytest.raises(ValidationError):
@@ -298,3 +298,14 @@ def test_update_race_accepts_each_field() -> None:
     for fields in per_field:
         mutation = UpdateRace.model_validate({"action": "update_race", "event_id": 1, **fields})
         assert mutation.event_id == 1
+
+
+@pytest.mark.parametrize("bad", [0, -1, "0", "-1", "  ", "0/../../athlete/0", "[bold]1[/bold]"])
+def test_event_id_rejects_placeholder_and_unsafe_values(bad: object) -> None:
+    with pytest.raises(ValidationError, match="event_id"):
+        UpdateWorkout(action="update", event_id=bad, moving_time=3600)
+
+
+def test_event_id_accepts_numeric_and_token_ids() -> None:
+    assert UpdateWorkout(action="update", event_id=10001, moving_time=3600).event_id == 10001
+    assert UpdateWorkout(action="update", event_id="e20001", moving_time=3600).event_id == "e20001"

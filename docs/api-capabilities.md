@@ -33,7 +33,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 | Sport settings (FTP, zones)            | `GET /api/v1/athlete/{id}/sport-settings`                                                 | Baseline values; rows carry mixed-type ids (`id` int, `athlete_id` string)                                                                                                                                                  |
 | Athlete profile                        | `GET /api/v1/athlete/{id}`                                                                | Weight, FTP, athlete info                                                                                                                                                                                                   |
 | Athlete summary                        | `GET /api/v1/athlete/{id}/athlete-summary`                                                | Returns a **list** of server-aggregated rows (verified 2026-08-17), not a dict                                                                                                                                              |
-| Interval search (deep-historical)      | `GET /api/v1/athlete/{id}/activities/interval-search?minSecs=&minIntensity=&type=&limit=` | Filters detected intervals by duration/intensity — useful for trend queries without pulling full activities                                                                                                                 |
+| Interval search (reference, unused)    | `GET /api/v1/athlete/{id}/activities/interval-search?minSecs=&minIntensity=&type=&limit=` | Filters detected intervals by duration/intensity — useful for trend queries without pulling full activities                                                                                                                 |
 | Activity file                          | `GET /api/v1/activity/{id}/file`                                                          | gzip-compressed fit/gpx/tcx                                                                                                                                                                                                 |
 
 - **Form/TSB:** no dedicated endpoint/field; compute `form = ctl - atl` from wellness (`ctl`/`atl` fields) or event payloads.
@@ -53,11 +53,11 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 - **Dual write guards:** update/delete fetch the event first and refuse anything outside the mutation's own family — workout mutations accept only `WORKOUT`, race mutations accept only `RACE_A`/`RACE_B`/`RACE_C`. A mutation can never cross between the two.
 - **Idempotent creates:** creates resolve by (name, date) — workout matches are scoped to `WORKOUT`, race matches span any `RACE_*` category so a priority change updates the existing event instead of duplicating it.
 - Payload fields for a workout event: `category: WORKOUT`, `start_date_local`, `name`, `description`, `type` (e.g. `Ride`), `moving_time`, `icu_training_load`, optionally `color`, `folders_id`, etc.
-- **Implication:** our writer can either set free-form `description` + estimated `moving_time`/load (server computes load), or emit full `.zwo` `file_contents` for structured workouts. Decision point for iteration 4: start with description-based, upgrade to .zwo later.
+- **Implication:** our writer sets a free-form `description` plus estimated `moving_time`/load; structured `.zwo` upload is a reference capability we do not use (description-based only).
 
 ### Webhooks
 
-- Configured in the app's **Manage App** page (OAuth apps) — **for personal API-key accounts, verify availability of a webhooks section under Settings → Developer Settings** (empirical check pending; docs only describe app-based webhooks).
+- Configured in the app's **Manage App** page (OAuth apps); personal API-key accounts have no webhooks section (verified 2026-08-16), so the activity webhook adapter stays on the roadmap until an app-based setup exists.
 - Payload shape:
 
   ```json
@@ -103,7 +103,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 - Token budgets: prefer `fields` filtering, interval summaries over raw streams; wellness has 46 fields — select columns via `cols`/`fields` params.
 - When a webhook adapter is added later (OAuth app), ack-first + in-process queue is confirmed correct: ACTIVITY_ANALYZED already has a 60 s consolidation delay, so processing after ack is the native pattern.
 - **Polling cadence (rate-limit math, for the optional background poller):** activities list every 5 min ≈ 288 calls/day; wellness every 30 min ≈ 48/day; per-analysis extraction ≈ 5–10 calls; total stays far below the 5000/day limit. Polling is also self-healing for missed webhooks — no separate reconciliation job needed.
-- Writer: start with description-based workouts (server computes load/time-in-zones), optional .zwo upgrade later.
+- Writer: description-based workouts (server computes load/time-in-zones); no `.zwo` upload.
 
 ## 6. Addendum (from intervals-icu-sync reference review, 2026-08-16)
 

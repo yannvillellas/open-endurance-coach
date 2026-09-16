@@ -8,7 +8,7 @@ import httpx
 
 from open_endurance_coach.config import Settings
 
-from .http import parse_retry_after
+from .http import error_detail, parse_retry_after
 
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -128,7 +128,7 @@ class IntervalsClient:
                 error_retry_after = parse_retry_after(response.headers, default=0.0) or None
             raise IntervalsApiError(
                 response.status_code,
-                response.text[:500],
+                error_detail(response) or "request rejected",
                 retry_after=error_retry_after,
             )
         return response

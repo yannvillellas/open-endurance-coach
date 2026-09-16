@@ -80,6 +80,13 @@ def build_within_budget(
         elif races:
             races.pop()
         elif activities:
-            activities.pop()
+            candidates = [
+                index for index, activity in enumerate(activities) if activity.id not in keep_ids
+            ]
+            index = min(
+                candidates or range(len(activities)),
+                key=lambda candidate: activities[candidate].start_date_local,
+            )
+            activities.pop(index)
         else:
             raise RuntimeError(f"cannot fit focus in token budget: {max_tokens}")

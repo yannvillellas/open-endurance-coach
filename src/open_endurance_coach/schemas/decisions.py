@@ -1,7 +1,26 @@
+import re
 from datetime import date
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _validate_event_id(value: int | str) -> int | str:
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("event_id must be a positive id from the athlete data")
+        return value
+    stripped = value.strip()
+    if stripped.lstrip("+-").isdigit() and int(stripped) <= 0:
+        raise ValueError("event_id must be a positive id from the athlete data")
+    if _EVENT_ID_RE.fullmatch(stripped) is None:
+        raise ValueError("event_id must be a safe id from the athlete data")
+    return stripped
+
+
+EventId = Annotated[int | str, AfterValidator(_validate_event_id)]
 
 
 class CreateWorkout(BaseModel):
@@ -20,7 +39,7 @@ class UpdateWorkout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["update"]
-    event_id: int | str
+    event_id: EventId
     name: str | None = None
     start_date_local: date | None = None
     description: str | None = None
@@ -49,7 +68,7 @@ class DeleteWorkout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["delete"]
-    event_id: int | str
+    event_id: EventId
 
 
 RaceCategory = Literal["RACE_A", "RACE_B", "RACE_C"]
@@ -74,7 +93,7 @@ class UpdateRace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["update_race"]
-    event_id: int | str
+    event_id: EventId
     name: str | None = None
     start_date_local: date | None = None
     category: RaceCategory | None = None
@@ -107,7 +126,7 @@ class DeleteRace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["delete_race"]
-    event_id: int | str
+    event_id: EventId
 
 
 Mutation = Annotated[

@@ -1,10 +1,9 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
@@ -22,19 +21,21 @@ from open_endurance_coach.store.records import DraftStatus
 
 from .fakes import (
     CREATE_MUTATION,
+    TODAY,
     FakeCalendarClient,
     FakeLlmProvider,
     FakeRunner,
     completion,
     decision_of,
     make_engine,
+    make_event,
     make_intervals_client,
+    near_future,
     report_json,
 )
 
+CLOCK = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
 runner = CliRunner()
-
-TODAY = date(2024, 2, 1)
 
 
 @pytest.fixture
@@ -103,9 +104,7 @@ def test_chat_provider_option_threads_to_engine(
         captured["model"] = model
         await callback(engine)
 
-    async def fake_run_chat(
-        engine: CoachEngine, settings: Settings, *, fresh: bool = False
-    ) -> None:
+    async def fake_run_chat(engine: CoachEngine, settings: Settings) -> None:
         return None
 
     monkeypatch.setattr(cli_main, "_with_engine", fake_with_engine)
@@ -1138,22 +1137,6 @@ def test_chat_startup_reports_pruned_records(
     assert "Pruned 2 old records" in result.output
 
 
-def test_chat_fresh_skips_seeding(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
-    _, store = patched(provider)
-    draft_id = store.save_draft(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(draft_id, "legs heavy")
-    result = runner.invoke(cli_main.app, ["--fresh"], input="how was my week?\nand today?\n")
-    assert result.exit_code == 0
-    assert "Remembering" not in result.output
-    assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
-    assert "Recent conversation:" in provider.calls[1]["messages"][1].content
-
-
 def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:
     provider = FakeLlmProvider(
         [
@@ -1339,7 +1322,7 @@ def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
     race = {
         "action": "create_race",
         "name": "Autumn Trail Race",
-        "start_date_local": (date.today() + timedelta(days=30)).isoformat(),
+        "start_date_local": near_future(),
         "category": "RACE_A",
         "type": "Run",
         "moving_time": 4200,
@@ -1360,7 +1343,7 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     race = {
         "action": "create_race",
         "name": "Autumn Trail Race",
-        "start_date_local": (date.today() + timedelta(days=30)).isoformat(),
+        "start_date_local": near_future(),
         "category": "RACE_A",
         "type": "Run",
         "moving_time": 4200,
@@ -1385,7 +1368,7 @@ def test_chat_startup_discards_a_stale_approved_decision(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     _, store = patched(provider, calendar=calendar)
-    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -1415,7 +1398,7 @@ def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     engine, store = patched(provider, calendar=calendar)
-    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    today = CLOCK.date()
     report = DecisionReport.model_validate(
         json.loads(
             report_json(
@@ -1469,3 +1452,79 @@ def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
     assert result.output.count("Usage: /forget [days>0]") == 2
     assert "Forgot" not in result.output
     assert store.list_drafts() == []
+
+
+def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Answer.", intent="chat", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nwhat does this train exactly?\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert "did not read that as a planning request" in result.output
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
+
+
+def test_chat_render_failure_after_apply_is_not_reported_as_unapplied(
+    patched: Any, monkeypatch: Any
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    patched(provider, calendar=calendar)
+
+    def boom(report: Any) -> None:
+        raise RuntimeError("render exploded")
+
+    monkeypatch.setattr(cli_chat, "render_apply", boom)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
+    assert result.exit_code == 0
+    assert len(calendar.created) == 1
+    assert "recorded but not applied" not in result.output
+
+
+def test_chat_race_update_is_gated_and_written(patched: Any) -> None:
+    calendar = FakeCalendarClient(
+        [make_event(136701474, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
+    )
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    mutations=[
+                        {
+                            "action": "update_race",
+                            "event_id": 136701474,
+                            "category": "RACE_A",
+                            "moving_time": 3600,
+                            "distance": 11000,
+                            "icu_training_load": 104,
+                        }
+                    ]
+                )
+            )
+        ]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="make my race RACE_A\nyes\n/exit\n")
+    assert result.exit_code == 0
+    assert [event_id for event_id, _ in calendar.updated] == ["136701474"]
+    assert calendar.updated[0][1]["category"] == "RACE_A"
+    assert calendar.created == []
+
+
+def test_chat_race_delete_is_gated_and_written(patched: Any) -> None:
+    calendar = FakeCalendarClient(
+        [make_event(136701474, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
+    )
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[{"action": "delete_race", "event_id": 136701474}]))]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="delete my race\nyes\n/exit\n")
+    assert result.exit_code == 0
+    assert calendar.deleted == ["136701474"]

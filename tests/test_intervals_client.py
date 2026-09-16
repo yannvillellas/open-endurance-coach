@@ -95,19 +95,19 @@ async def test_429_retry_then_success(settings: Settings) -> None:
     await client.aclose()
 
 
-async def test_429_http_date_retry_after_falls_back_to_default(settings: Settings) -> None:
+async def test_429_http_date_retry_after_clamps_a_past_date(settings: Settings) -> None:
     sleep = RecordingSleep()
     client, captured = make_client(
         settings,
         [
-            httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+            httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2020 07:28:00 GMT"}, json={}),
             httpx.Response(200, json=[{"id": "i1"}]),
         ],
         sleep=sleep,
     )
     result = await client.list_activities("2026-08-01", "2026-08-17")
     assert len(captured) == 2
-    assert sleep.calls == [60.0]
+    assert sleep.calls == [0.0]
     assert result == [{"id": "i1"}]
     await client.aclose()
 
@@ -116,7 +116,7 @@ async def test_429_exhaustion_with_http_date_raises_cleanly(settings: Settings) 
     sleep = RecordingSleep()
     client, captured = make_client(
         settings,
-        [httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={})]
+        [httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2020 07:28:00 GMT"}, json={})]
         * 4,
         sleep=sleep,
     )
@@ -124,7 +124,7 @@ async def test_429_exhaustion_with_http_date_raises_cleanly(settings: Settings) 
         await client.list_activities("2026-08-01", "2026-08-17")
     assert excinfo.value.status_code == 429
     assert len(captured) == 4
-    assert sleep.calls == [60.0, 60.0, 60.0]
+    assert sleep.calls == [0.0, 0.0, 0.0]
     await client.aclose()
 
 
@@ -289,4 +289,16 @@ async def test_list_events_rejects_non_list_payload(settings: Settings) -> None:
     client, _ = make_client(settings, [httpx.Response(200, json={"unexpected": True})])
     with pytest.raises(IntervalsApiError, match="unexpected events payload"):
         await client.list_events("2024-01-01", "2024-02-01")
+    await client.aclose()
+
+
+async def test_error_messages_do_not_echo_the_response_body(settings: Settings) -> None:
+    body = {"message": "denied", "athlete": {"name": "Private Athlete", "hr": 145}}
+    client, _ = make_client(settings, [httpx.Response(403, json=body)])
+    with pytest.raises(IntervalsApiError) as excinfo:
+        await client.list_activities("2026-08-01", "2026-08-17")
+    message = str(excinfo.value)
+    assert "403" in message
+    assert "denied" in message
+    assert "Private Athlete" not in message
     await client.aclose()

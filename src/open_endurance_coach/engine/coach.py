@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,8 +19,6 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
-    DeleteRace,
-    DeleteWorkout,
     UpdateRace,
     UpdateWorkout,
 )
@@ -54,16 +53,6 @@ class PlaceholderMutationError(ValueError):
     """The decision still carries example placeholder values."""
 
 
-def _is_placeholder_event_id(event_id: int | str) -> bool:
-    if isinstance(event_id, int):
-        return event_id <= 0
-    stripped = event_id.strip()
-    if stripped == "":
-        return True
-    digits = stripped.lstrip("+-")
-    return digits.isdigit() and int(stripped) <= 0
-
-
 def _is_stale(mutation: Any, *, today: date) -> bool:
     return (
         isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace))
@@ -82,10 +71,6 @@ def _bad_race_number(value: float | None, *, required: bool) -> bool:
 
 
 def _is_placeholder(mutation: Any) -> bool:
-    if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
-        _is_placeholder_event_id(mutation.event_id)
-    ):
-        return True
     if (
         isinstance(mutation, (CreateRace, UpdateRace))
         and mutation.distance is not None
@@ -133,12 +118,6 @@ def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
 
 def _reject_placeholders(report: DecisionReport) -> None:
     for mutation in report.mutations:
-        if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
-            _is_placeholder_event_id(mutation.event_id)
-        ):
-            raise PlaceholderMutationError(
-                "event_id 0 is a placeholder; use the real event id from the athlete data"
-            )
         if _is_placeholder(mutation):
             raise PlaceholderMutationError(
                 "duration/load must be real values; ask the athlete instead of"
@@ -165,8 +144,10 @@ class CoachEngine:
         read_client: IntervalsReadClient,
         llm_client: LlmClient,
         writer: CalendarWriter | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings
+        self._clock = clock or (lambda: datetime.now(ZoneInfo(settings.app_timezone)))
         self._store = store
         self._read_client = read_client
         self._llm_client = llm_client
@@ -229,8 +210,12 @@ class CoachEngine:
         ordered = list(reversed(kept))
         while ordered and ordered[0].role == "assistant":
             ordered.pop(0)
-        if not ordered and history:
-            logger.warning("dropping the whole conversation history to fit the context budget")
+        if len(ordered) < len(history):
+            logger.warning(
+                "trimmed the conversation history from %d to %d turns for the context budget",
+                len(history),
+                len(ordered),
+            )
         return ordered
 
     async def _run_llm(
@@ -289,7 +274,7 @@ class CoachEngine:
         return draft
 
     def today(self) -> date:
-        return datetime.now(ZoneInfo(self._settings.app_timezone)).date()
+        return self._clock().date()
 
     def unapplied_decisions(self) -> list[Decision]:
         return self._store.list_unapplied_decisions()

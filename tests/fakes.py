@@ -288,14 +288,18 @@ def report_json(summary: str = "Load stable.", **overrides: Any) -> str:
     return json.dumps(payload)
 
 
-def _near_future(days: int = 30) -> str:
-    return (date.today() + timedelta(days=days)).isoformat()
+TODAY = date(2024, 2, 1)
+
+
+def near_future(days: int = 30) -> str:
+    # Deterministic: the fixed clock the engine tests inject.
+    return (date(2026, 9, 16) + timedelta(days=days)).isoformat()
 
 
 CREATE_MUTATION = {
     "action": "create",
     "name": "Tempo Session",
-    "start_date_local": _near_future(),
+    "start_date_local": near_future(),
     "moving_time": 3600,
 }
 

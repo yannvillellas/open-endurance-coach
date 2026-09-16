@@ -214,8 +214,7 @@ async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: i
         session.pending_decision_id = None
         return
     try:
-        render_apply(await engine.apply(decision.id))
-        session.pending_decision_id = None
+        report = await engine.apply(decision.id)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         session.pending_decision_id = decision.id
@@ -223,6 +222,9 @@ async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: i
             f"[yellow]Decision #{decision.id} was recorded but not applied;"
             ' say "retry" to apply it again.[/yellow]'
         )
+        return
+    session.pending_decision_id = None
+    render_apply(report)
 
 
 @dataclass(frozen=True)
@@ -280,7 +282,13 @@ async def _handle_proposal(
                 _print_needs_input(answer.report.needs_input)
                 return state
             if answer.report.mutations:
-                return _open_proposal(answer.id, answer.report.mutations)
+                if answer.report.intent != "plan":
+                    console.print(
+                        "[dim]The coach did not read that as a planning request; nothing"
+                        " is proposed.[/dim]"
+                    )
+                else:
+                    return _open_proposal(answer.id, answer.report.mutations)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -363,7 +371,7 @@ async def _run_command(
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
     if settings.history_days > 0:
         removed = engine.prune_history(settings.history_days)
@@ -384,14 +392,13 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
             f"[yellow]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
             ' was recorded but never applied. Say "retry" to apply it.[/yellow]'
         )
-    if not fresh:
-        session.seed(
-            engine.recent_history(
-                settings.chat_history_turns,
-                max_age_days=settings.chat_history_max_age_days,
-            ),
-            max_tokens=settings.chat_history_max_tokens,
-        )
+    session.seed(
+        engine.recent_history(
+            settings.chat_history_turns,
+            max_age_days=settings.chat_history_max_age_days,
+        ),
+        max_tokens=settings.chat_history_max_tokens,
+    )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
@@ -447,13 +454,12 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
 
 def start_chat(
     *,
-    fresh: bool = False,
     provider: str | None = None,
     model: str | None = None,
 ) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
+        await run_chat(engine, cli_main.get_settings())
 
     cli_main._run(run, provider=provider, model=model)
