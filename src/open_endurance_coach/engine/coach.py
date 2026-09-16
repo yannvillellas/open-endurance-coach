@@ -42,6 +42,9 @@ def _today(context: CoachContext, settings: Settings) -> date:
     return datetime.now(ZoneInfo(settings.app_timezone)).date()
 
 
+MAX_PLANNING_DAYS = 400
+
+
 class StaleDecisionError(ValueError):
     """The decision's dated mutations are in the past."""
 
@@ -64,7 +67,10 @@ def _is_stale(mutation: Any, *, today: date) -> bool:
     return (
         isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace))
         and mutation.start_date_local is not None
-        and mutation.start_date_local < today
+        and (
+            mutation.start_date_local < today
+            or (mutation.start_date_local - today).days > MAX_PLANNING_DAYS
+        )
     )
 
 
@@ -119,7 +125,8 @@ def _filter_valid_mutations(report: DecisionReport, *, today: date) -> tuple[lis
 def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
     if any(_is_stale(mutation, today=today) for mutation in report.mutations):
         raise StaleDecisionError(
-            "mutations must be dated on or after today; example dates are placeholders"
+            "mutations must be dated between today and "
+            f"{MAX_PLANNING_DAYS} days ahead; example dates are placeholders"
         )
 
 

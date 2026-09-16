@@ -1339,7 +1339,7 @@ def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
     race = {
         "action": "create_race",
         "name": "Autumn Trail Race",
-        "start_date_local": "2099-01-27",
+        "start_date_local": (date.today() + timedelta(days=30)).isoformat(),
         "category": "RACE_A",
         "type": "Run",
         "moving_time": 4200,
@@ -1360,7 +1360,7 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     race = {
         "action": "create_race",
         "name": "Autumn Trail Race",
-        "start_date_local": "2099-01-27",
+        "start_date_local": (date.today() + timedelta(days=30)).isoformat(),
         "category": "RACE_A",
         "type": "Run",
         "moving_time": 4200,

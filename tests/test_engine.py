@@ -9,6 +9,7 @@ import pytest
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import (
+    MAX_PLANNING_DAYS,
     CoachEngine,
     PlaceholderMutationError,
     StaleDecisionError,
@@ -36,10 +37,15 @@ from .fakes import (
 
 TODAY = date(2024, 2, 1)
 
+
+def _near_future(days: int = 30) -> str:
+    return (datetime.now(ZoneInfo("Europe/Paris")).date() + timedelta(days=days)).isoformat()
+
+
 CREATE_MUTATION = {
     "action": "create",
     "name": "Tempo Session",
-    "start_date_local": "2099-01-01",
+    "start_date_local": _near_future(),
     "moving_time": 3600,
 }
 
@@ -243,7 +249,7 @@ async def test_submit_feedback_non_pending_raises(settings: Settings, tmp_path: 
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
+    draft = await engine.analyze("status check")
     engine.approve(draft.id)
     with pytest.raises(ValueError, match="pending"):
         await engine.submit_feedback(draft.id, "too late")
@@ -259,7 +265,7 @@ async def test_approve_records_decision(settings: Settings, tmp_path: Path) -> N
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
+    draft = await engine.analyze("status check")
     decision = engine.approve(draft.id)
     mutation = decision.report.mutations[0]
     assert isinstance(mutation, CreateWorkout)
@@ -294,7 +300,7 @@ async def test_apply_applies_unapplied_decisions_and_marks_applied(
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
+    draft = await engine.analyze("status check")
     engine.approve(draft.id)
     calendar = FakeCalendarClient()
     writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
@@ -527,7 +533,7 @@ async def test_approve_rejects_a_mutation_that_is_now_in_the_past(
         )
     )
     draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    with pytest.raises(ValueError, match="on or after today"):
+    with pytest.raises(ValueError, match="between today and"):
         engine.approve(draft_id)
 
 
@@ -537,7 +543,7 @@ async def test_validate_report_rejects_a_past_dated_update(settings: Settings) -
             mutations=[{"action": "update", "event_id": 7, "start_date_local": "2024-01-01"}]
         )
     )
-    with pytest.raises(ValueError, match="on or after today"):
+    with pytest.raises(ValueError, match="between today and"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -564,7 +570,7 @@ async def test_approve_rejects_a_race_mutation_that_is_now_in_the_past(
         )
     )
     draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    with pytest.raises(ValueError, match="on or after today"):
+    with pytest.raises(ValueError, match="between today and"):
         engine.approve(draft_id)
 
 
@@ -758,7 +764,7 @@ async def test_apply_placeholder_only_decision_raises_placeholder_error(
                     {
                         "action": "create_race",
                         "name": "Race",
-                        "start_date_local": "2099-01-01",
+                        "start_date_local": _near_future(),
                         "category": "RACE_A",
                     }
                 ]
@@ -781,7 +787,7 @@ async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_pa
                     {
                         "action": "create_race",
                         "name": "Race",
-                        "start_date_local": "2099-01-01",
+                        "start_date_local": _near_future(),
                         "category": "RACE_A",
                     }
                 ]
@@ -923,3 +929,27 @@ def test_validate_report_rejects_zero_workout_load_on_update() -> None:
     )
     with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_dates_beyond_the_planning_horizon() -> None:
+    today = date(2026, 9, 16)
+    far = today + timedelta(days=MAX_PLANNING_DAYS + 1)
+    near = today + timedelta(days=MAX_PLANNING_DAYS - 1)
+    for start, should_raise in ((far, True), (near, False)):
+        payload = json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Workout",
+                        "start_date_local": start.isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+        if should_raise:
+            with pytest.raises(StaleDecisionError, match="between today and"):
+                _validate_report(payload, today=today)
+        else:
+            _validate_report(payload, today=today)
