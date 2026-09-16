@@ -132,7 +132,7 @@ async def test_5xx_retry_then_success(settings: Settings) -> None:
     sleep = RecordingSleep()
     client, captured = make_client(
         settings,
-        [httpx.Response(500), httpx.Response(200, json={})],
+        [httpx.Response(500), httpx.Response(200, json=[])],
         sleep=sleep,
     )
     await client.list_activities("2026-08-01", "2026-08-17")
@@ -275,4 +275,18 @@ async def test_get_athlete_summary_rejects_non_list_payload(settings: Settings) 
     client, _ = make_client(settings, [httpx.Response(200, json={"unexpected": True})])
     with pytest.raises(IntervalsApiError, match="unexpected athlete-summary payload"):
         await client.get_athlete_summary()
+    await client.aclose()
+
+
+async def test_list_activities_rejects_non_list_payload(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"unexpected": True})])
+    with pytest.raises(IntervalsApiError, match="unexpected activities payload"):
+        await client.list_activities("2024-01-01", "2024-02-01")
+    await client.aclose()
+
+
+async def test_list_events_rejects_non_list_payload(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"unexpected": True})])
+    with pytest.raises(IntervalsApiError, match="unexpected events payload"):
+        await client.list_events("2024-01-01", "2024-02-01")
     await client.aclose()
