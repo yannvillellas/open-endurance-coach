@@ -85,6 +85,14 @@ def _is_placeholder(mutation: Any) -> bool:
         and mutation.distance <= 0
     ):
         return True
+    if isinstance(mutation, CreateWorkout):
+        return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
+            mutation.icu_training_load, required=False
+        )
+    if isinstance(mutation, UpdateWorkout):
+        return _bad_race_number(mutation.moving_time, required=False) or _bad_race_number(
+            mutation.icu_training_load, required=False
+        )
     if isinstance(mutation, CreateRace):
         return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
             mutation.icu_training_load, required=True
@@ -117,13 +125,15 @@ def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
 
 def _reject_placeholders(report: DecisionReport) -> None:
     for mutation in report.mutations:
-        if _is_placeholder(mutation):
-            if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)):
-                raise PlaceholderMutationError(
-                    "event_id 0 is a placeholder; use the real event id from the athlete data"
-                )
+        if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
+            _is_placeholder_event_id(mutation.event_id)
+        ):
             raise PlaceholderMutationError(
-                "race duration/load must be real values; ask the athlete instead of"
+                "event_id 0 is a placeholder; use the real event id from the athlete data"
+            )
+        if _is_placeholder(mutation):
+            raise PlaceholderMutationError(
+                "duration/load must be real values; ask the athlete instead of"
                 " copying the example zeros"
             )
 

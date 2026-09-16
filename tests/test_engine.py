@@ -637,7 +637,7 @@ def test_validate_report_rejects_placeholder_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(ValueError, match="race duration/load must be real values"):
+    with pytest.raises(ValueError, match="duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -673,7 +673,7 @@ def test_validate_report_rejects_a_race_create_without_load() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
+    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -808,7 +808,7 @@ def test_validate_report_rejects_negative_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
+    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -828,7 +828,7 @@ def test_validate_report_rejects_a_zero_race_distance() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="race duration/load must be real values"):
+    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -897,3 +897,29 @@ async def test_full_history_drop_is_logged(
             "status", context=CoachContext(focus="status", max_tokens=50), history=history
         )
     assert "dropping the whole conversation history" in caplog.text
+
+
+def test_validate_report_rejects_placeholder_workout_duration() -> None:
+    for moving_time in (0, None):
+        payload = json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Workout",
+                        "start_date_local": "2024-03-01",
+                        "moving_time": moving_time,
+                    }
+                ]
+            )
+        )
+        with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+            _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_zero_workout_load_on_update() -> None:
+    payload = json.loads(
+        report_json(mutations=[{"action": "update", "event_id": 10001, "icu_training_load": 0}])
+    )
+    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+        _validate_report(payload, today=date(2024, 2, 1))
