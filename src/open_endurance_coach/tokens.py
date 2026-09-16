@@ -6,6 +6,11 @@ from typing import Any
 # chars/4 heuristic under-counted by ~23%, so 3 gives a small safety margin.
 CHARS_PER_TOKEN = 3
 
+# Soft cap for a whole request: system prompt + athlete context + conversation history.
+# The system contract alone measures ~2.4k tokens at the calibrated rate, so history is
+# trimmed against whatever remains. This is a focus/latency policy, not a provider limit.
+INPUT_TOKEN_CEILING = 12288
+
 
 def estimate_text_tokens(text: str) -> int:
     return max(1, len(text) // CHARS_PER_TOKEN)

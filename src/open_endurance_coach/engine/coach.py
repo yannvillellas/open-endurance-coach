@@ -9,9 +9,10 @@ from pydantic import ValidationError
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
+from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
-from open_endurance_coach.prompts.prompts import build_messages
+from open_endurance_coach.prompts.prompts import build_messages, system_prompt
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
@@ -29,7 +30,7 @@ from open_endurance_coach.store.records import (
     DraftStatus,
     FeedbackWithReport,
 )
-from open_endurance_coach.tokens import estimate_text_tokens
+from open_endurance_coach.tokens import INPUT_TOKEN_CEILING, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
@@ -209,11 +210,14 @@ class CoachEngine:
 
     @staticmethod
     def _fit_history(
-        context: CoachContext, history: list[LlmMessage] | None
+        context: CoachContext,
+        history: list[LlmMessage] | None,
+        *,
+        system_tokens: int,
     ) -> list[LlmMessage] | None:
         if not history:
             return history
-        remaining = max(0, context.max_tokens - context.estimated_tokens())
+        remaining = max(0, INPUT_TOKEN_CEILING - system_tokens - context.estimated_tokens())
         kept: list[LlmMessage] = []
         total = 0
         for turn in reversed(history):
@@ -234,7 +238,15 @@ class CoachEngine:
     ) -> DecisionReport:
         today = _today(context, self._settings)
         content = await self._llm_client.complete_json(
-            build_messages(context, self._settings, self._fit_history(context, history)),
+            build_messages(
+                context,
+                self._settings,
+                self._fit_history(
+                    context,
+                    history,
+                    system_tokens=estimate_text_tokens(system_prompt(self._settings)),
+                ),
+            ),
             validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))
@@ -318,14 +330,21 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        base = draft.context.model_dump()
-        base["today"] = self.today()
-        try:
-            context = CoachContext.model_validate(
-                {**base, "user_feedback": feedback, "current_proposal": draft.report}
-            )
-        except ValidationError:
-            context = CoachContext.model_validate({**base, "user_feedback": feedback})
+        base = draft.context
+        context = build_within_budget(
+            base.focus,
+            base.recent_activities,
+            base.wellness,
+            base.upcoming_events,
+            base.sport_settings,
+            goal_races=base.goal_races,
+            training_rollup=base.training_rollup,
+            current_proposal=draft.report,
+            user_feedback=feedback,
+            activity_detail=base.activity_detail,
+            max_tokens=base.max_tokens,
+            today=self.today(),
+        )
         self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context, history=history)
         self._store.update_draft_report(

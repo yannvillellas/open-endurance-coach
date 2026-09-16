@@ -161,11 +161,7 @@ class LlmClient:
         for attempt in range(attempts):
             completion = await self.complete(messages, json_mode=True)
             content = completion.content
-            if not content or not content.strip():
-                if completion.finish_reason == "length":
-                    raise LlmError(_output_budget_error(completion))
-                last_error = LlmError(_empty_content_error(completion))
-            else:
+            if content and content.strip():
                 try:
                     payload = json.loads(content)
                 except json.JSONDecodeError as exc:
@@ -180,5 +176,9 @@ class LlmClient:
                             return content
                     else:
                         return content
+            else:
+                last_error = LlmError(_empty_content_error(completion))
+            if completion.finish_reason == "length":
+                raise LlmError(_output_budget_error(completion))
             await self._sleep(2**attempt)
         raise LlmError(f"JSON completion failed after {attempts} attempts: {last_error}")
