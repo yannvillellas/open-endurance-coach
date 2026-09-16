@@ -290,3 +290,15 @@ async def test_list_events_rejects_non_list_payload(settings: Settings) -> None:
     with pytest.raises(IntervalsApiError, match="unexpected events payload"):
         await client.list_events("2024-01-01", "2024-02-01")
     await client.aclose()
+
+
+async def test_error_messages_do_not_echo_the_response_body(settings: Settings) -> None:
+    body = {"message": "denied", "athlete": {"name": "Private Athlete", "hr": 145}}
+    client, _ = make_client(settings, [httpx.Response(403, json=body)])
+    with pytest.raises(IntervalsApiError) as excinfo:
+        await client.list_activities("2026-08-01", "2026-08-17")
+    message = str(excinfo.value)
+    assert "403" in message
+    assert "denied" in message
+    assert "Private Athlete" not in message
+    await client.aclose()

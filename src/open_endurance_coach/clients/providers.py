@@ -6,7 +6,7 @@ import httpx
 
 from open_endurance_coach.config import Settings
 
-from .http import parse_retry_after
+from .http import error_detail, parse_retry_after
 from .llm import LlmCompletion, LlmError, LlmMessage, LlmProvider
 
 OVH_MIN_429_BACKOFF_SECONDS = 60.0
@@ -85,9 +85,10 @@ class _OpenAiCompatibleProvider:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
                 continue
             if response.status_code >= 400:
-                message = (
-                    f"{self._error_label} API error {response.status_code}: {response.text[:500]}"
-                )
+                message = f"{self._error_label} API error {response.status_code}"
+                detail = error_detail(response)
+                if detail:
+                    message = f"{message}: {detail}"
                 if response.status_code == 429 and self._rate_limit_hint:
                     message = f"{message}\n{self._rate_limit_hint}"
                 raise LlmError(message)

@@ -1027,3 +1027,23 @@ def test_reasoning_effort_is_warned_when_unsupported(
             sleep=RecordingSleep(),
         )
     assert "has no effect on provider sequence" in caplog.text
+
+
+async def test_provider_error_does_not_echo_the_response_body(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"message": "bad request", "athlete": "secret data"})
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError) as excinfo:
+        await provider.complete(
+            model="deepseek-flash",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=True,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    message = str(excinfo.value)
+    assert "bad request" in message
+    assert "secret data" not in message

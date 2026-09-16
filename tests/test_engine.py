@@ -660,7 +660,7 @@ def test_validate_report_rejects_placeholder_event_id() -> None:
     payload = json.loads(
         report_json(mutations=[{"action": "update", "event_id": 0, "moving_time": 3600}])
     )
-    with pytest.raises(ValueError, match="event_id 0 is a placeholder"):
+    with pytest.raises(ValueError, match="event_id is not a real id"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1037,3 +1037,21 @@ async def test_partial_apply_retry_is_idempotent(settings: Settings, tmp_path: P
     ]
     assert len(calendar.created) == 2
     assert store.list_unapplied_decisions() == []
+
+
+def test_validate_report_rejects_an_unsafe_event_id() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[{"action": "update", "event_id": "0/../../athlete/0", "moving_time": 3600}]
+        )
+    )
+    with pytest.raises(PlaceholderMutationError, match="event_id is not a real id"):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_accepts_string_event_ids() -> None:
+    payload = json.loads(
+        report_json(mutations=[{"action": "update", "event_id": "e20001", "moving_time": 3600}])
+    )
+    report = _validate_report(payload, today=date(2024, 2, 1))
+    assert report.mutations[0].event_id == "e20001"
