@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
+from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor
 from open_endurance_coach.prompts.prompts import build_messages
@@ -318,14 +319,21 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        base = draft.context.model_dump()
-        base["today"] = self.today()
-        try:
-            context = CoachContext.model_validate(
-                {**base, "user_feedback": feedback, "current_proposal": draft.report}
-            )
-        except ValidationError:
-            context = CoachContext.model_validate({**base, "user_feedback": feedback})
+        base = draft.context
+        context = build_within_budget(
+            base.focus,
+            base.recent_activities,
+            base.wellness,
+            base.upcoming_events,
+            base.sport_settings,
+            goal_races=base.goal_races,
+            training_rollup=base.training_rollup,
+            current_proposal=draft.report,
+            user_feedback=feedback,
+            activity_detail=base.activity_detail,
+            max_tokens=base.max_tokens,
+            today=self.today(),
+        )
         self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context, history=history)
         self._store.update_draft_report(
