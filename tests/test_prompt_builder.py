@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 from typing import Any
 
 from open_endurance_coach.config import Settings
@@ -244,3 +245,26 @@ def test_examples_declare_needs_input() -> None:
     assert OUTPUT_EXAMPLE["needs_input"] == []
     assert DISCUSSION_EXAMPLE["needs_input"] == []
     assert INTAKE_EXAMPLE["needs_input"]
+
+
+def test_full_rollup_context_fits_default_budget() -> None:
+    rollup = [
+        {
+            "week_start": (date(2024, 1, 5) + timedelta(days=7 * index)).isoformat(),
+            "partial": index == 13,
+            "sessions": 5,
+            "time_s": 14400,
+            "load": 320.0,
+            "fitness": 45.2,
+            "fatigue": 38.1,
+            "form": 7.1,
+            "ramp_rate": 1.8,
+            "sports": [
+                {"category": "Ride", "sessions": 3, "time_s": 9000, "load": 210.0},
+                {"category": "Run", "sessions": 2, "time_s": 5400, "load": 110.0},
+            ],
+        }
+        for index in range(14)
+    ]
+    context = CoachContext.model_validate({"focus": "plan my race", "training_rollup": rollup})
+    assert context.estimated_tokens() <= 4096

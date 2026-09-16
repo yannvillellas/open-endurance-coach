@@ -187,7 +187,8 @@ async def test_submit_feedback_over_budget_raises_before_llm(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    context = CoachContext(focus="status check", max_tokens=10)
+    probe = CoachContext(focus="status check")
+    context = probe.model_copy(update={"max_tokens": probe.estimated_tokens()})
     draft_id = store.save_draft(
         focus="status check", report=DecisionReport(summary="ok"), context=context
     )

@@ -13,6 +13,7 @@ from open_endurance_coach.fixtures.anonymize import anonymize_fixtures
 ACTIVITY_WINDOW_DAYS = 30
 EVENT_PAST_DAYS = 7
 EVENT_FUTURE_DAYS = 60
+ROLLUP_WINDOW_DAYS = 90
 
 # The coaching domain is cycling-centric, so the detail fixture should
 # prefer a ride (rich power/HR intervals) over the latest activity overall.
@@ -41,7 +42,9 @@ class FixtureSource(Protocol):
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
     async def list_events(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
     async def get_sport_settings(self) -> list[dict[str, Any]]: ...
-    async def get_athlete_summary(self) -> list[dict[str, Any]]: ...
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
 
 async def record_fixtures(settings: Settings, client: FixtureSource) -> dict[str, Any]:
@@ -65,7 +68,9 @@ async def record_fixtures(settings: Settings, client: FixtureSource) -> dict[str
         (today + timedelta(days=EVENT_FUTURE_DAYS)).isoformat(),
     )
     sport_settings = await client.get_sport_settings()
-    athlete_summary = await client.get_athlete_summary()
+    athlete_summary = await client.get_athlete_summary(
+        start=(today - timedelta(days=ROLLUP_WINDOW_DAYS)).isoformat(), end=today.isoformat()
+    )
 
     return anonymize_fixtures(
         {

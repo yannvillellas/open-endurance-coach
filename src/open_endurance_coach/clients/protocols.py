@@ -8,9 +8,15 @@ class IntervalsReadClient(Protocol):
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
 
-    async def list_events(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
     async def get_sport_settings(self) -> list[dict[str, Any]]: ...
+
+    async def get_athlete_summary(
+        self, *, start: str | None = None, end: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
 
 class IntervalsCalendarClient(Protocol):
