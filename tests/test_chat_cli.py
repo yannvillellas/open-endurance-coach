@@ -17,13 +17,16 @@ from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 
 from .fakes import (
+    CREATE_MUTATION,
     FakeCalendarClient,
     FakeLlmProvider,
+    FakeRunner,
     completion,
+    decision_of,
+    make_engine,
     make_intervals_client,
     report_json,
 )
-from .test_cli import CREATE_MUTATION, FakeRunner, decision_of, make_engine
 
 runner = CliRunner()
 
@@ -61,26 +64,19 @@ def make_fake_prompt(monkeypatch: pytest.MonkeyPatch, script: list[object]) -> N
 
 
 def _spy_writes(engine: CoachEngine) -> dict[str, int]:
-    calls = {"approve": 0, "reject": 0, "apply_write": 0}
+    calls = {"approve": 0, "apply_write": 0}
     original_approve = engine.approve
-    original_reject = engine.reject
     original_apply = engine.apply
 
-    def approve(draft_id: int, *, mutations: Any = None) -> Any:
+    def approve(draft_id: int) -> Any:
         calls["approve"] += 1
-        return original_approve(draft_id, mutations=mutations)
+        return original_approve(draft_id)
 
-    def reject(draft_id: int) -> None:
-        calls["reject"] += 1
-        original_reject(draft_id)
-
-    async def apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
-        if not dry_run:
-            calls["apply_write"] += 1
-        return await original_apply(decision_id, dry_run=dry_run)
+    async def apply(decision_id: int | None = None) -> Any:
+        calls["apply_write"] += 1
+        return await original_apply(decision_id)
 
     engine.approve = approve  # type: ignore[method-assign]
-    engine.reject = reject  # type: ignore[method-assign]
     engine.apply = apply  # type: ignore[method-assign]
     return calls
 
@@ -112,21 +108,21 @@ def test_chat_provider_option_threads_to_engine(
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
     monkeypatch.setattr(cli_chat, "run_chat", fake_run_chat)
 
-    result = runner.invoke(cli_main.app, ["chat", "--provider", "deepseek"])
+    result = runner.invoke(cli_main.app, ["--provider", "deepseek"])
     assert result.exit_code == 0
     assert captured == {"provider": "deepseek", "model": None}
 
 
 def test_chat_startup_shows_provider_and_model(patched: Any, settings: Settings) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
     assert result.exit_code == 0
     assert f"Using fake ({settings.llm_model})." in result.output
 
 
 def test_chat_provider_command_shows_current(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/provider\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/provider\n/exit\n")
     assert result.exit_code == 0
     assert "Using fake (" in result.output
 
@@ -143,9 +139,7 @@ def test_chat_provider_command_switches_and_next_analysis_uses_it(
     engine = CoachEngine(settings, store, make_intervals_client(), llm)
     monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
-    result = runner.invoke(
-        cli_main.app, ["chat"], input="/provider deepseek\nanalyze my week\n/exit\n"
-    )
+    result = runner.invoke(cli_main.app, [], input="/provider deepseek\nanalyze my week\n/exit\n")
     assert result.exit_code == 0
     assert "Using deepseek (deepseek-flash)." in result.output
     assert deepseek.calls[-1]["model"] == "deepseek-flash"
@@ -164,9 +158,7 @@ def test_chat_model_command_sets_model(
     engine = CoachEngine(settings, store, make_intervals_client(), llm)
     monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
-    result = runner.invoke(
-        cli_main.app, ["chat"], input="/model my-model\nanalyze my week\n/exit\n"
-    )
+    result = runner.invoke(cli_main.app, [], input="/model my-model\nanalyze my week\n/exit\n")
     assert result.exit_code == 0
     assert "Using fake (my-model)." in result.output
     assert fake.calls[-1]["model"] == "my-model"
@@ -175,14 +167,14 @@ def test_chat_model_command_sets_model(
 
 def test_chat_model_command_escapes_markup(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/model bad[red]\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/model bad[red]\n/exit\n")
     assert result.exit_code == 0
     assert "bad[red]" in result.output
 
 
 def test_chat_provider_command_unknown_provider_prints_error(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/provider nope\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/provider nope\n/exit\n")
     assert result.exit_code == 0
     assert "Unknown LLM provider" in result.output
     assert "bye" in result.output
@@ -191,9 +183,7 @@ def test_chat_provider_command_unknown_provider_prints_error(patched: Any) -> No
 def test_chat_provider_during_confirmation_switches_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\n/provider fake\ncancel\n"
-    )
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/provider fake\ncancel\n")
     assert result.exit_code == 0
     assert "Using fake (" in result.output
     assert len(provider.calls) == 1
@@ -202,7 +192,7 @@ def test_chat_provider_during_confirmation_switches_without_llm(patched: Any) ->
 
 def test_chat_help_lists_commands(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/help\n")
+    result = runner.invoke(cli_main.app, [], input="/help\n")
     assert result.exit_code == 0
     assert "/provider" in result.output
     assert "/forget" in result.output
@@ -211,7 +201,7 @@ def test_chat_help_lists_commands(patched: Any) -> None:
 
 def test_bare_coach_starts_chat(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
     assert result.exit_code == 0
     assert "Chat with the coach" in result.output
     assert "bye" in result.output
@@ -237,35 +227,35 @@ def test_bare_coach_forwards_provider_option(
 
     monkeypatch.setattr(cli_main, "_with_engine", fake_with_engine)
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
-    result = runner.invoke(cli_main.app, ["chat", "-p", "deepseek"], input="/exit\n")
+    result = runner.invoke(cli_main.app, ["-p", "deepseek"], input="/exit\n")
     assert result.exit_code == 0
     assert captured == {"provider": "deepseek", "model": None}
 
 
 def test_chat_exit_says_bye(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/exit\n")
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
     assert result.exit_code == 0
     assert "bye" in result.output
 
 
 def test_chat_quit_alias_exits(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/quit\n")
+    result = runner.invoke(cli_main.app, [], input="/quit\n")
     assert result.exit_code == 0
     assert "bye" in result.output
 
 
 def test_chat_eof_exits_cleanly(patched: Any) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
-    result = runner.invoke(cli_main.app, ["chat"], input="hi\n")
+    result = runner.invoke(cli_main.app, [], input="hi\n")
     assert result.exit_code == 0
     assert "bye" in result.output
 
 
 def test_chat_unknown_command_shows_help_without_engine_calls(patched: Any) -> None:
     _, store = patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/bogus\n")
+    result = runner.invoke(cli_main.app, [], input="/bogus\n")
     assert result.exit_code == 0
     assert "/help" in result.output
     assert store.list_drafts() == []
@@ -274,7 +264,7 @@ def test_chat_unknown_command_shows_help_without_engine_calls(patched: Any) -> N
 def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert "Coach: Load stable." in result.output
     assert store.list_drafts() != []
@@ -284,7 +274,7 @@ def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
 
 def test_chat_free_text_becomes_the_analysis_focus(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze the week how was my week\n")
+    result = runner.invoke(cli_main.app, [], input="analyze the week how was my week\n")
     assert result.exit_code == 0
     assert "Coach: Load stable." in result.output
     drafts = store.list_drafts()
@@ -294,7 +284,7 @@ def test_chat_free_text_becomes_the_analysis_focus(patched: Any) -> None:
 
 def test_chat_first_free_text_keeps_the_exact_focus(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert store.list_drafts()[0].focus.splitlines()[0] == "how was my week?"
 
@@ -304,10 +294,10 @@ def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\nyes\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n")
     assert result.exit_code == 0
     assert "Apply this to Intervals.icu" in result.output
-    assert calls == {"approve": 1, "reject": 0, "apply_write": 1}
+    assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
     assert decision_of(store, 1).applied_at is not None
 
@@ -317,9 +307,9 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\nno\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nno\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert store.list_decisions() == []
     assert store.get_draft(1).status is DraftStatus.PENDING
@@ -335,10 +325,10 @@ def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
     )
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\nmake it easier\nyes\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\nyes\n")
     assert result.exit_code == 0
     assert result.output.count("Apply this to Intervals.icu") == 2
-    assert calls == {"approve": 1, "reject": 0, "apply_write": 1}
+    assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
     draft = store.get_draft(1)
     assert draft is not None
@@ -355,7 +345,7 @@ def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> 
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nmake it easier\nhow is it going?\n"
+        cli_main.app, [], input="analyze my week\nmake it easier\nhow is it going?\n"
     )
     assert result.exit_code == 0
     assert "No changes proposed anymore." in result.output
@@ -372,9 +362,9 @@ def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
     )
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\nyes please\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes please\ncancel\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert [row.content for row in store.list_feedback(1)] == ["yes please"]
 
@@ -390,9 +380,9 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     )
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input=f"analyze my week\n{answer}\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\ncancel\n")
     assert result.exit_code == 0
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
     assert store.get_draft(1).status is DraftStatus.PENDING
 
@@ -401,10 +391,10 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json("Sure."))])
     engine, store = patched(provider)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nyes\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\nyes\n")
     assert result.exit_code == 0
     assert "Coach: Sure." in result.output
-    assert calls == {"approve": 0, "reject": 0, "apply_write": 0}
+    assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
 
 
@@ -413,7 +403,7 @@ def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
     _, store = patched(provider)
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input="how much did my heart rate improve on hills over the last 3 months\n",
     )
     assert result.exit_code == 0
@@ -430,7 +420,7 @@ def test_chat_seeds_history_from_feedback(patched: Any) -> None:
         context=CoachContext(focus="f"),
     )
     store.add_feedback(draft_id, "legs heavy")
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nand today?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     prompt = provider.calls[1]["messages"][1].content
     assert "Recent conversation:" in prompt
@@ -456,7 +446,7 @@ def test_chat_seed_passes_max_age_from_settings(
         return original(limit, max_age_days=max_age_days)
 
     monkeypatch.setattr(engine, "recent_history", spy)
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert seen == [(10, 30)]
 
@@ -465,7 +455,7 @@ def test_chat_session_memory_appends_turns(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="how was my week?\nfirst question\nsecond question\n"
+        cli_main.app, [], input="how was my week?\nfirst question\nsecond question\n"
     )
     assert result.exit_code == 0
     prompt = provider.calls[2]["messages"][1].content
@@ -486,7 +476,7 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
     patched(provider)
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input="analyze my week\nmake it easier\nyes\nhow is it going?\n",
     )
     assert result.exit_code == 0
@@ -501,7 +491,7 @@ def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
 ) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     make_fake_prompt(monkeypatch, ["analyze my week", KeyboardInterrupt(), "/help", EOFError()])
-    result = runner.invoke(cli_main.app, ["chat"])
+    result = runner.invoke(cli_main.app, [])
     assert result.exit_code == 0
     assert "Cancelled. Nothing changed." in result.output
     assert "/provider" in result.output
@@ -514,7 +504,7 @@ def test_chat_eof_during_confirmation_cancels_and_exits(
 ) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))]))
     make_fake_prompt(monkeypatch, ["analyze my week", EOFError()])
-    result = runner.invoke(cli_main.app, ["chat"])
+    result = runner.invoke(cli_main.app, [])
     assert result.exit_code == 0
     assert "Cancelled. Nothing changed." in result.output
     assert "bye" in result.output
@@ -525,7 +515,7 @@ def test_chat_eof_during_confirmation_cancels_and_exits(
 def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     patched(FakeLlmProvider())
     make_fake_prompt(monkeypatch, [KeyboardInterrupt()])
-    result = runner.invoke(cli_main.app, ["chat"])
+    result = runner.invoke(cli_main.app, [])
     assert result.exit_code == 0
     assert "bye" in result.output
     assert "Cancelled" not in result.output
@@ -545,7 +535,7 @@ def test_chat_startup_keeps_history_when_window_is_zero(
     monkeypatch.setattr(
         cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 0})
     )
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert "Remembering 1 past exchange" in result.output
     assert "Pruned" not in result.output
@@ -561,7 +551,7 @@ def test_chat_shows_seeded_memory_count(patched: Any) -> None:
     )
     store.add_feedback(draft_id, "legs heavy")
     store.add_feedback(draft_id, "slept badly")
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nand today?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     assert "Remembering 2 past exchanges." in result.output
 
@@ -570,7 +560,7 @@ def test_chat_forget_wipes_stored_history_and_memory(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     _, store = patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="how was my week?\nsecond question\n/forget\nthird\n"
+        cli_main.app, [], input="how was my week?\nsecond question\n/forget\nthird\n"
     )
     assert result.exit_code == 0
     assert "Forgot" in result.output
@@ -592,7 +582,7 @@ def test_chat_session_trims_to_cap(
     )
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input=f"how was my week?\n{'A' * 4000}\n{'B' * 4000}\n{'C' * 4000}\n",
     )
     assert result.exit_code == 0
@@ -603,14 +593,14 @@ def test_chat_session_trims_to_cap(
 
 def test_chat_shows_thinking_indicator(patched: Any) -> None:
     patched(FakeLlmProvider([completion(report_json())]))
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n")
     assert result.exit_code == 0
     assert "Thinking…" in result.output
 
 
 def test_chat_blank_lines_are_skipped(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="\n   \n/help\n")
+    result = runner.invoke(cli_main.app, [], input="\n   \n/help\n")
     assert result.exit_code == 0
     assert "error" not in result.output
     assert "/provider" in result.output
@@ -622,7 +612,7 @@ def test_chat_mid_session_planning_request_opens_a_proposal(patched: Any) -> Non
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="how was my week?\nplan a rest run tomorrow\ncancel\n"
+        cli_main.app, [], input="how was my week?\nplan a rest run tomorrow\ncancel\n"
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
@@ -640,7 +630,7 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
     )
     _, store = patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nwhat would this train exactly?\nno\n"
+        cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
     assert "Coach: Explanation." in result.output
@@ -662,7 +652,7 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
     _, store = patched(provider)
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input="analyze my week\nmake it 45 minutes, why did you pick 60?\nyes\n",
     )
     assert result.exit_code == 0
@@ -683,7 +673,7 @@ def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nwhat would this train exactly?\nno\n"
+        cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
     assert "describe the change" in result.output
@@ -698,7 +688,7 @@ def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> No
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nwhat would this train exactly?\nno\n"
+        cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
     user_message = provider.calls[1]["messages"][1].content
@@ -715,7 +705,7 @@ def test_chat_proposal_modification_reshows_report_without_draft_line(patched: A
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nmake it 4 series instead\nno\n"
+        cli_main.app, [], input="analyze my week\nmake it 4 series instead\nno\n"
     )
     assert result.exit_code == 0
     assert "Coach: Revised plan." in result.output
@@ -732,7 +722,7 @@ def test_chat_revision_sees_current_proposal(patched: Any) -> None:
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\nmake it 4 series instead\nno\n"
+        cli_main.app, [], input="analyze my week\nmake it 4 series instead\nno\n"
     )
     assert result.exit_code == 0
     user_message = provider.calls[1]["messages"][1].content
@@ -743,7 +733,7 @@ def test_chat_revision_sees_current_proposal(patched: Any) -> None:
 def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/exit\n")
     assert result.exit_code == 0
     assert "bye" in result.output
     assert len(provider.calls) == 1
@@ -753,7 +743,7 @@ def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
 
 def test_chat_help_mentions_cancel(patched: Any) -> None:
     patched(FakeLlmProvider())
-    result = runner.invoke(cli_main.app, ["chat"], input="/help\n")
+    result = runner.invoke(cli_main.app, [], input="/help\n")
     assert result.exit_code == 0
     assert "cancel" in result.output
 
@@ -777,7 +767,6 @@ def test_chat_proposal_question_budget_overflow_falls_back_to_context(
     session.context = CoachContext(focus="tight", today=TODAY, max_tokens=25)
     state = ChatState(
         plan=PlanSnapshot(
-            action="approve",
             plan_text="Apply this to Intervals.icu:\nProposed changes:\n  - create Tempo Session",
             draft_id=draft_id,
         )
@@ -802,7 +791,7 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     draft_id = store.save_draft(
         focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
     )
-    state = ChatState(plan=PlanSnapshot(action="approve", plan_text="plan", draft_id=draft_id))
+    state = ChatState(plan=PlanSnapshot(plan_text="plan", draft_id=draft_id))
     session = ChatSession()
     session.context = CoachContext(focus="f", max_tokens=100)
     result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
@@ -814,26 +803,51 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     assert draft.context.current_proposal is None
 
 
-def test_chat_proposal_without_draft_errors_gracefully(patched: Any) -> None:
-    from open_endurance_coach.chat.gate import PlanSnapshot
-    from open_endurance_coach.chat.history import ChatSession
-    from open_endurance_coach.chat.state import ChatState
-    from open_endurance_coach.cli import chat as cli_chat
+def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
 
-    provider = FakeLlmProvider()
-    engine, _ = patched(provider)
-    state = ChatState(
-        plan=PlanSnapshot(
-            action="approve",
-            plan_text="Apply this to Intervals.icu:",
-            draft_id=None,
-        )
-    )
+    async def broken_apply(decision_id: int | None = None) -> Any:
+        raise RuntimeError("writer exploded")
+
     import asyncio
 
-    result = asyncio.run(cli_chat._handle_proposal(engine, state, "make it easier", ChatSession()))
-    assert isinstance(result, ChatState)
-    assert result.plan is None
+    async def noop() -> None:
+        pass
+
+    engine.apply = broken_apply
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n")
+    assert result.exit_code == 0
+    assert "writer exploded" in result.output
+    assert "not applied" in result.output
+    assert 'say "retry"' in result.output
+    decision = store.get_decision(1)
+    assert decision is not None
+    assert decision.applied_at is None
+    asyncio.run(noop())
+
+
+def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    original = engine.apply
+    attempts: list[int] = []
+
+    async def flaky_apply(decision_id: int | None = None) -> Any:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("writer exploded")
+        return await original(decision_id)
+
+    engine.apply = flaky_apply
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\nretry\n")
+    assert result.exit_code == 0
+    assert 'say "retry"' in result.output
+    assert len(attempts) == 2
+    assert len(calendar.created) == 1
+    assert store.list_unapplied_decisions() == []
 
 
 def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
@@ -846,7 +860,7 @@ def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
         raise sqlite3.OperationalError("database is locked")
 
     engine.analyze = broken_analyze
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\nand today?\n/help\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n/help\n")
     assert result.exit_code == 0
     assert "error:" in result.output
     assert "/provider" in result.output
@@ -855,7 +869,7 @@ def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
 def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\n/help\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/help\ncancel\n")
     assert result.exit_code == 0
     assert "/provider" in result.output
     assert len(provider.calls) == 1
@@ -865,7 +879,7 @@ def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
 def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\n/forget\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/forget\ncancel\n")
     assert result.exit_code == 0
     assert "unavailable while a proposal is open" in result.output
     assert len(provider.calls) == 1
@@ -881,7 +895,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
     )
     _, store = patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="analyze my week\n/forget\nwhat does this train?\nno\n"
+        cli_main.app, [], input="analyze my week\n/forget\nwhat does this train?\nno\n"
     )
     assert result.exit_code == 0
     assert "/forget is unavailable while a proposal is open." in result.output
@@ -893,7 +907,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
 def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\n/bogus\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/bogus\ncancel\n")
     assert result.exit_code == 0
     assert "Unknown command." in result.output
     assert len(provider.calls) == 1
@@ -905,7 +919,7 @@ def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> No
     _, store = patched(provider)
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input=(
             "how was my week?\nhow much did my heart rate improve on hills over the last 3 months\n"
         ),
@@ -920,7 +934,7 @@ def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
         [completion(report_json(intent="chat", mutations=[CREATE_MUTATION]))]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="review my last two runs\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="review my last two runs\n/exit\n")
     assert result.exit_code == 0
     assert "Confirm? Reply with exactly yes or no" not in result.output
     assert "did not read this as a planning request" in result.output
@@ -931,7 +945,7 @@ def test_chat_planning_phrase_opens_proposal(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="could we plan a rest run after my rest day\ncancel\n"
+        cli_main.app, [], input="could we plan a rest run after my rest day\ncancel\n"
     )
     assert result.exit_code == 0
     assert "Confirm? Reply with exactly yes or no" in result.output
@@ -940,7 +954,7 @@ def test_chat_planning_phrase_opens_proposal(patched: Any) -> None:
 def test_chat_analysis_with_mutations_opens_proposal(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\ncancel\n")
     assert result.exit_code == 0
     assert "Confirm? Reply with exactly yes or no" in result.output
 
@@ -950,28 +964,11 @@ def test_chat_analysis_intent_with_mutations_shows_the_refusal(patched: Any) -> 
         [completion(report_json(intent="analysis", mutations=[CREATE_MUTATION]))]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
     assert "did not read this as a planning request" in result.output
     assert "Confirm? Reply with exactly yes or no" not in result.output
     assert len(provider.calls) == 1
-
-
-def test_chat_apply_failure_after_yes_shows_the_retry_hint(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
-    engine, _ = patched(provider)
-
-    async def broken_apply(decision_id: int | None = None, *, dry_run: bool = False) -> Any:
-        if not dry_run:
-            raise RuntimeError("writer exploded")
-        return await engine.apply(decision_id, dry_run=True)
-
-    engine.apply = broken_apply
-    result = runner.invoke(cli_main.app, ["chat"], input="analyze my week\nyes\n")
-    assert result.exit_code == 0
-    assert "writer exploded" in result.output
-    assert "not applied" in result.output
-    assert "coach apply" in result.output
 
 
 def test_chat_material_questions_block_a_workout_plan(patched: Any) -> None:
@@ -986,7 +983,7 @@ def test_chat_material_questions_block_a_workout_plan(patched: Any) -> None:
         ]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="plan my race\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
     assert "expected finish time" in result.output
@@ -1004,7 +1001,7 @@ def test_chat_answer_after_needs_input_reruns_the_analysis(patched: Any) -> None
     patched(provider)
     result = runner.invoke(
         cli_main.app,
-        ["chat"],
+        [],
         input="plan my race\ntarget 60 minutes, I can train daily\ncancel\n",
     )
     assert result.exit_code == 0
@@ -1026,7 +1023,7 @@ def test_chat_duplicate_questions_are_shown_once(patched: Any) -> None:
         ]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="plan my race\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
     assert result.exit_code == 0
     assert result.output.count(question) == 1
     assert "Do you want cycling kept in the taper?" in result.output
@@ -1047,7 +1044,7 @@ def test_chat_non_plan_report_with_needs_input_shows_only_the_intent_hint(
         ]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
     assert "did not read this as a planning request" in result.output
     assert "needs answers before proposing calendar changes" not in result.output
@@ -1058,7 +1055,7 @@ def test_chat_needs_input_without_mutations_shows_the_questions(patched: Any) ->
         [completion(report_json(needs_input=["What is your expected finish time?"]))]
     )
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="plan my race\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
     assert "expected finish time" in result.output
@@ -1079,7 +1076,7 @@ def test_chat_proceed_with_assumptions_opens_the_proposal(patched: Any) -> None:
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, ["chat"], input="plan my race, proceed with assumptions\ncancel\n"
+        cli_main.app, [], input="plan my race, proceed with assumptions\ncancel\n"
     )
     assert result.exit_code == 0
     assert "Confirm? Reply with exactly yes or no" in result.output
@@ -1088,7 +1085,7 @@ def test_chat_proceed_with_assumptions_opens_the_proposal(patched: Any) -> None:
 def test_chat_bare_command_prints_a_slash_hint(patched: Any) -> None:
     provider = FakeLlmProvider()
     patched(provider)
-    result = runner.invoke(cli_main.app, ["chat"], input="forget 7\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="forget 7\n/exit\n")
     assert result.exit_code == 0
     assert "type it with a slash" in result.output
     assert provider.calls == []
@@ -1102,7 +1099,7 @@ def test_chat_unexpected_error_keeps_the_session(patched: Any) -> None:
         raise KeyError("boom")
 
     engine.analyze = broken_analyze
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n/exit\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
     assert "error:" in result.output
     assert "bye" in result.output
@@ -1117,7 +1114,7 @@ def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
         context=CoachContext(focus="f"),
     )
     store.add_feedback(draft_id, "legs heavy")
-    result = runner.invoke(cli_main.app, ["chat"], input="/forget 30\nhow was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="/forget 30\nhow was my week?\n")
     assert result.exit_code == 0
     assert "history older than 30 days" in result.output
     assert "legs heavy" in provider.calls[0]["messages"][1].content
@@ -1132,6 +1129,22 @@ def test_chat_startup_reports_pruned_records(
     monkeypatch.setattr(
         cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 180})
     )
-    result = runner.invoke(cli_main.app, ["chat"], input="how was my week?\n")
+    result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert "Pruned 2 old records" in result.output
+
+
+def test_chat_fresh_skips_seeding(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    _, store = patched(provider)
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=CoachContext(focus="f"),
+    )
+    store.add_feedback(draft_id, "legs heavy")
+    result = runner.invoke(cli_main.app, ["--fresh"], input="how was my week?\nand today?\n")
+    assert result.exit_code == 0
+    assert "Remembering" not in result.output
+    assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
+    assert "Recent conversation:" in provider.calls[1]["messages"][1].content

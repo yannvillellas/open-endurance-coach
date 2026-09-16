@@ -1,6 +1,4 @@
-import inspect
 import json
-from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -11,11 +9,8 @@ from open_endurance_coach.cli.rendering import (
     mutations_plan_text,
     print_error,
     render_apply,
-    render_draft,
     render_report,
-    render_review,
 )
-from open_endurance_coach.engine.coach import ReviewView
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
@@ -51,53 +46,6 @@ def test_render_report_prints_summary_findings_questions(
     assert "? RPE on Thursday?" in out
 
 
-def test_render_draft_one_shot_hint(capsys: pytest.CaptureFixture[str]) -> None:
-    render_draft(make_draft())
-    out = capsys.readouterr().out
-    assert "Draft #1 saved (pending). Review it: coach review 1" in out
-
-
-def test_render_draft_updated_verb(capsys: pytest.CaptureFixture[str]) -> None:
-    render_draft(make_draft(), updated=True)
-    out = capsys.readouterr().out
-    assert "Draft #1 updated (pending)" in out
-
-
-def test_render_draft_hint_is_one_shot(capsys: pytest.CaptureFixture[str]) -> None:
-    render_draft(make_draft())
-    out = capsys.readouterr().out
-    assert "Review it: coach review 1" in out
-    assert "/review 1" not in out
-
-
-def test_render_review_one_shot_hint(capsys: pytest.CaptureFixture[str]) -> None:
-    view = ReviewView(draft=make_draft(), requested_feedback=["RPE missing for Ride:"])
-    render_review(view)
-    out = capsys.readouterr().out
-    assert "? RPE missing for Ride:" in out
-    assert 'Answer the coach: coach feedback 1 "your RPE and notes"' in out
-
-
-def test_render_review_hint_is_one_shot(capsys: pytest.CaptureFixture[str]) -> None:
-    view = ReviewView(draft=make_draft(), requested_feedback=["RPE missing for Ride:"])
-    render_review(view)
-    out = capsys.readouterr().out
-    assert 'Answer the coach: coach feedback 1 "your RPE and notes"' in out
-    assert "/feedback 1" not in out
-
-
-def test_render_review_skips_solicitations_when_not_pending(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    draft = make_draft()
-    approved = replace(draft, status=DraftStatus.APPROVED)
-    view = ReviewView(draft=approved, requested_feedback=["RPE missing for Ride:"])
-    render_review(view)
-    out = capsys.readouterr().out
-    assert "RPE missing" not in out
-    assert "Answer the coach" not in out
-
-
 def test_mutations_plan_text_shows_dates_and_descriptions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -121,23 +69,7 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     assert "- create Bare Session on 2026-08-24" in text
 
 
-def test_render_apply_dry_run_banner_and_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
-    report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
-                outcomes=[MutationOutcome(action="create", target="created", name="Tempo Session")],
-            )
-        ]
-    )
-    render_apply(report, write=False)
-    out = capsys.readouterr().out
-    assert "DRY RUN - no changes written" in out
-    assert "Decision #1:" in out
-    assert "- create -> created: Tempo Session" in out
-
-
-def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
+def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
         decisions=[
             AppliedDecision(
@@ -146,7 +78,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
             )
         ]
     )
-    render_apply(report, write=True)
+    render_apply(report)
     out = capsys.readouterr().out
     assert "Applied:" in out
     assert "DRY RUN" not in out
@@ -154,7 +86,7 @@ def test_render_apply_write_mode(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
-    render_apply(ApplyReport(), write=False)
+    render_apply(ApplyReport())
     out = capsys.readouterr().out
     assert "No unapplied decisions." in out
 
@@ -256,11 +188,3 @@ def test_print_error_escapes_exception_text(capsys: pytest.CaptureFixture[str]) 
     out = capsys.readouterr().out
     assert "error:" in out
     assert "bad [bold]payload[/bold]" in out
-
-
-def test_render_draft_has_no_chat_parameter() -> None:
-    assert "chat" not in inspect.signature(render_draft).parameters
-
-
-def test_render_review_has_no_chat_parameter() -> None:
-    assert "chat" not in inspect.signature(render_review).parameters

@@ -67,6 +67,7 @@ class ChatSession:
     history: list[LlmMessage] = field(default_factory=list)
     context: CoachContext | None = None
     cap: int | None = None
+    pending_decision_id: int | None = None
 
     def seed(self, entries: list[FeedbackWithReport], *, max_tokens: int) -> None:
         self.history = trim_history(seed_turns(entries), max_tokens)

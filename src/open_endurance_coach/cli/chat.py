@@ -2,7 +2,6 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-import typer
 from pydantic import ValidationError
 from rich.prompt import Prompt
 
@@ -39,12 +38,13 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import WorkoutMutation
 from open_endurance_coach.store.records import Draft
 
-chat_app = typer.Typer()
+_RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
 
 HELP_TEXT = (
     "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
     "When he proposes calendar changes, answer with exactly yes or no (cancel\n"
     "abandons it; anything else is a change request and nothing is written).\n"
+    "retry                  apply again if a calendar write failed\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
     "/forget [days]         forget stored history (all, or older than N days)\n"
@@ -100,7 +100,6 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
 
 def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:
     snapshot = PlanSnapshot(
-        action="approve",
         plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
         draft_id=draft_id,
     )
@@ -153,23 +152,42 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     return None
 
 
+async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
+    try:
+        report = await engine.apply(session.pending_decision_id)
+    except RECOVERABLE_EXCEPTIONS as exc:
+        print_error(exc)
+        return
+    if not report.decisions:
+        console.print("Nothing to apply.")
+        return
+    session.pending_decision_id = None
+    render_apply(report)
+    session.append(text, "Applied the recorded calendar changes.")
+
+
 async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> ChatState | None:
     try:
+        if _RETRY_RE.match(text):
+            await _retry_apply(engine, session, text)
+            return None
         return await _analyze_line(engine, session, text)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return None
 
 
-async def _apply_proposal(engine: CoachEngine, draft_id: int) -> None:
+async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
     decision = engine.approve(draft_id)
     try:
-        render_apply(await engine.apply(decision.id), write=True)
+        render_apply(await engine.apply(decision.id))
+        session.pending_decision_id = None
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
+        session.pending_decision_id = decision.id
         console.print(
             f"[yellow]Decision #{decision.id} was recorded but not applied;"
-            " retry with: coach apply[/yellow]"
+            ' say "retry" to apply it again.[/yellow]'
         )
 
 
@@ -184,9 +202,6 @@ async def _handle_proposal(
     assert state.plan is not None
     snapshot = state.plan
     draft_id = snapshot.draft_id
-    if draft_id is None:
-        console.print("[red]error:[/red] confirmation state has no draft")
-        return ChatState()
     if is_exit_command(line):
         console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
         return ExitChat()
@@ -210,13 +225,13 @@ async def _handle_proposal(
         _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
     ):
         try:
-            view = engine.review(draft_id)
-            context_base = session.context if session.context is not None else view.draft.context
+            draft = engine.review(draft_id)
+            context_base = session.context if session.context is not None else draft.context
             try:
                 context = CoachContext.model_validate(
                     {
                         **context_base.model_dump(),
-                        "current_proposal": view.draft.report,
+                        "current_proposal": draft.report,
                     }
                 )
             except ValidationError:
@@ -234,7 +249,7 @@ async def _handle_proposal(
         return state
 
     async def execute(current: CoachEngine) -> None:
-        await _apply_proposal(current, draft_id)
+        await _apply_proposal(current, session, draft_id)
 
     async def feedback(line: str, updated: Draft) -> bool | None:
         session.append(line, assistant_turn(updated.report).content)
@@ -252,7 +267,6 @@ async def _handle_proposal(
             snapshot,
             line,
             executor=execute,
-            chat=True,
             on_feedback=feedback,
             restate=restate,
         )
@@ -290,7 +304,7 @@ async def _run_command(
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
     if settings.history_days > 0:
         removed = engine.prune_history(settings.history_days)
@@ -299,13 +313,14 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
             console.print(
                 f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
             )
-    session.seed(
-        engine.recent_history(
-            settings.chat_history_turns,
-            max_age_days=settings.chat_history_max_age_days,
-        ),
-        max_tokens=settings.chat_history_max_tokens,
-    )
+    if not fresh:
+        session.seed(
+            engine.recent_history(
+                settings.chat_history_turns,
+                max_age_days=settings.chat_history_max_age_days,
+            ),
+            max_tokens=settings.chat_history_max_tokens,
+        )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
@@ -359,16 +374,15 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
             print_error(exc)
 
 
-@chat_app.command()
-def chat(
-    provider: str | None = typer.Option(
-        None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
-    ),
-    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override"),
+def start_chat(
+    *,
+    fresh: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings())
+        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
 
     cli_main._run(run, provider=provider, model=model)

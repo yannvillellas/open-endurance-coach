@@ -281,19 +281,6 @@ class CoachStore:
             report=draft.report,
         )
 
-    def reject_draft(self, draft_id: int) -> None:
-        draft = self.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
-            raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts can be rejected"
-            )
-        self._connection.execute(
-            "UPDATE drafts SET status = ? WHERE id = ?", (DraftStatus.REJECTED.value, draft_id)
-        )
-        self._connection.commit()
-
     def _decision_from_row(self, row: sqlite3.Row) -> Decision:
         applied_at = row["applied_at"]
         return Decision(

@@ -12,9 +12,7 @@ from open_endurance_coach.chat.dispatch import (
 from open_endurance_coach.chat.gate import PlanSnapshot
 from open_endurance_coach.chat.state import ChatState
 
-_CONFIRMING = ChatState(
-    plan=PlanSnapshot(action="approve", plan_text="Draft #3 - approve", draft_id=3)
-)
+_CONFIRMING = ChatState(plan=PlanSnapshot(plan_text="Draft #3 - approve", draft_id=3))
 
 
 @pytest.mark.parametrize(
