@@ -2,7 +2,12 @@ import json
 from typing import Any
 
 from open_endurance_coach.config import Settings
-from open_endurance_coach.prompts.prompts import OUTPUT_EXAMPLE, build_messages
+from open_endurance_coach.prompts.prompts import (
+    DISCUSSION_EXAMPLE,
+    INTAKE_EXAMPLE,
+    OUTPUT_EXAMPLE,
+    build_messages,
+)
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
@@ -188,15 +193,54 @@ def test_build_messages_is_deterministic() -> None:
 
 
 def test_examples_are_placeholders_not_copyable_answers() -> None:
-    rendered = json.dumps(OUTPUT_EXAMPLE)
-    assert "2024-" not in rendered
-    assert "Tempo Session" not in rendered
-    assert "10001" not in rendered
-    assert "<workout name>" in rendered
-    assert "2099-01-01" in rendered
+    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE):
+        rendered = json.dumps(example)
+        assert "2024-" not in rendered
+        assert "Tempo Session" not in rendered
+        assert "10001" not in rendered
+    assert "<workout name>" in json.dumps(OUTPUT_EXAMPLE)
+    assert "2099-01-01" in json.dumps(OUTPUT_EXAMPLE)
 
 
 def test_contract_warns_that_examples_are_shape_only() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert "shows the shape only" in system
+    assert "show the shape only" in system
     assert "a mutation that sets a date before today is rejected" in system
+
+
+def test_contract_defaults_to_discussion_policy() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert 'Return an empty mutations list unless intent is "plan"' in system
+    assert "conversation - no calendar change requested" in system
+    assert "asked for a plan or calendar change" in system
+
+
+def test_examples_declare_intent() -> None:
+    assert DISCUSSION_EXAMPLE["intent"] == "chat"
+    assert DISCUSSION_EXAMPLE["mutations"] == []
+    assert OUTPUT_EXAMPLE["intent"] == "plan"
+    assert OUTPUT_EXAMPLE["mutations"]
+    assert DecisionReport(summary="x").intent == "analysis"
+
+
+def test_contract_blocks_proposals_on_material_questions() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Before prescribing anything" in system
+    assert "Put those questions in needs_input" in system
+    assert "never assume on the athlete's behalf" in system
+    assert "Assume only when the athlete explicitly tells you to" in system
+    assert "state the assumption in the summary" in system
+    assert "Never list the same question in both questions and needs_input" in system
+
+
+def test_intake_example_demonstrates_blocking() -> None:
+    report = DecisionReport.model_validate(INTAKE_EXAMPLE)
+    assert report.intent == "plan"
+    assert report.needs_input
+    assert report.mutations == []
+
+
+def test_examples_declare_needs_input() -> None:
+    assert OUTPUT_EXAMPLE["needs_input"] == []
+    assert DISCUSSION_EXAMPLE["needs_input"] == []
+    assert INTAKE_EXAMPLE["needs_input"]

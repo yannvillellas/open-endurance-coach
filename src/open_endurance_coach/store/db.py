@@ -56,6 +56,33 @@ class CoachStore:
             self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
         self._connection.commit()
 
+    def prune_before(self, cutoff: datetime) -> dict[str, int]:
+        stamp = cutoff.isoformat()
+        statements = {
+            "feedback": (
+                "DELETE FROM feedback WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
+            "decisions": (
+                "DELETE FROM decisions WHERE draft_id IN"
+                " (SELECT id FROM drafts WHERE created_at < ?)"
+            ),
+            "drafts": "DELETE FROM drafts WHERE created_at < ?",
+            "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
+        }
+        counts: dict[str, int] = {}
+        try:
+            for name, statement in statements.items():
+                cursor = self._connection.execute(statement, (stamp,))
+                counts[name] = cursor.rowcount
+            self._connection.commit()
+        except sqlite3.Error:
+            self._connection.rollback()
+            raise
+        if sum(counts.values()):
+            self._connection.execute("VACUUM")
+        return counts
+
     def close(self) -> None:
         self._connection.close()
 

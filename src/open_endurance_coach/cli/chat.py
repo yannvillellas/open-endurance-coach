@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from datetime import date
 
 import typer
 from pydantic import ValidationError
@@ -41,18 +42,16 @@ from open_endurance_coach.store.records import Draft
 chat_app = typer.Typer()
 
 HELP_TEXT = (
-    "Just talk to the coach. When he proposes calendar changes, answer with\n"
-    "exactly yes or no (cancel abandons it; anything else is a change request\n"
-    "and nothing is written).\n"
-    "/analyze [focus]       force a fresh analysis\n"
+    "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
+    "When he proposes calendar changes, answer with exactly yes or no (cancel\n"
+    "abandons it; anything else is a change request and nothing is written).\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
-    "/clear                 forget this session's memory\n"
+    "/forget [days]         forget stored history (all, or older than N days)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
 
-_ANALYZE_RE = re.compile(r"\b(analy[sz]e|review|assess|check|plan)\b", re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
 _QUESTION_START_RE = re.compile(
     r"^\s*(?:what|why|how|which|when|who|explain|detail\w*)\b", re.IGNORECASE
@@ -61,6 +60,28 @@ _CHANGE_RE = re.compile(
     r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b",
     re.IGNORECASE,
 )
+_REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
+_BARE_COMMAND_RE = re.compile(
+    r"^\s*(help|exit|quit|forget(?:\s+\d+)?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
+    re.IGNORECASE,
+)
+_ASSUME_RE = re.compile(
+    r"\b(proceed with assumptions|use assumptions|assume|i don'?t know|no idea|not sure yet)\b",
+    re.IGNORECASE,
+)
+
+
+def _print_needs_input(questions: list[str]) -> None:
+    console.print("[yellow]The coach needs answers before proposing calendar changes:[/yellow]")
+    for question in questions:
+        console.print(f"  ? {escape(question)}")
+    console.print('[dim]Answer here, or say "proceed with assumptions" to plan anyway.[/dim]')
+
+
+def _needs_fresh_context(focus: str, today: date | None) -> bool:
+    if detect_deep_query(focus, today=today) is not None:
+        return True
+    return _REFRESH_RE.search(focus) is not None
 
 
 def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None:
@@ -75,16 +96,6 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
         console.print(f"Using {escape(provider)} ({escape(model)}).")
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
-
-
-def _analysis_due(session: ChatSession, text: str) -> bool:
-    if session.context is None:
-        return True
-    if detect_deep_query(text) is not None:
-        return True
-    if _QUESTION_START_RE.search(text) is not None:
-        return False
-    return _ANALYZE_RE.search(text) is not None
 
 
 def _open_proposal(draft_id: int, mutations: list[WorkoutMutation]) -> ChatState:
@@ -102,29 +113,49 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
+    today = session.context.today if session.context is not None else None
+    if session.context is not None and _needs_fresh_context(focus, today):
+        cached = None
+    elif session.context is not None:
+        cached = session.context.model_copy(update={"focus": focus})
+    else:
+        cached = None
     async with thinking():
-        draft = await engine.analyze(focus)
-    render_report(draft.report)
+        draft = await engine.analyze(focus, context=cached, history=session.history)
+    report = draft.report
+    if report.needs_input:
+        blocking = {question.strip().casefold() for question in report.needs_input}
+        remaining = [
+            question for question in report.questions if question.strip().casefold() not in blocking
+        ]
+        if len(remaining) != len(report.questions):
+            report = report.model_copy(update={"questions": remaining})
+    render_report(report)
     session.context = draft.context
     session.append(focus, assistant_turn(draft.report).content)
+    needs_input = draft.report.needs_input
+    assumed = _ASSUME_RE.search(focus) is not None
     if draft.report.mutations:
+        if draft.report.intent != "plan":
+            console.print(
+                "[dim]The coach drafted calendar changes but did not read this as a"
+                " planning request; ask him to plan if you want a proposal.[/dim]"
+            )
+            return None
+        if needs_input and not assumed:
+            _print_needs_input(needs_input)
+            return None
         return _open_proposal(draft.id, draft.report.mutations)
-    console.print("[dim]Answer my questions here if you like.[/dim]")
+    if needs_input:
+        _print_needs_input(needs_input)
+    else:
+        console.print("[dim]Answer my questions here if you like.[/dim]")
     return None
 
 
-async def _handle_converse(
-    engine: CoachEngine, session: ChatSession, text: str
-) -> ChatState | None:
+async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> ChatState | None:
     try:
-        if _analysis_due(session, text):
-            return await _analyze_line(engine, session, text)
-        async with thinking():
-            reply = await engine.converse(text, history=session.history, context=session.context)
-        console.print("[bold green]Coach:[/bold green]", end=" ")
-        console.print(reply, markup=False)
-        session.append(text, reply)
-        return None
+        return await _analyze_line(engine, session, text)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return None
@@ -165,17 +196,10 @@ async def _handle_proposal(
         name = parts[0].casefold() if parts else ""
         if name == "help":
             console.print(HELP_TEXT, markup=False)
-        elif name == "clear":
-            session.history = []
-            session.context = None
-            console.print("Memory cleared.")
+        elif name == "forget":
+            console.print("[yellow]/forget is unavailable while a proposal is open.[/yellow]")
         elif name in {"provider", "model"}:
             _handle_llm_command(engine, name, parts[1:])
-        elif name == "analyze":
-            console.print(
-                "[yellow]/analyze is unavailable while a proposal is open;"
-                " reply yes, no, or cancel.[/yellow]"
-            )
         else:
             console.print("[red]Unknown command.[/red]")
             console.print(HELP_TEXT, markup=False)
@@ -198,10 +222,9 @@ async def _handle_proposal(
             except ValidationError:
                 context = context_base
             async with thinking():
-                reply = await engine.converse(line, history=session.history, context=context)
-            console.print("[bold green]Coach:[/bold green]", end=" ")
-            console.print(reply, markup=False)
-            session.append(line, reply)
+                answer = await engine.analyze(line, context=context, history=session.history)
+            render_report(answer.report)
+            session.append(line, assistant_turn(answer.report).content)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -247,35 +270,42 @@ async def _run_command(
     if name == "help":
         console.print(HELP_TEXT, markup=False)
         return None
-    if name == "clear":
-        session.history = []
-        session.context = None
-        console.print("Memory cleared.")
+    if name == "forget":
+        days: int | None = None
+        if args:
+            if not args[0].isdigit() or int(args[0]) <= 0:
+                console.print("[red]Usage: /forget [days>0] (omit days to forget everything)[/red]")
+                return None
+            days = int(args[0])
+        removed = engine.prune_history(days)
+        if days is None:
+            session.history = []
+            session.context = None
+        scope = "all history" if days is None else f"history older than {days} days"
+        console.print(f"Forgot {sum(removed.values())} records ({scope}).")
         return None
     if name in {"provider", "model"}:
         _handle_llm_command(engine, name, args)
         return None
-    if name == "analyze":
-        from open_endurance_coach.cli import main as cli_main
-
-        focus = " ".join(args) if args else cli_main.DEFAULT_ANALYZE_FOCUS
-        try:
-            return await _analyze_line(engine, session, focus)
-        except RECOVERABLE_EXCEPTIONS as exc:
-            print_error(exc)
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
-    if not fresh:
-        session.seed(
-            engine.recent_history(
-                settings.chat_history_turns,
-                max_age_days=settings.chat_history_max_age_days,
-            ),
-            max_tokens=settings.chat_history_max_tokens,
-        )
+    if settings.history_days > 0:
+        removed = engine.prune_history(settings.history_days)
+        total = sum(removed.values())
+        if total:
+            console.print(
+                f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
+            )
+    session.seed(
+        engine.recent_history(
+            settings.chat_history_turns,
+            max_age_days=settings.chat_history_max_age_days,
+        ),
+        max_tokens=settings.chat_history_max_tokens,
+    )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
@@ -298,30 +328,39 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
                 continue
             console.print("bye")
             return
-        match dispatch(line, state):
-            case Ignore():
-                continue
-            case Exit():
-                console.print("bye")
-                return
-            case Converse(text=text):
-                state = await _handle_converse(engine, session, text) or state
-            case UnknownCommand():
-                console.print("[red]Unknown command.[/red]")
-                console.print(HELP_TEXT, markup=False)
-            case Confirmation(line=line):
-                step = await _handle_proposal(engine, state, line, session)
-                if isinstance(step, ExitChat):
+        bare = _BARE_COMMAND_RE.match(line)
+        if bare is not None:
+            console.print(
+                f"[dim]That looks like a command; type it with a slash:"
+                f" /{bare.group(1).lower()}[/dim]"
+            )
+            continue
+        try:
+            match dispatch(line, state):
+                case Ignore():
+                    continue
+                case Exit():
                     console.print("bye")
                     return
-                state = step
-            case Command(name=name, args=args):
-                state = await _run_command(engine, name, args, session) or state
+                case Converse(text=text):
+                    state = await _handle_text(engine, session, text) or state
+                case UnknownCommand():
+                    console.print("[red]Unknown command.[/red]")
+                    console.print(HELP_TEXT, markup=False)
+                case Confirmation(line=line):
+                    step = await _handle_proposal(engine, state, line, session)
+                    if isinstance(step, ExitChat):
+                        console.print("bye")
+                        return
+                    state = step
+                case Command(name=name, args=args):
+                    state = await _run_command(engine, name, args, session) or state
+        except Exception as exc:
+            print_error(exc)
 
 
 @chat_app.command()
 def chat(
-    fresh: bool = typer.Option(False, "--fresh", help="Start without seeded memory"),
     provider: str | None = typer.Option(
         None, "--provider", "-p", help="LLM provider (ovh | deepseek)"
     ),
@@ -330,6 +369,6 @@ def chat(
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
+        await run_chat(engine, cli_main.get_settings())
 
     cli_main._run(run, provider=provider, model=model)

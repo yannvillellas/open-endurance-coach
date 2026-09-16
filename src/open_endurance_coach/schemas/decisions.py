@@ -60,7 +60,9 @@ WorkoutMutation = Annotated[
 class DecisionReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    intent: Literal["chat", "analysis", "plan"] = "analysis"
     summary: str = Field(min_length=1)
     findings: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
+    needs_input: list[str] = Field(default_factory=list)
     mutations: list[WorkoutMutation] = Field(default_factory=list)

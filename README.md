@@ -16,10 +16,12 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 
 `coach chat` is a single conversation with the coach. You just talk:
 
-- **Free text runs the right thing automatically.** When fresh data is needed (first message, trend questions, or requests like "analyze/review/check my week"), the coach runs a full analysis and answers with the report. Otherwise he answers conversationally from the same data snapshot.
+- **Free text runs a full analysis.** Every message is classified from the data snapshot: a fresh snapshot is extracted when needed (first message, requests like "analyze/review/check my week", or trend questions), otherwise the cached snapshot is reused.
+- **The coach decides what you need.** Every message is classified as _chat_ (answer from the analysis already in the session), _analysis_ (review executed training), or _plan_ (propose calendar changes). A full analysis is reused for follow-ups — there is no re-analysis until you ask for one or the question needs historical depth. If a change would help during a chat, he offers it instead of interrupting you with a confirmation gate.
+- **Material questions block proposals.** If an answer would change the plan (missing figures the plan depends on, available training days, an injury, an immovable constraint), the coach asks and does _not_ propose calendar changes until you answer — or say `proceed with assumptions` and he states the assumption in the plan.
 - **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes.
-- **Memory**: sessions remember recent exchanges (last 10 feedback rows from the last 90 days, up to 2048 tokens, self-trimmed). Start fresh with `coach chat --fresh`, or say `/clear` at any time.
-- Commands are optional: `/analyze` forces a fresh analysis, `/provider` and `/model` show or switch the LLM mid-session, `/help`, `/exit` — everything else is conversation.
+- **Memory**: sessions are seeded with recent exchanges (last 10 feedback rows from the last 90 days, up to 2048 tokens, self-trimmed). Stored history is pruned automatically to `HISTORY_DAYS` (default 180) at startup; `/forget` wipes it now, or `/forget N` keeps only the last N days.
+- Session commands only: `/provider` and `/model` show or switch the LLM, `/forget [days]`, `/help`, `/exit` — everything else is conversation.
 
 ```text
 $ coach chat
@@ -54,7 +56,7 @@ Options: `--provider`/`--model` (`-p`/`-m`) choose the LLM for one run (e.g. `co
 ## Modes
 
 - **Analysis** (free text in chat when data is needed, or `analyze` one-shot): extracts a fresh data snapshot (recent activities, wellness, upcoming events, sport settings — or a 90-day filtered window for trend questions), runs the strict JSON analysis, saves the report internally as a draft, and marks the analyzed activities as seen so they surface as "New activities since last review" only once. Nothing is written to the calendar here.
-- **Conversation** (free text in chat otherwise): prose answers from the cached snapshot; never creates plans, never marks activities seen.
+- **Chat** (any other free text): answers from the cached snapshot through the same JSON analysis; it never writes to the calendar and only proposes changes it classified as _plan_.
 - **Proposal gate**: every calendar change is proposed with the exact plan and requires a literal `yes`; any other answer is treated as a change request or discussion and writes nothing. Mid-confirmation Ctrl-C cancels safely.
 
 ## Configuration

@@ -6,9 +6,11 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.schemas.context import CoachContext
 
 OUTPUT_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
     "summary": "<one-line summary of the athlete's data>",
     "findings": ["<finding grounded in the athlete's data>"],
-    "questions": ["<question for the athlete>"],
+    "questions": ["<optional question for the athlete>"],
+    "needs_input": [],
     "mutations": [
         {
             "action": "create",
@@ -25,6 +27,41 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
         {"action": "delete", "event_id": 0},
     ],
 }
+
+DISCUSSION_EXAMPLE: dict[str, Any] = {
+    "intent": "chat",
+    "summary": "<direct answer to the athlete's question>",
+    "findings": ["<supporting observation from the athlete's data>"],
+    "questions": ["<follow-up question for the athlete>"],
+    "needs_input": [],
+    "mutations": [],
+}
+
+INTAKE_EXAMPLE: dict[str, Any] = {
+    "intent": "plan",
+    "summary": "<what you can already say, and the assumption you must not make>",
+    "findings": ["<what the data shows>"],
+    "questions": [],
+    "needs_input": ["<the fact you need before a plan is possible>"],
+    "mutations": [],
+}
+
+PROPOSAL_POLICY = (
+    'Classify the athlete\'s request in intent: "chat" for questions, advice, '
+    'explanation or discussion; "analysis" for a review of executed training; '
+    '"plan" only when the athlete asks for a calendar change or a training plan '
+    "(plan, schedule, create, add, adjust, taper, reschedule). Return an empty "
+    'mutations list unless intent is "plan": for chat and analysis put the answer in '
+    "summary/findings and, if a change would help, offer it as a question - never "
+    "encode a change the athlete did not ask for.\n"
+    "Before prescribing anything - workouts or a full block - list what you still "
+    "need to know that would change the plan (goals, available days, constraints, "
+    "injury, RPE). Put those questions in needs_input and, when it is non-empty, "
+    "return no mutations and ask - never assume on the athlete's behalf, even when "
+    "the data lets you estimate. Assume only when the athlete explicitly tells you "
+    "to: then state the assumption in the summary and plan. Never list the same "
+    "question in both questions and needs_input.\n"
+)
 
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
 # (forum topic 1163), the workout builder syntax quick guide (123701), distance-based
@@ -70,16 +107,21 @@ def _json_contract() -> str:
     return (
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
-        "The example below shows the shape only: its values are placeholders, every field "
-        "must come from the athlete data, the example workout text is the only thing to "
-        "imitate, and a mutation that sets a date before today is rejected.\n"
+        f"{PROPOSAL_POLICY}"
+        "The examples below show the shape only: their values are placeholders, every "
+        "field must come from the athlete data, the example workout text is the only "
+        "thing to imitate, and a mutation that sets a date before today is rejected.\n"
         "Any start_date_local you set must be on or after today (the athlete's local "
         "date), taken from the upcoming schedule - never copy the example dates.\n"
         "If current_proposal is present in the athlete data, revise that proposal "
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         "Copy the workout text format from the example, not the example's numbers.\n"
         f"{WORKOUT_TEXT_FORMAT}"
-        "Example json:\n"
+        "Example json (material information missing - ask, do not plan):\n"
+        f"{json.dumps(INTAKE_EXAMPLE, indent=2)}\n"
+        "Example json (conversation - no calendar change requested):\n"
+        f"{json.dumps(DISCUSSION_EXAMPLE, indent=2)}\n"
+        "Example json (the athlete asked for a plan or calendar change):\n"
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
     )
 
@@ -92,16 +134,24 @@ def _system_message(settings: Settings) -> str:
     return "".join(parts)
 
 
-def _user_message(context: CoachContext) -> str:
-    return (
-        "Athlete data:\n"
-        f"{json.dumps(context.sections(), indent=2, ensure_ascii=False)}\n"
-        "Produce your analysis as json per the contract.\n"
-    )
+def _user_message(context: CoachContext, history: list[LlmMessage] | None = None) -> str:
+    data = context.sections()
+    focus = str(data.pop("focus", ""))
+    parts = [f"Athlete data:\n{json.dumps(data, indent=2, ensure_ascii=False)}\n"]
+    if history:
+        transcript = "\n".join(f"{turn.role}: {turn.content}" for turn in history)
+        parts.append(f"Recent conversation:\n{transcript}\n")
+    parts.append(f"Current message:\n{focus}\n")
+    parts.append("Respond per the contract.\n")
+    return "".join(parts)
 
 
-def build_messages(context: CoachContext, settings: Settings) -> list[LlmMessage]:
+def build_messages(
+    context: CoachContext,
+    settings: Settings,
+    history: list[LlmMessage] | None = None,
+) -> list[LlmMessage]:
     return [
         LlmMessage(role="system", content=_system_message(settings)),
-        LlmMessage(role="user", content=_user_message(context)),
+        LlmMessage(role="user", content=_user_message(context, history)),
     ]
