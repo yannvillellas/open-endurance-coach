@@ -1469,3 +1469,36 @@ def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
     assert result.output.count("Usage: /forget [days>0]") == 2
     assert "Forgot" not in result.output
     assert store.list_drafts() == []
+
+
+def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Answer.", intent="chat", mutations=[CREATE_MUTATION])),
+        ]
+    )
+    patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nwhat does this train exactly?\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert "did not read that as a planning request" in result.output
+    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
+
+
+def test_chat_render_failure_after_apply_is_not_reported_as_unapplied(
+    patched: Any, monkeypatch: Any
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    patched(provider, calendar=calendar)
+
+    def boom(report: Any) -> None:
+        raise RuntimeError("render exploded")
+
+    monkeypatch.setattr(cli_chat, "render_apply", boom)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
+    assert result.exit_code == 0
+    assert len(calendar.created) == 1
+    assert "recorded but not applied" not in result.output

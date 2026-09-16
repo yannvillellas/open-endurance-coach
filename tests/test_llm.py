@@ -216,9 +216,9 @@ async def test_provider_honors_retry_after_on_429(settings: Settings) -> None:
     assert sleep.calls == [5.0]
 
 
-async def test_provider_429_http_date_retry_after_falls_back(settings: Settings) -> None:
+async def test_provider_429_http_date_retry_after_clamps_a_past_date(settings: Settings) -> None:
     responses = [
-        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, json={}),
+        httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2020 07:28:00 GMT"}, json={}),
         ok_response(),
     ]
 

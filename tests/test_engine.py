@@ -911,7 +911,7 @@ async def test_full_history_drop_is_logged(
         await engine.analyze(
             "status", context=CoachContext(focus="status", max_tokens=50), history=history
         )
-    assert "dropping the whole conversation history" in caplog.text
+    assert "trimmed the conversation history" in caplog.text
 
 
 def test_validate_report_rejects_placeholder_workout_duration() -> None:
