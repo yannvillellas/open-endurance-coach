@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
@@ -446,3 +447,18 @@ async def test_update_race_payload_includes_distance() -> None:
         make_decision(UpdateRace(action="update_race", event_id=10001, distance=10900))
     )
     assert client.updated[0][1]["distance"] == 10900
+
+
+class _ServerErrorCalendar(FakeCalendarClient):
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        raise IntervalsApiError(500, "calendar unavailable")
+
+
+async def test_update_does_not_swallow_a_server_error_on_lookup() -> None:
+    client = _ServerErrorCalendar()
+    writer = CalendarWriter(client)
+    with pytest.raises(IntervalsApiError):
+        await writer.apply_decision(
+            make_decision(UpdateWorkout(action="update", event_id=10001, name="Renamed"))
+        )
+    assert client.updated == []

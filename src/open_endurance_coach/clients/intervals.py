@@ -133,10 +133,16 @@ class IntervalsClient:
             )
         return response
 
+    def _json_list(self, response: httpx.Response, label: str) -> list[dict[str, Any]]:
+        data = response.json()
+        if not isinstance(data, list):
+            raise IntervalsApiError(response.status_code, f"unexpected {label} payload")
+        return data
+
     async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
         params = {"oldest": oldest, "newest": newest}
         response = await self._request("GET", self._athlete_path("/activities"), params=params)
-        return response.json()
+        return self._json_list(response, "activities")
 
     async def get_activity(self, activity_id: str, intervals: bool = True) -> dict[str, Any]:
         params = {"intervals": str(intervals).lower()}
@@ -147,7 +153,7 @@ class IntervalsClient:
         response = await self._request(
             "GET", self._athlete_path("/wellness"), params={"oldest": oldest, "newest": newest}
         )
-        return response.json()
+        return self._json_list(response, "wellness")
 
     async def list_events(
         self,
@@ -159,7 +165,7 @@ class IntervalsClient:
         if category:
             params["category"] = category
         response = await self._request("GET", self._athlete_path("/events"), params=params)
-        return response.json()
+        return self._json_list(response, "events")
 
     async def get_event(self, event_id: str) -> dict[str, Any]:
         response = await self._request("GET", self._athlete_path(f"/events/{event_id}"))
@@ -180,17 +186,14 @@ class IntervalsClient:
 
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         response = await self._request("GET", self._athlete_path("/sport-settings"))
-        return response.json()
+        return self._json_list(response, "sport-settings")
 
     async def get_athlete_summary(
         self, *, start: str | None = None, end: str | None = None
     ) -> list[dict[str, Any]]:
         params = {key: value for key, value in (("start", start), ("end", end)) if value}
         response = await self._request("GET", self._athlete_path("/athlete-summary"), params=params)
-        data = response.json()
-        if not isinstance(data, list):
-            raise IntervalsApiError(response.status_code, "unexpected athlete-summary payload")
-        return data
+        return self._json_list(response, "athlete-summary")
 
     async def aclose(self) -> None:
         await self._client.aclose()
