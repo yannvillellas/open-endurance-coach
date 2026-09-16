@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import (
@@ -982,3 +983,57 @@ async def test_total_prompt_stays_under_the_input_ceiling(
     total = sum(estimate_text_tokens(message.content) for message in messages)
     assert total <= INPUT_TOKEN_CEILING
     assert total > estimate_text_tokens(system_prompt(settings))
+
+
+class _FlakyCalendar(FakeCalendarClient):
+    def __init__(self, fail_at: int) -> None:
+        super().__init__()
+        self._fail_at = fail_at
+        self.create_calls = 0
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.create_calls += 1
+        if self.create_calls == self._fail_at:
+            raise IntervalsApiError(503, "calendar down")
+        return await super().create_event(payload)
+
+
+async def test_partial_apply_retry_is_idempotent(settings: Settings, tmp_path: Path) -> None:
+    calendar = _FlakyCalendar(fail_at=2)
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, FakeLlmProvider(), writer=CalendarWriter(calendar))
+    report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "First Session",
+                        "start_date_local": _near_future(1),
+                        "moving_time": 3600,
+                    },
+                    {
+                        "action": "create",
+                        "name": "Second Session",
+                        "start_date_local": _near_future(2),
+                        "moving_time": 3600,
+                    },
+                ]
+            )
+        )
+    )
+    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    decision = store.approve_draft(draft_id)
+
+    with pytest.raises(IntervalsApiError):
+        await engine.apply(decision.id)
+    assert [event["name"] for event in calendar.created] == ["First Session"]
+    assert [row.id for row in store.list_unapplied_decisions()] == [decision.id]
+
+    await engine.apply(decision.id)
+    assert sorted(event["name"] for event in calendar.created) == [
+        "First Session",
+        "Second Session",
+    ]
+    assert len(calendar.created) == 2
+    assert store.list_unapplied_decisions() == []
