@@ -1459,3 +1459,13 @@ def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None
     assert calendar.created == []
     assert len(provider.calls) == 2
     assert "Recent conversation:" in provider.calls[1]["messages"][1].content
+
+
+def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="/forget 0\n/forget abc\n/exit\n")
+    assert result.exit_code == 0
+    assert result.output.count("Usage: /forget [days>0]") == 2
+    assert "Forgot" not in result.output
+    assert store.list_drafts() == []

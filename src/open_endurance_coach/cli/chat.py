@@ -344,7 +344,9 @@ async def _run_command(
         days: int | None = None
         if args:
             if not args[0].isdigit() or int(args[0]) <= 0:
-                console.print("[red]Usage: /forget [days>0] (omit days to forget everything)[/red]")
+                console.print(
+                    r"[red]Usage: /forget \[days>0] (omit days to forget everything)[/red]"
+                )
                 return None
             days = int(args[0])
         removed = engine.prune_history(days)
