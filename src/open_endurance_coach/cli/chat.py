@@ -281,13 +281,14 @@ async def _handle_proposal(
             if answer.report.needs_input and not _assumes_answers(line):
                 _print_needs_input(answer.report.needs_input)
                 return state
-            if answer.report.mutations and answer.report.intent == "plan":
-                return _open_proposal(answer.id, answer.report.mutations)
             if answer.report.mutations:
-                console.print(
-                    "[dim]The coach did not read that as a planning request; nothing is"
-                    " proposed.[/dim]"
-                )
+                if answer.report.intent != "plan":
+                    console.print(
+                        "[dim]The coach did not read that as a planning request; nothing"
+                        " is proposed.[/dim]"
+                    )
+                else:
+                    return _open_proposal(answer.id, answer.report.mutations)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(

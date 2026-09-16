@@ -23,8 +23,8 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
             "moving_time": 0,
             "icu_training_load": 0,
         },
-        {"action": "update", "event_id": 0, "moving_time": 0},
-        {"action": "delete", "event_id": 0},
+        {"action": "update", "event_id": "EVENT_ID", "moving_time": 0},
+        {"action": "delete", "event_id": "EVENT_ID"},
     ],
 }
 
@@ -65,7 +65,7 @@ RACE_EXAMPLE: dict[str, Any] = {
         },
         {
             "action": "update_race",
-            "event_id": 0,
+            "event_id": "EVENT_ID",
             "category": "RACE_A",
             "moving_time": 0,
             "icu_training_load": 0,

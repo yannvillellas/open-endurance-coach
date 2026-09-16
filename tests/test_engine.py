@@ -5,6 +5,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
@@ -660,7 +661,7 @@ def test_validate_report_rejects_placeholder_event_id() -> None:
     payload = json.loads(
         report_json(mutations=[{"action": "update", "event_id": 0, "moving_time": 3600}])
     )
-    with pytest.raises(ValueError, match="event_id is not a real id"):
+    with pytest.raises(ValidationError, match="event_id"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -671,7 +672,7 @@ def test_validate_report_rejects_digit_string_placeholder_event_id() -> None:
                 mutations=[{"action": "update", "event_id": placeholder, "moving_time": 3600}]
             )
         )
-        with pytest.raises(PlaceholderMutationError):
+        with pytest.raises(ValidationError, match="event_id"):
             _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1045,7 +1046,7 @@ def test_validate_report_rejects_an_unsafe_event_id() -> None:
             mutations=[{"action": "update", "event_id": "0/../../athlete/0", "moving_time": 3600}]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="event_id is not a real id"):
+    with pytest.raises(ValidationError, match="event_id"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 

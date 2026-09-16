@@ -170,13 +170,6 @@ def test_plan_texts_escape_llm_markup() -> None:
     assert "Weird \\[x]" in apply
 
 
-def test_mutations_plan_text_escapes_update_event_id() -> None:
-    mutation = UpdateWorkout(action="update", event_id="[bold]10001[/bold]", moving_time=4200)
-    text = mutations_plan_text([mutation])
-    assert "[bold]10001[/bold]" not in text
-    assert "\\[bold]10001\\[/bold]" in text
-
-
 def test_apply_plan_text_escapes_event_id(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
         decisions=[

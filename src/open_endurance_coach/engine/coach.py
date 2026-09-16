@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -19,8 +18,6 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
-    DeleteRace,
-    DeleteWorkout,
     UpdateRace,
     UpdateWorkout,
 )
@@ -55,18 +52,6 @@ class PlaceholderMutationError(ValueError):
     """The decision still carries example placeholder values."""
 
 
-_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-
-
-def _is_placeholder_event_id(event_id: int | str) -> bool:
-    if isinstance(event_id, int):
-        return event_id <= 0
-    stripped = event_id.strip()
-    if stripped.lstrip("+-").isdigit():
-        return int(stripped) <= 0
-    return _EVENT_ID_RE.fullmatch(stripped) is None
-
-
 def _is_stale(mutation: Any, *, today: date) -> bool:
     return (
         isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace))
@@ -85,10 +70,6 @@ def _bad_race_number(value: float | None, *, required: bool) -> bool:
 
 
 def _is_placeholder(mutation: Any) -> bool:
-    if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
-        _is_placeholder_event_id(mutation.event_id)
-    ):
-        return True
     if (
         isinstance(mutation, (CreateRace, UpdateRace))
         and mutation.distance is not None
@@ -136,10 +117,6 @@ def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
 
 def _reject_placeholders(report: DecisionReport) -> None:
     for mutation in report.mutations:
-        if isinstance(mutation, (UpdateWorkout, DeleteWorkout, UpdateRace, DeleteRace)) and (
-            _is_placeholder_event_id(mutation.event_id)
-        ):
-            raise PlaceholderMutationError("event_id is not a real id from the athlete data")
         if _is_placeholder(mutation):
             raise PlaceholderMutationError(
                 "duration/load must be real values; ask the athlete instead of"
