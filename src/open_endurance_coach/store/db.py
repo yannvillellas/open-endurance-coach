@@ -1,4 +1,5 @@
 import json
+import logging
 import sqlite3
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
@@ -39,6 +40,10 @@ CREATE TABLE IF NOT EXISTS decisions (
 """
 
 
+logger = logging.getLogger(__name__)
+_SQL_VARIABLE_BATCH = 900
+
+
 class CoachStore:
     def __init__(self, path: str | Path, *, clock: Callable[[], datetime] | None = None) -> None:
         self._path = Path(path)
@@ -46,6 +51,7 @@ class CoachStore:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._connection = sqlite3.connect(self._path)
         self._connection.row_factory = sqlite3.Row
+        self._restrict_permissions()
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.executescript(_SCHEMA)
         columns = {
@@ -66,6 +72,14 @@ class CoachStore:
     def discard_decision(self, decision_id: int) -> None:
         self._connection.execute("DELETE FROM decisions WHERE id = ?", (decision_id,))
         self._connection.commit()
+
+    def _restrict_permissions(self) -> None:
+        if str(self._path) == ":memory:":
+            return
+        try:
+            self._path.chmod(0o600)
+        except OSError:
+            logger.warning("could not restrict permissions on %s", self._path)
 
     def prune_before(self, cutoff: datetime) -> dict[str, int]:
         stamp = cutoff.isoformat()
@@ -118,12 +132,15 @@ class CoachStore:
         ids = list(activity_ids)
         if not ids:
             return set()
-        placeholders = ",".join("?" for _ in ids)
-        rows = self._connection.execute(
-            f"SELECT activity_id FROM seen_activities WHERE activity_id IN ({placeholders})",
-            ids,
-        ).fetchall()
-        seen = {row["activity_id"] for row in rows}
+        seen: set[str] = set()
+        for start in range(0, len(ids), _SQL_VARIABLE_BATCH):
+            batch = ids[start : start + _SQL_VARIABLE_BATCH]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self._connection.execute(
+                f"SELECT activity_id FROM seen_activities WHERE activity_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            seen.update(row["activity_id"] for row in rows)
         return {item for item in ids if item not in seen}
 
     def save_draft(
@@ -274,9 +291,11 @@ class CoachStore:
                 f"draft {draft_id} is {draft.status.value}; only pending drafts can be approved"
             )
         decided_at = self._clock()
-        self._connection.execute(
-            "UPDATE drafts SET status = ? WHERE id = ?", (DraftStatus.APPROVED.value, draft_id)
-        )
+        with self._connection:
+            self._connection.execute(
+                "UPDATE drafts SET status = ? WHERE id = ?",
+                (DraftStatus.APPROVED.value, draft_id),
+            )
         cursor = self._connection.execute(
             "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
             (draft_id, decided_at.isoformat(), json.dumps(draft.report.model_dump(mode="json"))),

@@ -464,3 +464,17 @@ def test_rejected_legacy_drafts_are_dropped_on_open(tmp_path: Path) -> None:
     assert reopened.list_drafts() == []
     assert reopened.list_feedback(draft_id) == []
     reopened.close()
+
+
+def test_database_file_is_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path)
+    assert (path.stat().st_mode & 0o777) == 0o600
+
+
+def test_unseen_activity_ids_handles_large_batches(tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    seen = [f"fx-{index}" for index in range(1000)]
+    store.mark_activities_seen(seen)
+    unseen = store.unseen_activity_ids([*seen, "fx-new-1", "fx-new-2"])
+    assert unseen == {"fx-new-1", "fx-new-2"}
