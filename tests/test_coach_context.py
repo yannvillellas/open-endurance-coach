@@ -166,6 +166,7 @@ def test_goal_races_serialize_into_sections() -> None:
                     "days_to_race": 29,
                     "weeks_to_race": 5,
                     "phase": "Build",
+                    "distance": 21097.5,
                 }
             ],
         }
@@ -180,6 +181,7 @@ def test_goal_races_serialize_into_sections() -> None:
             "days_to_race": 29,
             "weeks_to_race": 5,
             "phase": "Build",
+            "distance": 21097.5,
         }
     ]
     assert context.section_tokens()["goal_races"] > 0

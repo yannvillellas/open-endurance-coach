@@ -297,10 +297,15 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
     assert "RACE_A (season objective), RACE_B (important) or RACE_C" in system
     assert "ask the athlete for it instead of estimating" in system
     assert "Never copy the example race numbers" in system
-    assert "set moving_time, distance (metres) and icu_training_load" in system
+    assert "When a race is missing a figure" in system
     assert "TrailRun" in system
 
 
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert estimate_text_tokens(system) <= 2560
+
+
+def test_contract_forbids_no_op_race_updates() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Never re-propose a race mutation whose fields already match goal_races" in system
