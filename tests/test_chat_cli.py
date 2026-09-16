@@ -104,7 +104,7 @@ def test_chat_provider_option_threads_to_engine(
         await callback(engine)
 
     async def fake_run_chat(
-        engine: CoachEngine, settings: Settings, *, fresh: bool = False
+        engine: CoachEngine, settings: Settings
     ) -> None:
         return None
 
@@ -1137,21 +1137,6 @@ def test_chat_startup_reports_pruned_records(
     assert result.exit_code == 0
     assert "Pruned 2 old records" in result.output
 
-
-def test_chat_fresh_skips_seeding(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
-    _, store = patched(provider)
-    draft_id = store.save_draft(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(draft_id, "legs heavy")
-    result = runner.invoke(cli_main.app, ["--fresh"], input="how was my week?\nand today?\n")
-    assert result.exit_code == 0
-    assert "Remembering" not in result.output
-    assert "Recent conversation:" not in provider.calls[0]["messages"][1].content
-    assert "Recent conversation:" in provider.calls[1]["messages"][1].content
 
 
 def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:

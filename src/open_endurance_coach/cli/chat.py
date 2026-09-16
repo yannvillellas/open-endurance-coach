@@ -371,7 +371,7 @@ async def _run_command(
     return None
 
 
-async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = False) -> None:
+async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     session = ChatSession(cap=settings.chat_history_max_tokens)
     if settings.history_days > 0:
         removed = engine.prune_history(settings.history_days)
@@ -392,14 +392,13 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
             f"[yellow]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
             ' was recorded but never applied. Say "retry" to apply it.[/yellow]'
         )
-    if not fresh:
-        session.seed(
-            engine.recent_history(
-                settings.chat_history_turns,
-                max_age_days=settings.chat_history_max_age_days,
-            ),
-            max_tokens=settings.chat_history_max_tokens,
-        )
+    session.seed(
+        engine.recent_history(
+            settings.chat_history_turns,
+            max_age_days=settings.chat_history_max_age_days,
+        ),
+        max_tokens=settings.chat_history_max_tokens,
+    )
     state = ChatState()
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
@@ -455,13 +454,12 @@ async def run_chat(engine: CoachEngine, settings: Settings, *, fresh: bool = Fal
 
 def start_chat(
     *,
-    fresh: bool = False,
     provider: str | None = None,
     model: str | None = None,
 ) -> None:
     from open_endurance_coach.cli import main as cli_main
 
     async def run(engine: CoachEngine) -> None:
-        await run_chat(engine, cli_main.get_settings(), fresh=fresh)
+        await run_chat(engine, cli_main.get_settings())
 
     cli_main._run(run, provider=provider, model=model)
