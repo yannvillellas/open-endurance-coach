@@ -7,15 +7,19 @@ from open_endurance_coach.prompts.prompts import (
     DISCUSSION_EXAMPLE,
     INTAKE_EXAMPLE,
     OUTPUT_EXAMPLE,
+    RACE_EXAMPLE,
     build_messages,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
+    CreateRace,
     CreateWorkout,
     DecisionReport,
     DeleteWorkout,
+    UpdateRace,
     UpdateWorkout,
 )
+from open_endurance_coach.tokens import estimate_text_tokens
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -194,7 +198,7 @@ def test_build_messages_is_deterministic() -> None:
 
 
 def test_examples_are_placeholders_not_copyable_answers() -> None:
-    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE):
+    for example in (OUTPUT_EXAMPLE, DISCUSSION_EXAMPLE, RACE_EXAMPLE):
         rendered = json.dumps(example)
         assert "2024-" not in rendered
         assert "Tempo Session" not in rendered
@@ -244,6 +248,7 @@ def test_intake_example_demonstrates_blocking() -> None:
 def test_examples_declare_needs_input() -> None:
     assert OUTPUT_EXAMPLE["needs_input"] == []
     assert DISCUSSION_EXAMPLE["needs_input"] == []
+    assert RACE_EXAMPLE["needs_input"] == []
     assert INTAKE_EXAMPLE["needs_input"]
 
 
@@ -268,3 +273,32 @@ def test_full_rollup_context_fits_default_budget() -> None:
     ]
     context = CoachContext.model_validate({"focus": "plan my race", "training_rollup": rollup})
     assert context.estimated_tokens() <= 4096
+
+
+def test_race_example_validates_and_is_placeholder_only() -> None:
+    report = DecisionReport.model_validate(RACE_EXAMPLE)
+    assert report.intent == "plan"
+    assert isinstance(report.mutations[0], CreateRace)
+    assert isinstance(report.mutations[1], UpdateRace)
+    assert RACE_EXAMPLE["mutations"][0]["category"] == "RACE_B"
+    assert RACE_EXAMPLE["mutations"][0]["moving_time"] == 0
+    assert RACE_EXAMPLE["mutations"][0]["icu_training_load"] == 0
+    assert "<race name>" in json.dumps(RACE_EXAMPLE)
+    assert RACE_EXAMPLE["mutations"][1]["moving_time"] == 0
+    assert RACE_EXAMPLE["mutations"][1]["icu_training_load"] == 0
+
+
+def test_contract_teaches_backwards_planning_and_asking() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "plan backwards from the nearest race" in system
+    assert "Base, Build, Peak, Taper" in system
+    assert "next 7-14 days only" in system
+    assert "RACE_A (season objective), RACE_B (important) or RACE_C" in system
+    assert "ask the athlete for it instead of estimating" in system
+    assert "Never copy the example race numbers" in system
+    assert "set moving_time and icu_training_load" in system
+
+
+def test_system_prompt_stays_small() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert estimate_text_tokens(system) <= 2560
