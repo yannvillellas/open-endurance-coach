@@ -37,7 +37,7 @@ def prompt_plan(snapshot: PlanSnapshot) -> None:
     )
     console.print(
         Panel(
-            wrap_plan_text(snapshot.plan_text, max(20, console.width - 4)),
+            console.render_str(wrap_plan_text(snapshot.plan_text, max(20, console.width - 4))),
             title="Proposal",
             title_align="left",
             border_style="plan.frame",

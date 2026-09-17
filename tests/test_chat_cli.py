@@ -269,7 +269,7 @@ def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
     _, store = patched(provider)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "Coach: Load stable." in result.output
+    assert "Load stable." in result.output
     assert store.list_drafts() != []
     assert store.is_activity_seen("fx-a") is True
     assert provider.calls[0]["json_mode"] is True
@@ -279,7 +279,7 @@ def test_chat_free_text_becomes_the_analysis_focus(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
     result = runner.invoke(cli_main.app, [], input="analyze the week how was my week\n")
     assert result.exit_code == 0
-    assert "Coach: Load stable." in result.output
+    assert "Load stable." in result.output
     drafts = store.list_drafts()
     assert len(drafts) == 1
     assert drafts[0].focus.splitlines()[0] == "analyze the week how was my week"
@@ -352,7 +352,7 @@ def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> 
     )
     assert result.exit_code == 0
     assert "No changes proposed anymore." in result.output
-    assert "Coach: Prose reply." in result.output
+    assert "Prose reply." in result.output
 
 
 def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
@@ -396,7 +396,7 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input="how was my week?\nyes\n")
     assert result.exit_code == 0
-    assert "Coach: Sure." in result.output
+    assert "Sure." in result.output
     assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
 
@@ -636,7 +636,7 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
         cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
-    assert "Coach: Explanation." in result.output
+    assert "Explanation." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
     assert len(store.list_drafts()) == 2
@@ -660,7 +660,7 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
-    assert "Coach: Revised." in result.output
+    assert "Revised." in result.output
     draft = store.get_draft(1)
     assert draft is not None
     assert draft.user_feedback == "make it 45 minutes, why did you pick 60?"
@@ -711,7 +711,7 @@ def test_chat_proposal_modification_reshows_report_without_draft_line(patched: A
         cli_main.app, [], input="analyze my week\nmake it 4 series instead\nno\n"
     )
     assert result.exit_code == 0
-    assert "Coach: Revised plan." in result.output
+    assert "Revised plan." in result.output
     assert "Draft #" not in result.output
     assert "Review it" not in result.output
 
@@ -903,7 +903,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
     )
     assert result.exit_code == 0
     assert "/forget is unavailable while a proposal is open." in result.output
-    assert "Coach: Explanation." in result.output
+    assert "Explanation." in result.output
     assert len(provider.calls) == 2
     assert store.list_feedback(1) == []
 

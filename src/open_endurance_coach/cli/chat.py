@@ -82,6 +82,7 @@ def _assumes_answers(focus: str) -> bool:
 
 
 def _print_needs_input(questions: list[str]) -> None:
+    console.print()
     console.print("[warn]The coach needs answers before proposing calendar changes:[/warn]")
     for question in questions:
         console.print(f"  [question]? {escape(question)}[/question]")
@@ -406,6 +407,7 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     if remembered:
         console.print(f"[meta]Remembering {remembered} past exchanges.[/meta]")
     while True:
+        console.print()
         try:
             line = Prompt.ask("[athlete.label]you[/athlete.label]")
         except EOFError:

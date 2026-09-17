@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import date
@@ -21,7 +22,6 @@ THEME = Theme(
     {
         "coach.label": "bold cyan",
         "athlete.label": "bold green",
-        "finding": "dim",
         "question": "yellow",
         "plan.frame": "yellow",
         "plan.title": "bold yellow",
@@ -33,7 +33,7 @@ THEME = Theme(
     }
 )
 
-console = Console(theme=THEME)
+console = Console(theme=THEME, highlight=False)
 
 
 def print_error(exc: Exception) -> None:
@@ -50,24 +50,68 @@ async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
         yield
 
 
+_TOPIC_RE = re.compile(r"^([^:]{1,32}?):\s")
+
+
+def split_finding_topic(finding: str) -> tuple[str, str]:
+    match = _TOPIC_RE.match(finding)
+    if match is None:
+        return "", finding
+    topic = match.group(1).strip()
+    if not topic or len(topic.split()) > 3:
+        return "", finding
+    return topic, finding[match.end(1) :]
+
+
+def _print_finding(finding: str) -> None:
+    topic, _ = split_finding_topic(finding)
+    lines = wrap_plan_text(f"  - {finding}", console.width).splitlines()
+    if not lines:
+        return
+    body = lines[0][4:]
+    if topic and body.startswith(topic):
+        head = f"  [meta]-[/meta] [coach.label]{escape(topic)}[/coach.label]"
+        console.print(head + escape(body[len(topic) :]))
+    else:
+        console.print(f"  [meta]-[/meta] {escape(body)}")
+    for extra in lines[1:]:
+        console.print(escape(extra))
+
+
+def _print_question(question: str) -> None:
+    lines = wrap_plan_text(f"  ? {question}", console.width).splitlines()
+    for index, line in enumerate(lines):
+        if index == 0:
+            console.print(f"  [question]? {escape(line[4:])}[/question]")
+        else:
+            console.print(f"[question]{escape(line)}[/question]")
+
+
 def render_report(report: DecisionReport) -> None:
-    console.print(f"[coach.label]Coach:[/coach.label] {escape(report.summary)}")
-    if report.findings or report.questions:
+    console.print()
+    console.print("[coach.label]Coach:[/coach.label]")
+    for line in wrap_plan_text(f"  {report.summary}", console.width, hanging=2).splitlines():
+        console.print(escape(line))
+    if report.findings:
         console.print()
-    for finding in report.findings:
-        console.print(f"  [finding]- {escape(finding)}[/finding]")
-    for question in report.questions:
-        console.print(f"  [question]? {escape(question)}[/question]")
+        console.print("[coach.label]Evidence:[/coach.label]")
+        for finding in report.findings:
+            _print_finding(finding)
+    if report.questions:
+        console.print()
+        console.print("[coach.label]Open questions:[/coach.label]")
+        for question in report.questions:
+            _print_question(question)
 
 
-def wrap_plan_text(text: str, width: int) -> str:
+def wrap_plan_text(text: str, width: int, *, hanging: int | None = None) -> str:
     lines: list[str] = []
     for line in text.splitlines():
         if not line.strip() or len(line) <= width:
             lines.append(line)
             continue
         indent = len(line) - len(line.lstrip(" "))
-        hanging = " " * (indent + 2)
+        hanging_text = " " * (indent + 2 if hanging is None else hanging)
         words = line.split()
         current = " " * indent + words[0]
         for word in words[1:]:
@@ -75,7 +119,7 @@ def wrap_plan_text(text: str, width: int) -> str:
                 current += " " + word
             else:
                 lines.append(current)
-                current = hanging + word
+                current = hanging_text + word
         lines.append(current)
     return "\n".join(lines)
 
@@ -214,6 +258,7 @@ def render_apply(report: ApplyReport) -> None:
     if not report.decisions:
         console.print("No unapplied decisions.")
         return
+    console.print()
     console.print("[success]Applied:[/success]")
     console.print(apply_plan_text(report))
     skipped = [

@@ -11,6 +11,7 @@ from open_endurance_coach.cli.rendering import (
     print_error,
     render_apply,
     render_report,
+    split_finding_topic,
     wrap_plan_text,
 )
 from open_endurance_coach.schemas.context import CoachContext
@@ -46,8 +47,11 @@ def test_render_report_prints_summary_findings_questions(
 ) -> None:
     render_report(make_draft().report)
     out = capsys.readouterr().out
-    assert "Coach: Load stable." in out
+    assert "Coach" in out
+    assert "Load stable." in out
+    assert "Evidence" in out
     assert "- Tempo block hit target." in out
+    assert "Open questions" in out
     assert "? RPE on Thursday?" in out
 
 
@@ -291,3 +295,23 @@ def test_prompt_plan_frames_the_proposal(capsys: pytest.CaptureFixture[str]) -> 
     assert "Apply this to Intervals.icu" in out
     assert "Confirm? Reply exactly yes to apply" in out
     assert "(yes / no, or describe a change)" in out
+
+
+def test_split_finding_topic_extracts_a_short_label() -> None:
+    assert split_finding_topic("Wellness: CTL 28.99") == ("Wellness", ": CTL 28.99")
+    assert split_finding_topic("Race: 11 km on 2026-09-27") == ("Race", ": 11 km on 2026-09-27")
+
+
+def test_split_finding_topic_leaves_long_or_missing_prefixes_alone() -> None:
+    long_prefix = "Load is run-only for three weeks: 227"
+    assert split_finding_topic(long_prefix) == ("", long_prefix)
+    assert split_finding_topic("no colon here") == ("", "no colon here")
+
+
+def test_render_report_keeps_the_finding_text_when_it_has_a_topic(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = DecisionReport(summary="Ok.", findings=["Wellness: CTL 28.99, form +2.37."])
+    render_report(report)
+    out = capsys.readouterr().out
+    assert "  - Wellness: CTL 28.99, form +2.37." in out
