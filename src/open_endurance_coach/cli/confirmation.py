@@ -2,7 +2,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
 from open_endurance_coach.chat.gate import (
-    Cancelled,
     Declined,
     Feedback,
     Ignored,
@@ -28,9 +27,12 @@ class Done:
 
 
 def prompt_plan(snapshot: PlanSnapshot) -> None:
-    console.print("[plan.title]Confirm? Reply with exactly yes or no.[/plan.title]")
+    console.print(
+        "[plan.title]Confirm? Reply exactly yes to apply, no to discard.\n"
+        "Or describe a change to revise the plan.[/plan.title]"
+    )
     console.print(snapshot.plan_text)
-    console.print("[hint](yes / no / cancel)[/hint]")
+    console.print("[hint](yes / no, or describe a change)[/hint]")
 
 
 async def respond(
@@ -52,9 +54,6 @@ async def respond(
             return Done()
         case Ignored():
             return snapshot
-        case Cancelled():
-            console.print("[warn]Cancelled. Nothing changed.[/warn]")
-            return Done()
         case Feedback(feedback):
             async with thinking():
                 updated = await engine.submit_feedback(snapshot.draft_id, feedback, history=history)

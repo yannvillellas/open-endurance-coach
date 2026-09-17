@@ -25,11 +25,6 @@ class Declined:
 
 
 @dataclass(frozen=True)
-class Cancelled:
-    pass
-
-
-@dataclass(frozen=True)
 class Ignored:
     pass
 
@@ -39,7 +34,7 @@ class Feedback:
     line: str
 
 
-ConfirmationResult = Proceed | Declined | Cancelled | Ignored | Feedback
+ConfirmationResult = Proceed | Declined | Ignored | Feedback
 
 
 def is_exit_command(line: str) -> bool:
@@ -56,6 +51,4 @@ def handle(line: str, snapshot: PlanSnapshot) -> ConfirmationResult:
         return Proceed()
     if key == "no":
         return Declined()
-    if key == "cancel":
-        return Cancelled()
     return Feedback(stripped)

@@ -46,8 +46,8 @@ _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
 
 HELP_TEXT = (
     "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
-    "When he proposes calendar changes, answer with exactly yes or no (cancel\n"
-    "abandons it; anything else is a change request and nothing is written).\n"
+    "When he proposes calendar changes, answer with exactly yes or no, or describe\n"
+    "the changes you want (only a literal yes writes to the calendar).\n"
     "retry                  apply again if a calendar write failed\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
