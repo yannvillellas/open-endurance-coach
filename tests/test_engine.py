@@ -11,13 +11,14 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import (
     MAX_PLANNING_DAYS,
+    PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
     StaleDecisionError,
     _validate_report,
 )
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
-from open_endurance_coach.prompts.prompts import system_prompt
+from open_endurance_coach.prompts.prompts import estimate_user_message_tokens, system_prompt
 from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
@@ -326,6 +327,21 @@ def test_focus_limit_leaves_room_for_the_context(settings: Settings, tmp_path: P
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     system_tokens = estimate_text_tokens(system_prompt(settings))
     assert system_tokens + engine.focus_limit() + DEFAULT_MAX_TOKENS <= INPUT_TOKEN_CEILING
+
+
+def test_prompt_overhead_reserve_covers_the_rendered_message(settings: Settings) -> None:
+    context = CoachContext(focus="status check", today=date(2026, 9, 17))
+    overhead = estimate_user_message_tokens(context) - context.estimated_tokens()
+    assert 0 <= overhead < PROMPT_OVERHEAD_TOKENS
+
+
+def test_request_ceiling_guard_rejects_an_oversized_request(
+    settings: Settings, tmp_path: Path
+) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    oversized = LlmMessage(role="user", content="x" * ((INPUT_TOKEN_CEILING + 1) * CHARS_PER_TOKEN))
+    with pytest.raises(ValueError, match="request too large"):
+        engine._assert_within_ceiling([oversized])
 
 
 async def test_analyze_rejects_a_message_over_the_focus_limit(
@@ -1114,7 +1130,7 @@ async def test_full_history_drop_is_logged(
     ]
     with caplog.at_level("WARNING"):
         await engine.analyze(
-            "status", context=CoachContext(focus="status", max_tokens=50), history=history
+            "status", context=CoachContext(focus="status", max_tokens=200), history=history
         )
     assert "trimmed the conversation history" in caplog.text
 

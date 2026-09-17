@@ -61,7 +61,7 @@ async def test_budget_overrun_trims_oldest_activities_first(settings: Settings) 
         "fx-c",
         "fx-d",
     ][: len(context.recent_activities)]
-    assert len(context.wellness) == 3
+    assert len(context.wellness) == 2
     assert len(context.upcoming_events) == 2
 
 
