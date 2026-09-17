@@ -8,7 +8,7 @@ from open_endurance_coach.schemas.context import CoachContext
 OUTPUT_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<one-line summary of the athlete's data>",
-    "findings": ["<finding grounded in the athlete's data>"],
+    "findings": ["<topic label>: <finding grounded in the athlete's data>"],
     "questions": ["<optional question for the athlete>"],
     "needs_input": [],
     "mutations": [
@@ -31,7 +31,7 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
 DISCUSSION_EXAMPLE: dict[str, Any] = {
     "intent": "chat",
     "summary": "<direct answer to the athlete's question>",
-    "findings": ["<supporting observation from the athlete's data>"],
+    "findings": ["<topic label>: <supporting observation from the athlete's data>"],
     "questions": ["<follow-up question for the athlete>"],
     "needs_input": [],
     "mutations": [],
@@ -40,7 +40,7 @@ DISCUSSION_EXAMPLE: dict[str, Any] = {
 INTAKE_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<what you can already say, and the assumption you must not make>",
-    "findings": ["<what the data shows>"],
+    "findings": ["<topic label>: <what the data shows>"],
     "questions": [],
     "needs_input": ["<the fact you need before a plan is possible>"],
     "mutations": [],
@@ -49,7 +49,9 @@ INTAKE_EXAMPLE: dict[str, Any] = {
 RACE_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
     "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
-    "findings": ["<what the weekly rollup and readiness say about the current phase>"],
+    "findings": [
+        "<topic label>: <what the weekly rollup and readiness say about the current phase>"
+    ],
     "questions": ["<optional question for the athlete>"],
     "needs_input": [],
     "mutations": [
@@ -81,6 +83,9 @@ PROPOSAL_POLICY = (
     'mutations list unless intent is "plan": for chat and analysis put the answer in '
     "summary/findings and, if a change would help, offer it as a question - never "
     "encode a change the athlete did not ask for.\n"
+    "Every finding must start with a short topic label of one to three words followed "
+    "by ': ' so the list can be scanned (for example 'Wellness: ...', 'Load: ...'); "
+    "keep the full detail after the label, never shorten the finding.\n"
     "The examples below show the shape only. Their values are placeholders: every "
     "field must come from the athlete data, the example workout text is the only "
     "thing to imitate, and a mutation that sets a date before today is "

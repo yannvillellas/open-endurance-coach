@@ -238,6 +238,11 @@ def test_contract_blocks_proposals_on_material_questions() -> None:
     assert "Never list the same question in both questions and needs_input" in system
 
 
+def test_contract_requires_topic_labels_on_findings() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Every finding must start with a short topic label" in system
+
+
 def test_intake_example_demonstrates_blocking() -> None:
     report = DecisionReport.model_validate(INTAKE_EXAMPLE)
     assert report.intent == "plan"
