@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,7 +14,7 @@ from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
-from open_endurance_coach.extractors.standard import StandardExtractor
+from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
 from open_endurance_coach.prompts.prompts import build_messages, system_prompt
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
@@ -32,11 +33,28 @@ from open_endurance_coach.store.records import (
     DraftStatus,
     FeedbackWithReport,
 )
-from open_endurance_coach.tokens import INPUT_TOKEN_CEILING, estimate_text_tokens
+from open_endurance_coach.tokens import (
+    CHARS_PER_TOKEN,
+    INPUT_TOKEN_CEILING,
+    estimate_text_tokens,
+)
 from open_endurance_coach.writer.calendar import CalendarWriter
 from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FeedbackOutcome:
+    """Result of a feedback turn.
+
+    ``draft`` is the persisted revision when the model returned a plan, or the
+    unchanged pending draft when the turn was conversational or still blocked on
+    material questions; ``report`` always carries the turn's report for display.
+    """
+
+    draft: Draft
+    report: DecisionReport
 
 
 def _today(context: CoachContext, settings: Settings) -> date:
@@ -306,6 +324,7 @@ class CoachEngine:
         context: CoachContext | None = None,
         history: list[LlmMessage] | None = None,
     ) -> Draft:
+        self.check_focus(focus)
         if context is None:
             context = await self.build_context(focus, user_feedback=user_feedback, today=today)
         report = await self._run_llm(context, history=history)
@@ -325,6 +344,25 @@ class CoachEngine:
 
     def today(self) -> date:
         return self._clock().date()
+
+    def focus_limit(self) -> int:
+        """Max tokens a single athlete message may occupy in a request.
+
+        Reserves the system prompt and the normal context data budget so
+        system + context + message stays under the request ceiling.
+        """
+        system_tokens = estimate_text_tokens(system_prompt(self._settings))
+        return max(1, INPUT_TOKEN_CEILING - system_tokens - DEFAULT_MAX_TOKENS)
+
+    def check_focus(self, focus: str) -> None:
+        """Reject a message too large to send, rather than truncating it silently."""
+        limit = self.focus_limit()
+        tokens = estimate_text_tokens(focus)
+        if tokens > limit:
+            raise ValueError(
+                f"message too long: about {tokens} tokens; keep it under {limit} tokens"
+                f" (roughly {limit * CHARS_PER_TOKEN} characters)"
+            )
 
     def unapplied_decisions(self) -> list[Decision]:
         return self._store.list_unapplied_decisions()
@@ -351,13 +389,55 @@ class CoachEngine:
     ) -> list[FeedbackWithReport]:
         return self._store.recent_feedback(limit, max_age_days=max_age_days)
 
+    def _context_around(
+        self,
+        base: CoachContext,
+        *,
+        focus: str,
+        proposal: DecisionReport | None,
+        user_feedback: str | None,
+        today: date,
+    ) -> CoachContext:
+        return build_within_budget(
+            focus,
+            base.recent_activities,
+            base.wellness,
+            base.upcoming_events,
+            base.sport_settings,
+            goal_races=base.goal_races,
+            training_rollup=base.training_rollup,
+            current_proposal=proposal,
+            user_feedback=user_feedback,
+            activity_detail=base.activity_detail,
+            max_tokens=base.max_tokens,
+            today=today,
+        )
+
+    def refocus_context(
+        self, base: CoachContext, focus: str, *, today: date | None = None
+    ) -> CoachContext:
+        """Reuse cached athlete data for a new message within the context budget.
+
+        A raw copy would let a long message push the estimate over ``max_tokens``
+        and break the draft on reload, so the data is trimmed to fit.
+        """
+        return self._context_around(
+            base,
+            focus=focus,
+            proposal=None,
+            user_feedback=None,
+            today=today or self.today(),
+        )
+
     async def submit_feedback(
         self,
         draft_id: int,
         feedback: str,
         *,
+        focus: str | None = None,
+        assume: bool = False,
         history: list[LlmMessage] | None = None,
-    ) -> Draft:
+    ) -> FeedbackOutcome:
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
@@ -365,29 +445,30 @@ class CoachEngine:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
             )
-        base = draft.context
-        context = build_within_budget(
-            base.focus,
-            base.recent_activities,
-            base.wellness,
-            base.upcoming_events,
-            base.sport_settings,
-            goal_races=base.goal_races,
-            training_rollup=base.training_rollup,
-            current_proposal=draft.report,
-            user_feedback=feedback,
-            activity_detail=base.activity_detail,
-            max_tokens=base.max_tokens,
+        self.check_focus(focus if focus is not None else feedback)
+        context = self._context_around(
+            draft.context,
+            focus=focus or draft.context.focus,
+            proposal=draft.report,
+            # The message is the focus when the caller passes it, so do not also
+            # charge it as user_feedback: that section counts against the data
+            # budget and would evict real athlete data for long messages.
+            user_feedback=None if focus is not None else feedback,
             today=self.today(),
         )
-        self._store.add_feedback(draft_id, feedback)
+        feedback_id = self._store.add_feedback(draft_id, feedback)
         report = await self._run_llm(context, history=history)
+        self._store.set_feedback_report(feedback_id, report)
+        if report.intent != "plan" or (report.needs_input and not assume):
+            # Conversational turn or a plan still blocked on material questions:
+            # keep the pending proposal and only carry the report for display.
+            return FeedbackOutcome(draft=draft, report=report)
         self._store.update_draft_report(
             draft_id, report=report, user_feedback=feedback, context=context
         )
         updated = self._store.get_draft(draft_id)
         assert updated is not None
-        return updated
+        return FeedbackOutcome(draft=updated, report=report)
 
     def _assert_current_dates(self, report: DecisionReport) -> None:
         _assert_valid_mutations(report, today=self.today())

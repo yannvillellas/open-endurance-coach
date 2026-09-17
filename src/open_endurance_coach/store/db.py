@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     draft_id INTEGER NOT NULL REFERENCES drafts(id),
     created_at TEXT NOT NULL,
-    content TEXT NOT NULL
+    content TEXT NOT NULL,
+    report_json TEXT
 );
 CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,12 @@ class CoachStore:
         }
         if "applied_at" not in columns:
             self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
+        feedback_columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(feedback)").fetchall()
+        }
+        if "report_json" not in feedback_columns:
+            self._connection.execute("ALTER TABLE feedback ADD COLUMN report_json TEXT")
         self._connection.executescript(
             "DELETE FROM feedback WHERE draft_id IN"
             " (SELECT id FROM drafts WHERE status = 'rejected');"
@@ -225,17 +232,31 @@ class CoachStore:
             )
         self._connection.commit()
 
-    def add_feedback(self, draft_id: int, content: str) -> int:
+    def add_feedback(
+        self, draft_id: int, content: str, *, report: DecisionReport | None = None
+    ) -> int:
         if self.get_draft(draft_id) is None:
             raise ValueError(f"draft not found: {draft_id}")
         cursor = self._connection.execute(
-            "INSERT INTO feedback (draft_id, created_at, content) VALUES (?, ?, ?)",
-            (draft_id, self._clock().isoformat(), content),
+            "INSERT INTO feedback (draft_id, created_at, content, report_json) VALUES (?, ?, ?, ?)",
+            (
+                draft_id,
+                self._clock().isoformat(),
+                content,
+                json.dumps(report.model_dump(mode="json")) if report is not None else None,
+            ),
         )
         self._connection.commit()
         lastrowid = cursor.lastrowid
         assert lastrowid is not None
         return lastrowid
+
+    def set_feedback_report(self, feedback_id: int, report: DecisionReport) -> None:
+        self._connection.execute(
+            "UPDATE feedback SET report_json = ? WHERE id = ?",
+            (json.dumps(report.model_dump(mode="json")), feedback_id),
+        )
+        self._connection.commit()
 
     def list_feedback(self, draft_id: int) -> list[Feedback]:
         rows = self._connection.execute(
@@ -258,7 +279,8 @@ class CoachStore:
             return []
         query = (
             "SELECT f.id AS id, f.draft_id AS draft_id, f.created_at AS created_at,"
-            " f.content AS content, d.report_json AS report_json"
+            " f.content AS content,"
+            " COALESCE(f.report_json, d.report_json) AS report_json"
             " FROM feedback f JOIN drafts d ON d.id = f.draft_id"
         )
         params: tuple[object, ...] = ()

@@ -67,7 +67,9 @@ def test_estimated_tokens_match_indented_prompt_format() -> None:
         len(json.dumps(payload, ensure_ascii=False)) // CHARS_PER_TOKEN
         for payload in context.sections().values()
     )
-    indented = sum(estimate_payload_tokens(payload) for payload in context.sections().values())
+    indented = sum(
+        estimate_payload_tokens(payload) for payload in context.sections().values() if payload
+    )
     assert context.estimated_tokens() == indented
     assert indented > compact
 
@@ -137,9 +139,24 @@ def test_section_tokens_reports_per_section() -> None:
     }
     assert sections["recent_activities"] > 0
     assert sections["wellness"] > 0
-    assert sections["activity_detail"] == 1
+    assert sections["activity_detail"] == 0
     assert sections["user_feedback"] == 0
     assert sections["focus"] > 0
+
+
+def test_empty_sections_cost_no_tokens() -> None:
+    context = CoachContext.model_validate({"focus": "status check"})
+    tokens = context.section_tokens()
+    assert tokens["recent_activities"] == 0
+    assert tokens["wellness"] == 0
+    assert tokens["user_feedback"] == 0
+    assert context.data_tokens() == 0
+
+
+def test_focus_is_bounded_by_the_request_not_the_data_budget() -> None:
+    context = CoachContext.model_validate({"focus": "x" * 30000, "recent_activities": [ACTIVITY]})
+    assert context.data_tokens() <= context.max_tokens
+    assert context.estimated_tokens() > context.max_tokens
 
 
 def test_max_tokens_must_be_positive() -> None:
