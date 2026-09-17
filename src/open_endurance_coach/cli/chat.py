@@ -82,10 +82,10 @@ def _assumes_answers(focus: str) -> bool:
 
 
 def _print_needs_input(questions: list[str]) -> None:
-    console.print("[yellow]The coach needs answers before proposing calendar changes:[/yellow]")
+    console.print("[warn]The coach needs answers before proposing calendar changes:[/warn]")
     for question in questions:
-        console.print(f"  ? {escape(question)}")
-    console.print('[dim]Answer here, or say "proceed with assumptions" to plan anyway.[/dim]')
+        console.print(f"  [question]? {escape(question)}[/question]")
+    console.print('[hint]Answer here, or say "proceed with assumptions" to plan anyway.[/hint]')
 
 
 def _needs_fresh_context(focus: str, today: date | None) -> bool:
@@ -103,7 +103,7 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
                 provider, model = engine.select_llm(model=args[0])
         else:
             provider, model = engine.llm_selection()
-        console.print(f"Using {escape(provider)} ({escape(model)}).")
+        console.print(f"[meta]Using {escape(provider)} ({escape(model)}).[/meta]")
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
 
@@ -152,8 +152,8 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     if draft.report.mutations:
         if draft.report.intent != "plan":
             console.print(
-                "[dim]The coach drafted calendar changes but did not read this as a"
-                " planning request; ask him to plan if you want a proposal.[/dim]"
+                "[meta]The coach drafted calendar changes but did not read this as a"
+                " planning request; ask him to plan if you want a proposal.[/meta]"
             )
             return None
         if needs_input and not assumed:
@@ -163,7 +163,7 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     if needs_input:
         _print_needs_input(needs_input)
     else:
-        console.print("[dim]Answer my questions here if you like.[/dim]")
+        console.print("[meta]Answer my questions here if you like.[/meta]")
     return None
 
 
@@ -174,7 +174,7 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     try:
         report = await engine.apply(session.pending_decision_id)
     except (StaleDecisionError, PlaceholderMutationError) as exc:
-        console.print(f"[yellow]Decision #{session.pending_decision_id} discarded: {exc}[/yellow]")
+        console.print(f"[warn]Decision #{session.pending_decision_id} discarded: {exc}[/warn]")
         engine.discard_decision(session.pending_decision_id)
         session.pending_decision_id = None
         return
@@ -190,8 +190,7 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     session.pending_decision_id = remaining[0].id if remaining else None
     if remaining:
         console.print(
-            f"[yellow]Decision #{remaining[0].id} is still unapplied."
-            ' Say "retry" to apply it.[/yellow]'
+            f'[warn]Decision #{remaining[0].id} is still unapplied. Say "retry" to apply it.[/warn]'
         )
 
 
@@ -219,8 +218,8 @@ async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: i
         print_error(exc)
         session.pending_decision_id = decision.id
         console.print(
-            f"[yellow]Decision #{decision.id} was recorded but not applied;"
-            ' say "retry" to apply it again.[/yellow]'
+            f"[warn]Decision #{decision.id} was recorded but not applied;"
+            ' say "retry" to apply it again.[/warn]'
         )
         return
     session.pending_decision_id = None
@@ -239,7 +238,7 @@ async def _handle_proposal(
     snapshot = state.plan
     draft_id = snapshot.draft_id
     if is_exit_command(line):
-        console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+        console.print("[warn]Cancelled. Nothing changed.[/warn]")
         return ExitChat()
 
     if line.startswith("/"):
@@ -248,11 +247,11 @@ async def _handle_proposal(
         if name == "help":
             console.print(HELP_TEXT, markup=False)
         elif name == "forget":
-            console.print("[yellow]/forget is unavailable while a proposal is open.[/yellow]")
+            console.print("[warn]/forget is unavailable while a proposal is open.[/warn]")
         elif name in {"provider", "model"}:
             _handle_llm_command(engine, name, parts[1:])
         else:
-            console.print("[red]Unknown command.[/red]")
+            console.print("[error]Unknown command.[/error]")
             console.print(HELP_TEXT, markup=False)
         prompt_plan(snapshot)
         return state
@@ -284,15 +283,16 @@ async def _handle_proposal(
             if answer.report.mutations:
                 if answer.report.intent != "plan":
                     console.print(
-                        "[dim]The coach did not read that as a planning request; nothing"
-                        " is proposed.[/dim]"
+                        "[meta]The coach did not read that as a planning request; nothing"
+                        " is proposed.[/meta]"
                     )
                 else:
                     return _open_proposal(answer.id, answer.report.mutations)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
-            '[dim]Note: to revise the plan, describe the change (e.g. "make it 45 minutes").[/dim]'
+            '[hint]Note: to revise the plan, describe the change (e.g. "make it 45'
+            ' minutes").[/hint]'
         )
         prompt_plan(snapshot)
         return state
@@ -308,16 +308,17 @@ async def _handle_proposal(
             return True
         session.append(line, assistant_turn(updated.report).content)
         if not updated.report.mutations:
-            console.print("[yellow]No changes proposed anymore.[/yellow]")
+            console.print("[warn]No changes proposed anymore.[/warn]")
             return True
         if updated.report.intent != "plan":
             console.print(
-                "[dim]The coach did not read that as a planning request; nothing is proposed.[/dim]"
+                "[meta]The coach did not read that as a planning request; nothing is"
+                " proposed.[/meta]"
             )
             return True
         console.print(
-            '[dim]Nothing was written: reply exactly "yes" to approve this plan, or keep'
-            " describing the change you want.[/dim]"
+            '[hint]Nothing was written: reply exactly [bold]"yes"[/bold] to approve this'
+            " plan, or keep describing the change you want.[/hint]"
         )
         return None
 
@@ -353,7 +354,7 @@ async def _run_command(
         if args:
             if not args[0].isdigit() or int(args[0]) <= 0:
                 console.print(
-                    r"[red]Usage: /forget \[days>0] (omit days to forget everything)[/red]"
+                    r"[error]Usage: /forget \[days>0] (omit days to forget everything)[/error]"
                 )
                 return None
             days = int(args[0])
@@ -378,19 +379,17 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         total = sum(removed.values())
         if total:
             console.print(
-                f"[dim]Pruned {total} old records (keeping {settings.history_days} days).[/dim]"
+                f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
             )
     for stale_id, reason in engine.discard_stale_decisions():
-        console.print(
-            f"[yellow]Decision #{stale_id} was approved with {reason}; discarded.[/yellow]"
-        )
+        console.print(f"[warn]Decision #{stale_id} was approved with {reason}; discarded.[/warn]")
     unapplied = engine.unapplied_decisions()
     if unapplied:
         oldest = unapplied[0]
         session.pending_decision_id = oldest.id
         console.print(
-            f"[yellow]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
-            ' was recorded but never applied. Say "retry" to apply it.[/yellow]'
+            f"[warn]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
+            ' was recorded but never applied. Say "retry" to apply it.[/warn]'
         )
     session.seed(
         engine.recent_history(
@@ -403,20 +402,20 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     remembered = sum(1 for turn in session.history if turn.role == "user")
     provider, model = engine.llm_selection()
     console.print("Chat with the coach. /help lists commands.")
-    console.print(f"[dim]Using {escape(provider)} ({escape(model)}).[/dim]")
+    console.print(f"[meta]Using {escape(provider)} ({escape(model)}).[/meta]")
     if remembered:
-        console.print(f"[dim]Remembering {remembered} past exchanges.[/dim]")
+        console.print(f"[meta]Remembering {remembered} past exchanges.[/meta]")
     while True:
         try:
-            line = Prompt.ask("[bold cyan]you[/bold cyan]")
+            line = Prompt.ask("[athlete.label]you[/athlete.label]")
         except EOFError:
             if state.plan is not None:
-                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+                console.print("[warn]Cancelled. Nothing changed.[/warn]")
             console.print("bye")
             return
         except KeyboardInterrupt:
             if state.plan is not None:
-                console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+                console.print("[warn]Cancelled. Nothing changed.[/warn]")
                 state = ChatState()
                 continue
             console.print("bye")
@@ -424,8 +423,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         bare = _BARE_COMMAND_RE.match(line)
         if bare is not None:
             console.print(
-                f"[dim]That looks like a command; type it with a slash:"
-                f" /{bare.group(1).lower()}[/dim]"
+                f"[hint]That looks like a command; type it with a slash:"
+                f" /{bare.group(1).lower()}[/hint]"
             )
             continue
         try:
@@ -438,7 +437,7 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 case Converse(text=text):
                     state = await _handle_text(engine, session, text) or state
                 case UnknownCommand():
-                    console.print("[red]Unknown command.[/red]")
+                    console.print("[error]Unknown command.[/error]")
                     console.print(HELP_TEXT, markup=False)
                 case Confirmation(line=line):
                     step = await _handle_proposal(engine, state, line, session)

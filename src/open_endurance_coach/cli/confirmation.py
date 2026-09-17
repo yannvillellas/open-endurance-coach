@@ -28,9 +28,9 @@ class Done:
 
 
 def prompt_plan(snapshot: PlanSnapshot) -> None:
-    console.print("[bold yellow]Confirm? Reply with exactly yes or no.[/bold yellow]")
+    console.print("[plan.title]Confirm? Reply with exactly yes or no.[/plan.title]")
     console.print(snapshot.plan_text)
-    console.print("[dim](yes / no / cancel)[/dim]")
+    console.print("[hint](yes / no / cancel)[/hint]")
 
 
 async def respond(
@@ -48,12 +48,12 @@ async def respond(
             await executor(engine)
             return Done()
         case Declined():
-            console.print("[yellow]Nothing changed.[/yellow]")
+            console.print("[warn]Nothing changed.[/warn]")
             return Done()
         case Ignored():
             return snapshot
         case Cancelled():
-            console.print("[yellow]Cancelled. Nothing changed.[/yellow]")
+            console.print("[warn]Cancelled. Nothing changed.[/warn]")
             return Done()
         case Feedback(feedback):
             async with thinking():

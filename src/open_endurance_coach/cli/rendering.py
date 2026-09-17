@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from rich.console import Console
 from rich.markup import escape
+from rich.theme import Theme
 
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
@@ -15,29 +16,45 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.writer.records import ApplyReport
 
-console = Console()
+THEME = Theme(
+    {
+        "coach.label": "bold cyan",
+        "athlete.label": "bold green",
+        "finding": "dim",
+        "question": "yellow",
+        "plan.frame": "yellow",
+        "plan.title": "bold yellow",
+        "hint": "dim italic",
+        "meta": "dim",
+        "warn": "yellow",
+        "error": "bold red",
+        "success": "green",
+    }
+)
+
+console = Console(theme=THEME)
 
 
 def print_error(exc: Exception) -> None:
-    console.print(f"[red]error:[/red] {escape(str(exc))}")
+    console.print(f"[error]error:[/error] {escape(str(exc))}")
 
 
 @asynccontextmanager
 async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
     if console.is_terminal:
-        with console.status(f"[bold cyan]{message}…[/bold cyan]", spinner="dots"):
+        with console.status(f"[meta]{message}…[/meta]", spinner="dots"):
             yield
     else:
-        console.print(f"[dim]{message}…[/dim]")
+        console.print(f"[meta]{message}…[/meta]")
         yield
 
 
 def render_report(report: DecisionReport) -> None:
-    console.print(f"[bold green]Coach:[/bold green] {escape(report.summary)}")
+    console.print(f"[coach.label]Coach:[/coach.label] {escape(report.summary)}")
     for finding in report.findings:
-        console.print(f"  [dim]- {escape(finding)}[/dim]")
+        console.print(f"  [finding]- {escape(finding)}[/finding]")
     for question in report.questions:
-        console.print(f"  [yellow]? {escape(question)}[/yellow]")
+        console.print(f"  [question]? {escape(question)}[/question]")
 
 
 def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
@@ -140,7 +157,7 @@ def render_apply(report: ApplyReport) -> None:
     if not report.decisions:
         console.print("No unapplied decisions.")
         return
-    console.print("[green]Applied:[/green]")
+    console.print("[success]Applied:[/success]")
     console.print(apply_plan_text(report))
     skipped = [
         (decision.decision_id, len(decision.skipped), sorted(set(decision.skipped)))
@@ -149,6 +166,6 @@ def render_apply(report: ApplyReport) -> None:
     ]
     for decision_id, count, reasons in skipped:
         console.print(
-            f"[yellow]Decision #{decision_id}: {count} mutation(s) skipped"
-            f" ({', '.join(reasons)}) — the calendar was only partially updated.[/yellow]"
+            f"[warn]Decision #{decision_id}: {count} mutation(s) skipped"
+            f" ({', '.join(reasons)}) — the calendar was only partially updated.[/warn]"
         )
