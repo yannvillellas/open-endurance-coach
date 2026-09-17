@@ -11,6 +11,8 @@ from open_endurance_coach.cli.rendering import (
     print_error,
     render_apply,
     render_report,
+    split_finding_topic,
+    wrap_plan_text,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
@@ -45,8 +47,11 @@ def test_render_report_prints_summary_findings_questions(
 ) -> None:
     render_report(make_draft().report)
     out = capsys.readouterr().out
-    assert "Coach: Load stable." in out
+    assert "Coach" in out
+    assert "Load stable." in out
+    assert "Evidence" in out
     assert "- Tempo block hit target." in out
+    assert "Open questions" in out
     assert "? RPE on Thursday?" in out
 
 
@@ -69,8 +74,10 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     ]
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
-    assert "- create Aerobic Swim on 2026-08-23: 2000m easy" in text
-    assert "- create Bare Session on 2026-08-24" in text
+    assert "  2026-08-23" in text
+    assert "- create Aerobic Swim: 2000m easy" in text
+    assert "  2026-08-24" in text
+    assert "- create Bare Session" in text
 
 
 def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
@@ -109,8 +116,28 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
     ]
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
-    assert "- create Tempo Session on 2024-02-05 (Ride, moving_time=3600, load=84)" in text
+    assert "  2024-02-05" in text
+    assert "- create Tempo Session (Ride, moving_time=3600, load=84)" in text
+    assert "(no date)" in text
     assert "- update event 10001: moving_time=4200" in text
+
+
+def test_mutations_plan_text_nests_multiline_description() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Intervals",
+            start_date_local=date(2026, 9, 19),
+            description="- 10m warmup\n\n3x\n- 3m hard",
+        ),
+    ]
+    lines = mutations_plan_text(mutations).splitlines()
+    day = lines.index("  2026-09-19")
+    assert lines[day + 1] == "    - create Intervals"
+    assert lines[day + 2] == "      - 10m warmup"
+    assert lines[day + 3] == ""
+    assert lines[day + 4] == "      3x"
+    assert lines[day + 5] == "      - 3m hard"
 
 
 def test_mutations_plan_text_empty_mutations() -> None:
@@ -209,8 +236,9 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
         ),
     ]
     text = mutations_plan_text(mutations)
+    assert "  2026-09-27" in text
     assert (
-        "- create RACE_A Autumn Trail Race on 2026-09-27"
+        "- create RACE_A Autumn Trail Race"
         " (TrailRun, moving_time=10800, distance=10900m, load=142): hilly loop" in text
     )
 
@@ -242,3 +270,48 @@ def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
     out = " ".join(capsys.readouterr().out.split())
     assert "Decision #7: 1 mutation(s) skipped (past-dated)" in out
     assert "only partially updated" in out
+
+
+def test_wrap_plan_text_keeps_hanging_indent() -> None:
+    line = "    - create Trail Hill Sharpening (TrailRun, moving_time=2580, load=55)"
+    wrapped = wrap_plan_text(line, 40).splitlines()
+    assert all(len(part) <= 40 for part in wrapped)
+    assert wrapped[0].startswith("    - create")
+    assert all(part.startswith("      ") for part in wrapped[1:])
+
+
+def test_prompt_plan_frames_the_proposal(capsys: pytest.CaptureFixture[str]) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.cli.confirmation import prompt_plan
+
+    prompt_plan(
+        PlanSnapshot(
+            plan_text="Apply this to Intervals.icu:\nProposed changes:\n  2026-09-17",
+            draft_id=1,
+        )
+    )
+    out = capsys.readouterr().out
+    assert "Proposal" in out
+    assert "Apply this to Intervals.icu" in out
+    assert "Confirm? Reply exactly yes to apply" in out
+    assert "(yes / no, or describe a change)" in out
+
+
+def test_split_finding_topic_extracts_a_short_label() -> None:
+    assert split_finding_topic("Wellness: CTL 28.99") == ("Wellness", ": CTL 28.99")
+    assert split_finding_topic("Race: 11 km on 2026-09-27") == ("Race", ": 11 km on 2026-09-27")
+
+
+def test_split_finding_topic_leaves_long_or_missing_prefixes_alone() -> None:
+    long_prefix = "Load is run-only for three weeks: 227"
+    assert split_finding_topic(long_prefix) == ("", long_prefix)
+    assert split_finding_topic("no colon here") == ("", "no colon here")
+
+
+def test_render_report_keeps_the_finding_text_when_it_has_a_topic(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = DecisionReport(summary="Ok.", findings=["Wellness: CTL 28.99, form +2.37."])
+    render_report(report)
+    out = capsys.readouterr().out
+    assert "  - Wellness: CTL 28.99, form +2.37." in out

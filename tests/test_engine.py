@@ -22,7 +22,7 @@ from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
-from open_endurance_coach.tokens import INPUT_TOKEN_CEILING, estimate_text_tokens
+from open_endurance_coach.tokens import CHARS_PER_TOKEN, INPUT_TOKEN_CEILING, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 
 from .fakes import (
@@ -868,14 +868,14 @@ async def test_history_is_trimmed_to_the_context_budget(settings: Settings, tmp_
     provider = FakeLlmProvider([completion(report_json("ok"))])
     engine = make_engine(settings, store, provider)
     history = [
-        LlmMessage(role="user", content="x" * 40000),
+        LlmMessage(role="user", content="zzzzzzzz" + "z" * (INPUT_TOKEN_CEILING * CHARS_PER_TOKEN)),
         LlmMessage(role="assistant", content="short answer"),
         LlmMessage(role="user", content="recent question"),
     ]
     context = CoachContext(focus="status", max_tokens=200)
     await engine.analyze("status", context=context, history=history)
     prompt = provider.calls[0]["messages"][1].content
-    assert "x" * 40000 not in prompt
+    assert "zzzzzzzz" not in prompt
     assert "recent question" in prompt
     assert "short answer" not in prompt
 
@@ -885,8 +885,10 @@ async def test_history_trimming_keeps_the_newest_turns(settings: Settings, tmp_p
     provider = FakeLlmProvider([completion(report_json("ok"))])
     engine = make_engine(settings, store, provider)
     history = [
-        LlmMessage(role="user", content="oldest " + "x" * 30000),
-        LlmMessage(role="assistant", content="old answer " + "y" * 30000),
+        LlmMessage(role="user", content="oldest " + "x" * (INPUT_TOKEN_CEILING * CHARS_PER_TOKEN)),
+        LlmMessage(
+            role="assistant", content="old answer " + "y" * (INPUT_TOKEN_CEILING * CHARS_PER_TOKEN)
+        ),
         LlmMessage(role="user", content="newest question"),
     ]
     await engine.analyze(
@@ -904,7 +906,9 @@ async def test_full_history_drop_is_logged(
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json("ok"))])
     engine = make_engine(settings, store, provider)
-    history = [LlmMessage(role="user", content="x" * 40000)]
+    history = [
+        LlmMessage(role="user", content="x" * ((INPUT_TOKEN_CEILING + 1024) * CHARS_PER_TOKEN))
+    ]
     with caplog.at_level("WARNING"):
         await engine.analyze(
             "status", context=CoachContext(focus="status", max_tokens=50), history=history

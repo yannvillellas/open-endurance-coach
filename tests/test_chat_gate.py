@@ -1,7 +1,6 @@
 import pytest
 
 from open_endurance_coach.chat.gate import (
-    Cancelled,
     Declined,
     Feedback,
     Ignored,
@@ -24,8 +23,8 @@ def test_literal_no_declines(line: str) -> None:
 
 
 @pytest.mark.parametrize("line", ["cancel", "CANCEL", " cancel "])
-def test_literal_cancel_exits_confirmation(line: str) -> None:
-    assert handle(line, APPROVE) == Cancelled()
+def test_literal_cancel_is_a_revision_request(line: str) -> None:
+    assert handle(line, APPROVE) == Feedback(line.strip())
 
 
 @pytest.mark.parametrize("line", ["", "   ", "\t "])
@@ -50,7 +49,7 @@ def test_fallback_preserves_interior_whitespace_and_strips_ends() -> None:
     assert handle("  RPE  was  7  ", APPROVE) == Feedback("RPE  was  7")
 
 
-def test_cancel_with_extra_text_is_a_fallback_not_a_cancel() -> None:
+def test_cancel_with_extra_text_is_a_revision_request() -> None:
     assert handle("cancel it", APPROVE) == Feedback("cancel it")
 
 

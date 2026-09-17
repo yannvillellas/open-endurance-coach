@@ -41,10 +41,10 @@ async def _with_engine(
         settings = get_settings()
     except ValidationError as exc:
         console.print(
-            "[red]error:[/red] configuration missing: is there a readable .env file"
+            "[error]error:[/error] configuration missing: is there a readable .env file"
             " in the current directory with all required keys?"
         )
-        console.print(f"[dim]{exc}[/dim]")
+        console.print(f"[meta]{exc}[/meta]")
         raise typer.Exit(code=1) from None
     settings = settings.with_llm_override(provider=provider, model=model)
     intervals = IntervalsClient(settings)

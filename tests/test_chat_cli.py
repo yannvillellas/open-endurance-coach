@@ -186,7 +186,7 @@ def test_chat_provider_command_unknown_provider_prints_error(patched: Any) -> No
 def test_chat_provider_during_confirmation_switches_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\n/provider fake\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/provider fake\nno\n")
     assert result.exit_code == 0
     assert "Using fake (" in result.output
     assert len(provider.calls) == 1
@@ -269,7 +269,7 @@ def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
     _, store = patched(provider)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "Coach: Load stable." in result.output
+    assert "Load stable." in result.output
     assert store.list_drafts() != []
     assert store.is_activity_seen("fx-a") is True
     assert provider.calls[0]["json_mode"] is True
@@ -279,7 +279,7 @@ def test_chat_free_text_becomes_the_analysis_focus(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
     result = runner.invoke(cli_main.app, [], input="analyze the week how was my week\n")
     assert result.exit_code == 0
-    assert "Coach: Load stable." in result.output
+    assert "Load stable." in result.output
     drafts = store.list_drafts()
     assert len(drafts) == 1
     assert drafts[0].focus.splitlines()[0] == "analyze the week how was my week"
@@ -352,7 +352,7 @@ def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> 
     )
     assert result.exit_code == 0
     assert "No changes proposed anymore." in result.output
-    assert "Coach: Prose reply." in result.output
+    assert "Prose reply." in result.output
 
 
 def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
@@ -365,7 +365,7 @@ def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
     )
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes please\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes please\nno\n")
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
@@ -383,7 +383,7 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     )
     engine, store = patched(provider, calendar=calendar)
     calls = _spy_writes(engine)
-    result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\nno\n")
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
@@ -396,7 +396,7 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     calls = _spy_writes(engine)
     result = runner.invoke(cli_main.app, [], input="how was my week?\nyes\n")
     assert result.exit_code == 0
-    assert "Coach: Sure." in result.output
+    assert "Sure." in result.output
     assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
 
@@ -615,11 +615,11 @@ def test_chat_mid_session_planning_request_opens_a_proposal(patched: Any) -> Non
     )
     patched(provider)
     result = runner.invoke(
-        cli_main.app, [], input="how was my week?\nplan a rest run tomorrow\ncancel\n"
+        cli_main.app, [], input="how was my week?\nplan a rest run tomorrow\nno\n"
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
-    assert "Confirm? Reply with exactly yes or no" in result.output
+    assert "Confirm? Reply exactly yes to apply" in result.output
 
 
 def test_chat_proposal_question_line_gets_an_answer_without_replan(
@@ -636,7 +636,7 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
         cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
-    assert "Coach: Explanation." in result.output
+    assert "Explanation." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
     assert len(store.list_drafts()) == 2
@@ -660,7 +660,7 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
-    assert "Coach: Revised." in result.output
+    assert "Revised." in result.output
     draft = store.get_draft(1)
     assert draft is not None
     assert draft.user_feedback == "make it 45 minutes, why did you pick 60?"
@@ -711,7 +711,7 @@ def test_chat_proposal_modification_reshows_report_without_draft_line(patched: A
         cli_main.app, [], input="analyze my week\nmake it 4 series instead\nno\n"
     )
     assert result.exit_code == 0
-    assert "Coach: Revised plan." in result.output
+    assert "Revised plan." in result.output
     assert "Draft #" not in result.output
     assert "Review it" not in result.output
 
@@ -744,11 +744,12 @@ def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
     assert store.list_decisions() == []
 
 
-def test_chat_help_mentions_cancel(patched: Any) -> None:
+def test_chat_help_explains_confirmation_replies(patched: Any) -> None:
     patched(FakeLlmProvider())
     result = runner.invoke(cli_main.app, [], input="/help\n")
     assert result.exit_code == 0
-    assert "cancel" in result.output
+    assert "answer with exactly yes or no" in result.output
+    assert "cancel" not in result.output
 
 
 def test_chat_proposal_question_budget_overflow_falls_back_to_context(
@@ -872,7 +873,7 @@ def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
 def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\n/help\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/help\nno\n")
     assert result.exit_code == 0
     assert "/provider" in result.output
     assert len(provider.calls) == 1
@@ -882,7 +883,7 @@ def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
 def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\n/forget\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/forget\nno\n")
     assert result.exit_code == 0
     assert "unavailable while a proposal is open" in result.output
     assert len(provider.calls) == 1
@@ -902,7 +903,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
     )
     assert result.exit_code == 0
     assert "/forget is unavailable while a proposal is open." in result.output
-    assert "Coach: Explanation." in result.output
+    assert "Explanation." in result.output
     assert len(provider.calls) == 2
     assert store.list_feedback(1) == []
 
@@ -910,7 +911,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
 def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     _, store = patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\n/bogus\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/bogus\nno\n")
     assert result.exit_code == 0
     assert "Unknown command." in result.output
     assert len(provider.calls) == 1
@@ -939,7 +940,7 @@ def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
     patched(provider)
     result = runner.invoke(cli_main.app, [], input="review my last two runs\n/exit\n")
     assert result.exit_code == 0
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
     assert "did not read this as a planning request" in result.output
     assert len(provider.calls) == 1
 
@@ -948,18 +949,18 @@ def test_chat_planning_phrase_opens_proposal(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     patched(provider)
     result = runner.invoke(
-        cli_main.app, [], input="could we plan a rest run after my rest day\ncancel\n"
+        cli_main.app, [], input="could we plan a rest run after my rest day\nno\n"
     )
     assert result.exit_code == 0
-    assert "Confirm? Reply with exactly yes or no" in result.output
+    assert "Confirm? Reply exactly yes to apply" in result.output
 
 
 def test_chat_analysis_with_mutations_opens_proposal(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     patched(provider)
-    result = runner.invoke(cli_main.app, [], input="analyze my week\ncancel\n")
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nno\n")
     assert result.exit_code == 0
-    assert "Confirm? Reply with exactly yes or no" in result.output
+    assert "Confirm? Reply exactly yes to apply" in result.output
 
 
 def test_chat_analysis_intent_with_mutations_shows_the_refusal(patched: Any) -> None:
@@ -970,7 +971,7 @@ def test_chat_analysis_intent_with_mutations_shows_the_refusal(patched: Any) -> 
     result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
     assert "did not read this as a planning request" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
     assert len(provider.calls) == 1
 
 
@@ -991,7 +992,7 @@ def test_chat_material_questions_block_a_workout_plan(patched: Any) -> None:
     assert "needs answers before proposing calendar changes" in result.output
     assert "expected finish time" in result.output
     assert "proceed with assumptions" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
 
 
 def test_chat_answer_after_needs_input_reruns_the_analysis(patched: Any) -> None:
@@ -1005,12 +1006,12 @@ def test_chat_answer_after_needs_input_reruns_the_analysis(patched: Any) -> None
     result = runner.invoke(
         cli_main.app,
         [],
-        input="plan my race\ntarget 60 minutes, I can train daily\ncancel\n",
+        input="plan my race\ntarget 60 minutes, I can train daily\nno\n",
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
     assert provider.calls[1]["json_mode"] is True
-    assert "Confirm? Reply with exactly yes or no" in result.output
+    assert "Confirm? Reply exactly yes to apply" in result.output
 
 
 def test_chat_duplicate_questions_are_shown_once(patched: Any) -> None:
@@ -1062,7 +1063,7 @@ def test_chat_needs_input_without_mutations_shows_the_questions(patched: Any) ->
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
     assert "expected finish time" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
     assert "Answer my questions here if you like" not in result.output
 
 
@@ -1078,11 +1079,9 @@ def test_chat_proceed_with_assumptions_opens_the_proposal(patched: Any) -> None:
         ]
     )
     patched(provider)
-    result = runner.invoke(
-        cli_main.app, [], input="plan my race, proceed with assumptions\ncancel\n"
-    )
+    result = runner.invoke(cli_main.app, [], input="plan my race, proceed with assumptions\nno\n")
     assert result.exit_code == 0
-    assert "Confirm? Reply with exactly yes or no" in result.output
+    assert "Confirm? Reply exactly yes to apply" in result.output
 
 
 def test_chat_bare_command_prints_a_slash_hint(patched: Any) -> None:
@@ -1149,7 +1148,7 @@ def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None
     result = runner.invoke(cli_main.app, [], input="plan my block - don't assume anything\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
 
 
 def test_chat_negated_use_assumptions_does_not_override(patched: Any) -> None:
@@ -1164,7 +1163,7 @@ def test_chat_negated_use_assumptions_does_not_override(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="plan my block - don't use assumptions\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
 
 
 def test_chat_revision_with_needs_input_keeps_the_gate_closed(patched: Any) -> None:
@@ -1195,7 +1194,7 @@ def test_chat_revision_to_chat_intent_closes_the_gate(patched: Any) -> None:
     assert result.exit_code == 0
     assert "did not read that as a planning request" in result.output
     assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
-    assert result.output.count("Confirm? Reply with exactly yes or no") == 1
+    assert result.output.count("Confirm? Reply exactly yes to apply") == 1
 
 
 def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) -> None:
@@ -1213,7 +1212,7 @@ def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) 
     assert len(provider.calls) == 2
     prompt = provider.calls[1]["messages"][1].content
     assert "Current message:\nhow about 45 minutes instead?" in prompt
-    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
+    assert result.output.count("Confirm? Reply exactly yes to apply") == 2
 
 
 def test_chat_retry_with_nothing_pending_does_not_write(patched: Any) -> None:
@@ -1275,7 +1274,7 @@ def test_chat_gate_question_with_needs_input_keeps_the_gate_closed(patched: Any)
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
     assert "What is your goal time?" in result.output
-    assert result.output.count("Confirm? Reply with exactly yes or no") == 1
+    assert result.output.count("Confirm? Reply exactly yes to apply") == 1
 
 
 def test_chat_retry_applies_each_unapplied_decision_in_order(patched: Any) -> None:
@@ -1360,7 +1359,7 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="plan my race\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
-    assert "Confirm? Reply with exactly yes or no" not in result.output
+    assert "Confirm? Reply exactly yes to apply" not in result.output
     assert calendar.created == []
 
 
@@ -1467,7 +1466,7 @@ def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> No
     )
     assert result.exit_code == 0
     assert "did not read that as a planning request" in result.output
-    assert result.output.count("Confirm? Reply with exactly yes or no") == 2
+    assert result.output.count("Confirm? Reply exactly yes to apply") == 2
 
 
 def test_chat_render_failure_after_apply_is_not_reported_as_unapplied(
