@@ -4,6 +4,7 @@ from typing import Any
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.tokens import estimate_text_tokens
 
 OUTPUT_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
@@ -199,6 +200,13 @@ def _user_message(context: CoachContext, history: list[LlmMessage] | None = None
     parts.append(f"Current message:\n{focus}\n")
     parts.append("Respond per the contract.\n")
     return "".join(parts)
+
+
+def estimate_user_message_tokens(
+    context: CoachContext, history: list[LlmMessage] | None = None
+) -> int:
+    """Tokens of the exact user message the prompt builder will send."""
+    return estimate_text_tokens(_user_message(context, history))
 
 
 def build_messages(

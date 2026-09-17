@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from open_endurance_coach.schemas.decisions import DecisionReport, RaceCategory
 from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
-from open_endurance_coach.tokens import estimate_payload_tokens
+from open_endurance_coach.tokens import estimate_payload_tokens, estimate_text_tokens
 
 MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
 
@@ -123,19 +123,26 @@ class CoachContext(BaseModel):
         return sections
 
     def section_tokens(self) -> dict[str, int]:
+        """Per-section token estimates, for diagnostics only.
+
+        The budget is measured on the serialized payload the prompt actually sends
+        (see ``data_tokens``); summing these per-section dumps undercounts it because
+        the prompt nests every section one level deeper.
+        """
         sections = self.sections()
         return {key: _tokens_of(sections[key]) if key in sections else 0 for key in _SECTION_KEYS}
 
-    def estimated_tokens(self) -> int:
-        return max(1, sum(self.section_tokens().values()))
+    def data_payload(self) -> dict[str, Any]:
+        """The athlete-data dict the prompt serializes, without the message."""
+        return {key: value for key, value in self.sections().items() if key != "focus"}
 
     def data_tokens(self) -> int:
-        """Tokens of athlete data, excluding the athlete's message.
+        """Tokens of athlete data as the prompt renders it, excluding the message."""
+        return _tokens_of(self.data_payload())
 
-        The message is bounded separately against the request ceiling, so it never
-        competes with the data budget that ``build_within_budget`` trims.
-        """
-        return sum(tokens for key, tokens in self.section_tokens().items() if key != "focus")
+    def estimated_tokens(self) -> int:
+        """Tokens of the data payload plus the athlete's message."""
+        return max(1, self.data_tokens() + estimate_text_tokens(self.focus))
 
     @model_validator(mode="after")
     def _within_budget(self) -> Self:

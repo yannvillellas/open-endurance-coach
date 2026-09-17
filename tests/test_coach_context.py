@@ -5,7 +5,11 @@ from pydantic import ValidationError
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.intervals import Activity, Wellness
-from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_payload_tokens
+from open_endurance_coach.tokens import (
+    CHARS_PER_TOKEN,
+    estimate_payload_tokens,
+    estimate_text_tokens,
+)
 
 ACTIVITY = {
     "id": "fx000001",
@@ -59,19 +63,16 @@ def test_sections_default_to_empty() -> None:
     assert context.user_feedback is None
 
 
-def test_estimated_tokens_match_indented_prompt_format() -> None:
+def test_estimated_tokens_match_the_indented_payload() -> None:
     context = CoachContext.model_validate(
         {"focus": "status check", "recent_activities": [ACTIVITY], "max_tokens": 4096}
     )
-    compact = sum(
-        len(json.dumps(payload, ensure_ascii=False)) // CHARS_PER_TOKEN
-        for payload in context.sections().values()
-    )
-    indented = sum(
-        estimate_payload_tokens(payload) for payload in context.sections().values() if payload
-    )
-    assert context.estimated_tokens() == indented
+    data = context.data_payload()
+    compact = len(json.dumps(data, ensure_ascii=False)) // CHARS_PER_TOKEN
+    indented = estimate_payload_tokens(data)
     assert indented > compact
+    assert context.data_tokens() == indented
+    assert context.estimated_tokens() == indented + estimate_text_tokens(context.focus)
 
 
 def test_sections_match_the_prompt_payload() -> None:
@@ -144,13 +145,13 @@ def test_section_tokens_reports_per_section() -> None:
     assert sections["focus"] > 0
 
 
-def test_empty_sections_cost_no_tokens() -> None:
+def test_empty_sections_cost_only_the_payload_they_render() -> None:
     context = CoachContext.model_validate({"focus": "status check"})
     tokens = context.section_tokens()
     assert tokens["recent_activities"] == 0
     assert tokens["wellness"] == 0
     assert tokens["user_feedback"] == 0
-    assert context.data_tokens() == 0
+    assert context.data_tokens() == estimate_payload_tokens(context.data_payload())
 
 
 def test_focus_is_bounded_by_the_request_not_the_data_budget() -> None:

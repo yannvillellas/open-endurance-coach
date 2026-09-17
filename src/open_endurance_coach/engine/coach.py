@@ -15,7 +15,11 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
-from open_endurance_coach.prompts.prompts import build_messages, system_prompt
+from open_endurance_coach.prompts.prompts import (
+    build_messages,
+    estimate_user_message_tokens,
+    system_prompt,
+)
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
@@ -75,6 +79,9 @@ def _context_event_dates(context: CoachContext) -> dict[str, date]:
 
 
 MAX_PLANNING_DAYS = 400
+
+# Slack in the message cap for the prompt boilerplate around the data payload.
+PROMPT_OVERHEAD_TOKENS = 256
 
 
 class StaleDecisionError(ValueError):
@@ -230,7 +237,9 @@ class CoachEngine:
     ) -> list[LlmMessage] | None:
         if not history:
             return history
-        remaining = max(0, INPUT_TOKEN_CEILING - system_tokens - context.estimated_tokens())
+        remaining = max(
+            0, INPUT_TOKEN_CEILING - system_tokens - estimate_user_message_tokens(context)
+        )
         kept: list[LlmMessage] = []
         total = 0
         for turn in reversed(history):
@@ -250,20 +259,27 @@ class CoachEngine:
             )
         return ordered
 
+    @staticmethod
+    def _assert_within_ceiling(messages: list[LlmMessage]) -> None:
+        total = sum(estimate_text_tokens(message.content) for message in messages)
+        if total > INPUT_TOKEN_CEILING:
+            raise ValueError(
+                f"request too large: about {total} tokens; limit {INPUT_TOKEN_CEILING}"
+            )
+
     async def _run_llm(
         self, context: CoachContext, *, history: list[LlmMessage] | None = None
     ) -> DecisionReport:
         today = _today(context, self._settings)
+        system_tokens = estimate_text_tokens(system_prompt(self._settings))
+        messages = build_messages(
+            context,
+            self._settings,
+            self._fit_history(context, history, system_tokens=system_tokens),
+        )
+        self._assert_within_ceiling(messages)
         content = await self._llm_client.complete_json(
-            build_messages(
-                context,
-                self._settings,
-                self._fit_history(
-                    context,
-                    history,
-                    system_tokens=estimate_text_tokens(system_prompt(self._settings)),
-                ),
-            ),
+            messages,
             validator=lambda payload: _validate_report(payload, today=today),
         )
         return DecisionReport.model_validate(json.loads(content))
@@ -352,7 +368,10 @@ class CoachEngine:
         system + context + message stays under the request ceiling.
         """
         system_tokens = estimate_text_tokens(system_prompt(self._settings))
-        return max(1, INPUT_TOKEN_CEILING - system_tokens - DEFAULT_MAX_TOKENS)
+        return max(
+            1,
+            INPUT_TOKEN_CEILING - system_tokens - DEFAULT_MAX_TOKENS - PROMPT_OVERHEAD_TOKENS,
+        )
 
     def check_focus(self, focus: str) -> None:
         """Reject a message too large to send, rather than truncating it silently."""

@@ -784,7 +784,7 @@ def test_chat_proposal_question_context_is_trimmed_to_the_budget(
     draft_id = store.save_draft(
         focus="tight",
         report=DecisionReport.model_validate(json.loads(report_json(mutations=[CREATE_MUTATION]))),
-        context=CoachContext(focus="tight", max_tokens=40),
+        context=CoachContext(focus="tight", max_tokens=150),
     )
     session = ChatSession()
     state = ChatState(
