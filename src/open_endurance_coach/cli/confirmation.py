@@ -53,7 +53,7 @@ async def respond(
     line: str,
     *,
     executor: Executor,
-    restate: Callable[[Draft], str],
+    restate: Callable[[Draft], Awaitable[str]],
     on_feedback: Callable[[str, Draft], Awaitable[bool | None]] | None = None,
     history: list[LlmMessage] | None = None,
 ) -> Done | PlanSnapshot:
@@ -72,4 +72,4 @@ async def respond(
             render_report(updated.report)
             if on_feedback is not None and await on_feedback(feedback, updated):
                 return Done()
-            return replace(snapshot, plan_text=restate(updated))
+            return replace(snapshot, plan_text=await restate(updated))

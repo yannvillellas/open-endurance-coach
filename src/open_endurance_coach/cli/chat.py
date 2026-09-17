@@ -39,7 +39,6 @@ from open_endurance_coach.engine.coach import (
 )
 from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import Mutation
 from open_endurance_coach.store.records import Draft
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
@@ -109,10 +108,12 @@ def _handle_llm_command(engine: CoachEngine, name: str, args: list[str]) -> None
         print_error(exc)
 
 
-def _open_proposal(draft_id: int, mutations: list[Mutation]) -> ChatState:
+async def _open_proposal(engine: CoachEngine, draft: Draft) -> ChatState:
+    event_dates = await engine.resolve_event_dates(draft.context, draft.report.mutations)
     snapshot = PlanSnapshot(
-        plan_text="Apply this to Intervals.icu:\n" + mutations_plan_text(mutations),
-        draft_id=draft_id,
+        plan_text="Apply this to Intervals.icu:\n"
+        + mutations_plan_text(draft.report.mutations, event_dates=event_dates),
+        draft_id=draft.id,
     )
     return _enter_confirmation(snapshot)
 
@@ -160,7 +161,7 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
         if needs_input and not assumed:
             _print_needs_input(needs_input)
             return None
-        return _open_proposal(draft.id, draft.report.mutations)
+        return await _open_proposal(engine, draft)
     if needs_input:
         _print_needs_input(needs_input)
     else:
@@ -288,7 +289,7 @@ async def _handle_proposal(
                         " is proposed.[/meta]"
                     )
                 else:
-                    return _open_proposal(answer.id, answer.report.mutations)
+                    return await _open_proposal(engine, answer)
         except RECOVERABLE_EXCEPTIONS as exc:
             print_error(exc)
         console.print(
@@ -323,8 +324,11 @@ async def _handle_proposal(
         )
         return None
 
-    def restate(draft: Draft) -> str:
-        return "Apply this to Intervals.icu:\n" + mutations_plan_text(draft.report.mutations)
+    async def restate(draft: Draft) -> str:
+        event_dates = await engine.resolve_event_dates(draft.context, draft.report.mutations)
+        return "Apply this to Intervals.icu:\n" + mutations_plan_text(
+            draft.report.mutations, event_dates=event_dates
+        )
 
     try:
         step = await respond(

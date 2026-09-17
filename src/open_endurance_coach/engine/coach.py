@@ -1,12 +1,13 @@
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
@@ -19,9 +20,11 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
+    Mutation,
     UpdateRace,
     UpdateWorkout,
 )
+from open_endurance_coach.schemas.intervals import Event
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Decision,
@@ -40,6 +43,17 @@ def _today(context: CoachContext, settings: Settings) -> date:
     if context.today is not None:
         return context.today
     return datetime.now(ZoneInfo(settings.app_timezone)).date()
+
+
+def _context_event_dates(context: CoachContext) -> dict[str, date]:
+    dates: dict[str, date] = {}
+    for race in context.goal_races:
+        if race.event_id is not None:
+            dates[str(race.event_id)] = race.date
+    for event in context.upcoming_events:
+        if event.id is not None:
+            dates[str(event.id)] = event.start_date_local.date()
+    return dates
 
 
 MAX_PLANNING_DAYS = 400
@@ -246,6 +260,42 @@ class CoachEngine:
         return self._surface_unseen(
             await self._extract(focus, user_feedback=user_feedback, today=today)
         )
+
+    async def resolve_event_dates(
+        self, context: CoachContext, mutations: Sequence[Mutation]
+    ) -> dict[str, date]:
+        """Map the event ids referenced by mutations to their calendar dates.
+
+        Events fetched into the context resolve offline; ids outside the fetched
+        window are looked up individually. Lookup failures are best effort and
+        leave the mutation undated.
+        """
+        dates = _context_event_dates(context)
+        missing: list[str] = []
+        for mutation in mutations:
+            event_id = getattr(mutation, "event_id", None)
+            if event_id is None or getattr(mutation, "start_date_local", None) is not None:
+                continue
+            key = str(event_id)
+            if key not in dates and key not in missing:
+                missing.append(key)
+        for event_id in missing:
+            try:
+                payload = await self._read_client.get_event(event_id)
+                event = Event.model_validate(payload)
+            except (IntervalsApiError, ValueError) as exc:
+                # Expected: the API refused the id, or the payload did not validate
+                # (pydantic's ValidationError is a ValueError). Leave it undated.
+                logger.warning("could not resolve the date of event %s: %s", event_id, exc)
+                continue
+            except Exception:
+                # A genuine defect must not stay invisible: log the traceback and
+                # keep the proposal renderable rather than dropping it.
+                logger.exception("unexpected error resolving the date of event %s", event_id)
+                continue
+            if event.id is not None:
+                dates[str(event.id)] = event.start_date_local.date()
+        return dates
 
     async def analyze(
         self,

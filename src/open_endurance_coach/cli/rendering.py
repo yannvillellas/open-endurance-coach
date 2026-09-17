@@ -1,5 +1,5 @@
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -127,8 +127,16 @@ def wrap_plan_text(text: str, width: int, *, hanging: int | None = None) -> str:
     return "\n".join(lines)
 
 
-def _mutation_date(mutation: Mutation) -> date | None:
-    return getattr(mutation, "start_date_local", None)
+def _mutation_date(
+    mutation: Mutation, event_dates: Mapping[str, date] | None = None
+) -> date | None:
+    day = getattr(mutation, "start_date_local", None)
+    if day is not None:
+        return day
+    event_id = getattr(mutation, "event_id", None)
+    if event_id is not None and event_dates is not None:
+        return event_dates.get(str(event_id))
+    return None
 
 
 def _inline_description(description: str | None) -> str:
@@ -216,7 +224,9 @@ def _mutation_lines(mutation: Mutation) -> list[str]:
     return [f"    - {mutation.action} event {escape(str(mutation.event_id))}"]
 
 
-def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
+def mutations_plan_text(
+    mutations: Sequence[Mutation], *, event_dates: Mapping[str, date] | None = None
+) -> str:
     lines = ["Proposed changes:"]
     if not mutations:
         lines.append("  (no calendar changes)")
@@ -224,7 +234,7 @@ def mutations_plan_text(mutations: Sequence[Mutation]) -> str:
     grouped: dict[date, list[Mutation]] = {}
     undated: list[Mutation] = []
     for mutation in mutations:
-        day = _mutation_date(mutation)
+        day = _mutation_date(mutation, event_dates)
         if day is None:
             undated.append(mutation)
         else:

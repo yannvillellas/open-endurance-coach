@@ -18,7 +18,12 @@ from open_endurance_coach.engine.coach import (
 )
 from open_endurance_coach.prompts.prompts import system_prompt
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.decisions import CreateWorkout, DecisionReport, UpdateWorkout
+from open_endurance_coach.schemas.decisions import (
+    CreateWorkout,
+    DecisionReport,
+    DeleteWorkout,
+    UpdateWorkout,
+)
 from open_endurance_coach.schemas.intervals import Activity
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
@@ -36,6 +41,7 @@ from .fakes import (
     completion,
     make_activity,
     make_activity_list,
+    make_event,
     make_intervals_client,
     near_future,
     report_json,
@@ -101,6 +107,78 @@ async def test_analyze_surfaces_only_unseen_activities(settings: Settings, tmp_p
     listing = second_draft.focus.split("New activities since last review")[1]
     assert "Synthetic Workout" not in listing
     assert store.is_activity_seen("fx-z") is True
+
+
+async def test_resolve_event_dates_backfills_out_of_window_events(
+    settings: Settings, tmp_path: Path
+) -> None:
+    client = make_intervals_client(
+        events=[make_event(136743073, "2026-09-17", name="Trail Hill Sharpening")]
+    )
+    engine = make_engine(
+        settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider(), client=client
+    )
+    context = CoachContext(focus="focus")
+    dates = await engine.resolve_event_dates(
+        context, [DeleteWorkout(action="delete", event_id=136743073)]
+    )
+    assert dates == {"136743073": date(2026, 9, 17)}
+
+
+async def test_resolve_event_dates_keeps_explicit_mutation_dates(
+    settings: Settings, tmp_path: Path
+) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    dates = await engine.resolve_event_dates(
+        CoachContext(focus="focus"),
+        [UpdateWorkout(action="update", event_id=1, start_date_local=date(2026, 9, 21))],
+    )
+    assert dates == {}
+
+
+async def test_resolve_event_dates_ignores_unknown_events(
+    settings: Settings, tmp_path: Path
+) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    dates = await engine.resolve_event_dates(
+        CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
+    )
+    assert dates == {}
+
+
+async def test_resolve_event_dates_logs_expected_lookup_failure(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    with caplog.at_level("WARNING"):
+        dates = await engine.resolve_event_dates(
+            CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
+        )
+    assert dates == {}
+    assert "could not resolve the date of event 999" in caplog.text
+
+
+async def test_resolve_event_dates_logs_unexpected_lookup_failure(
+    settings: Settings,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_intervals_client()
+
+    async def boom(event_id: str) -> dict[str, Any]:
+        raise KeyError(event_id)
+
+    monkeypatch.setattr(client, "get_event", boom)
+    engine = make_engine(
+        settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider(), client=client
+    )
+    with caplog.at_level("WARNING"):
+        dates = await engine.resolve_event_dates(
+            CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
+        )
+    assert dates == {}
+    assert "unexpected error resolving the date of event 999" in caplog.text
 
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
