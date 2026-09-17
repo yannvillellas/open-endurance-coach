@@ -88,19 +88,21 @@ def _print_question(question: str) -> None:
 
 
 def render_report(report: DecisionReport) -> None:
+    findings = [finding for finding in report.findings if finding.strip()]
+    questions = [question for question in report.questions if question.strip()]
     console.print()
     console.print("[coach.label]Coach:[/coach.label]")
     for line in wrap_plan_text(f"  {report.summary}", console.width, hanging=2).splitlines():
         console.print(escape(line))
-    if report.findings:
+    if findings:
         console.print()
         console.print("[coach.label]Evidence:[/coach.label]")
-        for finding in report.findings:
+        for finding in findings:
             _print_finding(finding)
-    if report.questions:
+    if questions:
         console.print()
         console.print("[coach.label]Open questions:[/coach.label]")
-        for question in report.questions:
+        for question in questions:
             _print_question(question)
 
 
@@ -111,7 +113,8 @@ def wrap_plan_text(text: str, width: int, *, hanging: int | None = None) -> str:
             lines.append(line)
             continue
         indent = len(line) - len(line.lstrip(" "))
-        hanging_text = " " * (indent + 2 if hanging is None else hanging)
+        requested = hanging if hanging is not None else indent + 2
+        hanging_text = " " * max(requested, indent)
         words = line.split()
         current = " " * indent + words[0]
         for word in words[1:]:
