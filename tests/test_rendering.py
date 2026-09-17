@@ -11,6 +11,7 @@ from open_endurance_coach.cli.rendering import (
     print_error,
     render_apply,
     render_report,
+    wrap_plan_text,
 )
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import (
@@ -265,3 +266,28 @@ def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
     out = " ".join(capsys.readouterr().out.split())
     assert "Decision #7: 1 mutation(s) skipped (past-dated)" in out
     assert "only partially updated" in out
+
+
+def test_wrap_plan_text_keeps_hanging_indent() -> None:
+    line = "    - create Trail Hill Sharpening (TrailRun, moving_time=2580, load=55)"
+    wrapped = wrap_plan_text(line, 40).splitlines()
+    assert all(len(part) <= 40 for part in wrapped)
+    assert wrapped[0].startswith("    - create")
+    assert all(part.startswith("      ") for part in wrapped[1:])
+
+
+def test_prompt_plan_frames_the_proposal(capsys: pytest.CaptureFixture[str]) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.cli.confirmation import prompt_plan
+
+    prompt_plan(
+        PlanSnapshot(
+            plan_text="Apply this to Intervals.icu:\nProposed changes:\n  2026-09-17",
+            draft_id=1,
+        )
+    )
+    out = capsys.readouterr().out
+    assert "Proposal" in out
+    assert "Apply this to Intervals.icu" in out
+    assert "Confirm? Reply exactly yes to apply" in out
+    assert "(yes / no, or describe a change)" in out

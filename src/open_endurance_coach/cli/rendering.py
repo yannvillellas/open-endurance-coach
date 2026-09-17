@@ -52,10 +52,32 @@ async def thinking(message: str = "Thinking") -> AsyncIterator[None]:
 
 def render_report(report: DecisionReport) -> None:
     console.print(f"[coach.label]Coach:[/coach.label] {escape(report.summary)}")
+    if report.findings or report.questions:
+        console.print()
     for finding in report.findings:
         console.print(f"  [finding]- {escape(finding)}[/finding]")
     for question in report.questions:
         console.print(f"  [question]? {escape(question)}[/question]")
+
+
+def wrap_plan_text(text: str, width: int) -> str:
+    lines: list[str] = []
+    for line in text.splitlines():
+        if not line.strip() or len(line) <= width:
+            lines.append(line)
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        hanging = " " * (indent + 2)
+        words = line.split()
+        current = " " * indent + words[0]
+        for word in words[1:]:
+            if len(current) + 1 + len(word) <= width:
+                current += " " + word
+            else:
+                lines.append(current)
+                current = hanging + word
+        lines.append(current)
+    return "\n".join(lines)
 
 
 def _mutation_date(mutation: Mutation) -> date | None:

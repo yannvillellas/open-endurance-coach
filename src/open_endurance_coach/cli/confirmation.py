@@ -1,6 +1,8 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
+from rich.panel import Panel
+
 from open_endurance_coach.chat.gate import (
     Declined,
     Feedback,
@@ -13,6 +15,7 @@ from open_endurance_coach.cli.rendering import (
     console,
     render_report,
     thinking,
+    wrap_plan_text,
 )
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.engine.coach import CoachEngine
@@ -27,11 +30,20 @@ class Done:
 
 
 def prompt_plan(snapshot: PlanSnapshot) -> None:
+    console.print()
     console.print(
         "[plan.title]Confirm? Reply exactly yes to apply, no to discard.\n"
         "Or describe a change to revise the plan.[/plan.title]"
     )
-    console.print(snapshot.plan_text)
+    console.print(
+        Panel(
+            wrap_plan_text(snapshot.plan_text, max(20, console.width - 4)),
+            title="Proposal",
+            title_align="left",
+            border_style="plan.frame",
+            padding=(0, 1),
+        )
+    )
     console.print("[hint](yes / no, or describe a change)[/hint]")
 
 
