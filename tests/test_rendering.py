@@ -69,8 +69,10 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
     ]
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
-    assert "- create Aerobic Swim on 2026-08-23: 2000m easy" in text
-    assert "- create Bare Session on 2026-08-24" in text
+    assert "  2026-08-23" in text
+    assert "- create Aerobic Swim: 2000m easy" in text
+    assert "  2026-08-24" in text
+    assert "- create Bare Session" in text
 
 
 def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
@@ -109,8 +111,28 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
     ]
     text = mutations_plan_text(mutations)
     assert "Proposed changes:" in text
-    assert "- create Tempo Session on 2024-02-05 (Ride, moving_time=3600, load=84)" in text
+    assert "  2024-02-05" in text
+    assert "- create Tempo Session (Ride, moving_time=3600, load=84)" in text
+    assert "(no date)" in text
     assert "- update event 10001: moving_time=4200" in text
+
+
+def test_mutations_plan_text_nests_multiline_description() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Intervals",
+            start_date_local=date(2026, 9, 19),
+            description="- 10m warmup\n\n3x\n- 3m hard",
+        ),
+    ]
+    lines = mutations_plan_text(mutations).splitlines()
+    day = lines.index("  2026-09-19")
+    assert lines[day + 1] == "    - create Intervals"
+    assert lines[day + 2] == "      - 10m warmup"
+    assert lines[day + 3] == ""
+    assert lines[day + 4] == "      3x"
+    assert lines[day + 5] == "      - 3m hard"
 
 
 def test_mutations_plan_text_empty_mutations() -> None:
@@ -209,8 +231,9 @@ def test_mutations_plan_text_renders_race_create_with_type_and_category() -> Non
         ),
     ]
     text = mutations_plan_text(mutations)
+    assert "  2026-09-27" in text
     assert (
-        "- create RACE_A Autumn Trail Race on 2026-09-27"
+        "- create RACE_A Autumn Trail Race"
         " (TrailRun, moving_time=10800, distance=10900m, load=142): hilly loop" in text
     )
 
