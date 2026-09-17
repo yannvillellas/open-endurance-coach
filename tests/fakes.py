@@ -71,6 +71,13 @@ class FakeIntervalsClient:
             if allowed is None or event.get("category") in allowed
         ]
 
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        self.calls.append(("get_event", event_id))
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                return dict(event)
+        raise IntervalsApiError(404, f"event not found: {event_id}")
+
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         self.calls.append(("sport_settings",))
         return list(self.sport_settings)
@@ -309,6 +316,7 @@ def make_engine(
     tmp_path: Path,
     provider: FakeLlmProvider,
     calendar: FakeCalendarClient | None = None,
+    intervals: FakeIntervalsClient | None = None,
 ) -> tuple[CoachEngine, CoachStore]:
     llm = LlmClient(
         settings.model_copy(update={"llm_provider": "fake"}),
@@ -317,7 +325,7 @@ def make_engine(
     )
     store = CoachStore(tmp_path / "coach.db")
     writer = CalendarWriter(calendar) if calendar is not None else None
-    engine = CoachEngine(settings, store, make_intervals_client(), llm, writer=writer)
+    engine = CoachEngine(settings, store, intervals or make_intervals_client(), llm, writer=writer)
     return engine, store
 
 

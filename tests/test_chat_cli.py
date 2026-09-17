@@ -23,6 +23,7 @@ from .fakes import (
     CREATE_MUTATION,
     TODAY,
     FakeCalendarClient,
+    FakeIntervalsClient,
     FakeLlmProvider,
     FakeRunner,
     completion,
@@ -41,9 +42,13 @@ runner = CliRunner()
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path) -> Any:
     def build(
-        provider: FakeLlmProvider, calendar: FakeCalendarClient | None = None
+        provider: FakeLlmProvider,
+        calendar: FakeCalendarClient | None = None,
+        intervals: FakeIntervalsClient | None = None,
     ) -> tuple[CoachEngine, CoachStore]:
-        engine, store = make_engine(settings, tmp_path, provider, calendar=calendar)
+        engine, store = make_engine(
+            settings, tmp_path, provider, calendar=calendar, intervals=intervals
+        )
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
         monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
         return engine, store
@@ -303,6 +308,21 @@ def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
     assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
     assert decision_of(store, 1).applied_at is not None
+
+
+def test_chat_proposal_shows_resolved_event_date(patched: Any) -> None:
+    day = near_future(1)
+    intervals = make_intervals_client(
+        events=[make_event(136743073, day, name="Trail Hill Sharpening")]
+    )
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[{"action": "delete", "event_id": 136743073}]))]
+    )
+    patched(provider, intervals=intervals)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nno\n/exit\n")
+    assert result.exit_code == 0
+    assert f"  {day}" in result.output
+    assert "- delete event 136743073" in result.output
 
 
 def test_chat_proposal_no_writes_nothing(patched: Any) -> None:

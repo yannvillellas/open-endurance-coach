@@ -21,6 +21,7 @@ from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
     DeleteRace,
+    DeleteWorkout,
     Mutation,
     UpdateRace,
     UpdateWorkout,
@@ -121,6 +122,38 @@ def test_mutations_plan_text_lists_each_mutation() -> None:
     assert "- create Tempo Session (Ride, moving_time=3600, load=84)" in text
     assert "(no date)" in text
     assert "- update event 10001: moving_time=4200" in text
+
+
+def test_mutations_plan_text_resolves_event_dates_from_context() -> None:
+    mutations: list[Mutation] = [
+        DeleteWorkout(action="delete", event_id=136743073),
+        UpdateWorkout(action="update", event_id=136743074, moving_time=2400, icu_training_load=35),
+    ]
+    text = mutations_plan_text(
+        mutations,
+        event_dates={"136743073": date(2026, 9, 17), "136743074": date(2026, 9, 18)},
+    )
+    assert "  2026-09-17" in text
+    assert "- delete event 136743073" in text
+    assert "  2026-09-18" in text
+    assert "- update event 136743074: moving_time=2400, load=35" in text
+    assert "(no date)" not in text
+
+
+def test_mutations_plan_text_unresolved_event_keeps_no_date() -> None:
+    mutations: list[Mutation] = [DeleteWorkout(action="delete", event_id=999)]
+    text = mutations_plan_text(mutations, event_dates={"136743073": date(2026, 9, 17)})
+    assert "(no date)" in text
+    assert "- delete event 999" in text
+
+
+def test_mutations_plan_text_mutation_date_wins_over_context() -> None:
+    mutations: list[Mutation] = [
+        UpdateWorkout(action="update", event_id=136743074, start_date_local=date(2026, 9, 21))
+    ]
+    text = mutations_plan_text(mutations, event_dates={"136743074": date(2026, 9, 18)})
+    assert "  2026-09-21" in text
+    assert "  2026-09-18" not in text
 
 
 def test_mutations_plan_text_nests_multiline_description() -> None:
