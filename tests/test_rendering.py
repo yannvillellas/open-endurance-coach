@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
+from rich.console import Console
 
 from open_endurance_coach.cli.rendering import (
     apply_plan_text,
@@ -280,6 +281,12 @@ def test_wrap_plan_text_keeps_hanging_indent() -> None:
     assert all(part.startswith("      ") for part in wrapped[1:])
 
 
+def test_wrap_plan_text_honours_an_explicit_hanging_indent() -> None:
+    wrapped = wrap_plan_text("  " + "word " * 40, 40, hanging=2).splitlines()
+    assert len(wrapped) > 1
+    assert all(len(part) - len(part.lstrip(" ")) == 2 for part in wrapped)
+
+
 def test_prompt_plan_frames_the_proposal(capsys: pytest.CaptureFixture[str]) -> None:
     from open_endurance_coach.chat.gate import PlanSnapshot
     from open_endurance_coach.cli.confirmation import prompt_plan
@@ -308,10 +315,49 @@ def test_split_finding_topic_leaves_long_or_missing_prefixes_alone() -> None:
     assert split_finding_topic("no colon here") == ("", "no colon here")
 
 
-def test_render_report_keeps_the_finding_text_when_it_has_a_topic(
+def test_render_report_styles_a_finding_topic(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
+    import open_endurance_coach.cli.rendering as rendering
+
+    buffer = io.StringIO()
+    console = Console(
+        file=buffer,
+        force_terminal=True,
+        width=80,
+        theme=rendering.THEME,
+        color_system="standard",
+        highlight=False,
+    )
+    monkeypatch.setattr(rendering, "console", console)
+    rendering.render_report(
+        DecisionReport(summary="Ok.", findings=["Wellness: CTL 28.99, form +2.37."])
+    )
+    assert "\x1b[1;36mWellness\x1b[0m: CTL 28.99, form +2.37." in buffer.getvalue()
+
+
+def test_render_report_skips_blank_findings_and_questions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    report = DecisionReport(summary="Ok.", findings=["Wellness: CTL 28.99, form +2.37."])
-    render_report(report)
+    render_report(DecisionReport(summary="Ok.", findings=["  "], questions=[""]))
     out = capsys.readouterr().out
-    assert "  - Wellness: CTL 28.99, form +2.37." in out
+    assert "Evidence:" not in out
+    assert "Open questions:" not in out
+
+
+def test_prompt_plan_does_not_render_llm_markup(capsys: pytest.CaptureFixture[str]) -> None:
+    from open_endurance_coach.chat.gate import PlanSnapshot
+    from open_endurance_coach.cli.confirmation import prompt_plan
+
+    plan_text = "Apply this to Intervals.icu:\n" + mutations_plan_text(
+        [
+            CreateWorkout(
+                action="create",
+                name="Weird [bold]Session[/bold]",
+                start_date_local=date(2026, 9, 17),
+            )
+        ]
+    )
+    prompt_plan(PlanSnapshot(plan_text=plan_text, draft_id=1))
+    out = capsys.readouterr().out
+    assert "[bold]Session[/bold]" in out
