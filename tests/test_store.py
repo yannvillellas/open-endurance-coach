@@ -337,6 +337,43 @@ def test_store_migrates_old_schema_without_applied_at(tmp_path: Path) -> None:
     assert store.list_unapplied_decisions() == []
 
 
+def test_store_migrates_old_feedback_without_report_column(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "coach.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            focus TEXT NOT NULL,
+            user_feedback TEXT,
+            context_json TEXT NOT NULL,
+            report_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draft_id INTEGER NOT NULL REFERENCES drafts(id),
+            created_at TEXT NOT NULL,
+            content TEXT NOT NULL
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+    store = CoachStore(path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.add_feedback(draft_id, "old row")
+    old = store.recent_feedback(1)[0]
+    assert old.feedback.content == "old row"
+    assert old.report.summary == "Load stable."
+    store.add_feedback(draft_id, "new row", report=DecisionReport(summary="Answer."))
+    new = store.recent_feedback(1)[0]
+    assert new.report.summary == "Answer."
+
+
 def test_recent_feedback_empty_store(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     assert store.recent_feedback(10) == []
@@ -381,7 +418,7 @@ def test_recent_feedback_limit_caps_the_window(tmp_path: Path) -> None:
     assert [row.feedback.content for row in rows] == ["note 4", "note 3"]
 
 
-def test_recent_feedback_uses_the_drafts_current_report(tmp_path: Path) -> None:
+def test_recent_feedback_falls_back_to_the_drafts_current_report(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
     store.add_feedback(draft_id, "first answer")

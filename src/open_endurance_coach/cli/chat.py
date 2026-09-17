@@ -2,7 +2,6 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-from pydantic import ValidationError
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.dispatch import (
@@ -34,11 +33,11 @@ from open_endurance_coach.cli.rendering import (
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine.coach import (
     CoachEngine,
+    FeedbackOutcome,
     PlaceholderMutationError,
     StaleDecisionError,
 )
 from open_endurance_coach.extractors.deep import detect_deep_query
-from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.store.records import Draft
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
@@ -55,14 +54,6 @@ HELP_TEXT = (
     "/exit, /quit           leave the chat\n"
 )
 
-_QUESTION_RE = re.compile(r"\b(what|why|how|explain|detail\w*|which|when|who)\b", re.IGNORECASE)
-_QUESTION_START_RE = re.compile(
-    r"^\s*(?:what|why|how|which|when|who|explain|detail\w*)\b", re.IGNORECASE
-)
-_CHANGE_RE = re.compile(
-    r"\b(make|change|prefer|instead|rather|shorter|longer|less|more|add|remove|modify|adjust|update)\b",
-    re.IGNORECASE,
-)
 _REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
 _BARE_COMMAND_RE = re.compile(
     r"^\s*(help|exit|quit|forget(?:\s+\d+)?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
@@ -128,7 +119,7 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     if session.context is not None and _needs_fresh_context(focus, today):
         cached = None
     elif session.context is not None:
-        cached = session.context.model_copy(update={"focus": focus, "today": today})
+        cached = engine.refocus_context(session.context, focus, today=today)
     else:
         cached = None
     async with thinking():
@@ -258,65 +249,19 @@ async def _handle_proposal(
         prompt_plan(snapshot)
         return state
 
-    if _QUESTION_START_RE.search(line) or (
-        _QUESTION_RE.search(line) and not _CHANGE_RE.search(line)
-    ):
-        try:
-            draft = engine.review(draft_id)
-            context_base = session.context if session.context is not None else draft.context
-            try:
-                context = CoachContext.model_validate(
-                    {
-                        **context_base.model_dump(),
-                        "focus": line,
-                        "today": engine.today(),
-                        "current_proposal": draft.report,
-                    }
-                )
-            except ValidationError:
-                context = context_base.model_copy(update={"focus": line, "today": engine.today()})
-            async with thinking():
-                answer = await engine.analyze(line, context=context, history=session.history)
-            render_report(answer.report)
-            session.append(line, assistant_turn(answer.report).content)
-            if answer.report.needs_input and not _assumes_answers(line):
-                _print_needs_input(answer.report.needs_input)
-                return state
-            if answer.report.mutations:
-                if answer.report.intent != "plan":
-                    console.print(
-                        "[meta]The coach did not read that as a planning request; nothing"
-                        " is proposed.[/meta]"
-                    )
-                else:
-                    return await _open_proposal(engine, answer)
-        except RECOVERABLE_EXCEPTIONS as exc:
-            print_error(exc)
-        console.print(
-            '[hint]Note: to revise the plan, describe the change (e.g. "make it 45'
-            ' minutes").[/hint]'
-        )
-        prompt_plan(snapshot)
-        return state
-
     async def execute(current: CoachEngine) -> None:
         await _apply_proposal(current, session, draft_id)
 
-    async def feedback(line: str, updated: Draft) -> bool | None:
-        if updated.report.needs_input and not _assumes_answers(line):
-            _print_needs_input(updated.report.needs_input)
-            questions = "; ".join(updated.report.needs_input)
-            session.append(line, f"{assistant_turn(updated.report).content}\nNeeds: {questions}")
-            return True
-        session.append(line, assistant_turn(updated.report).content)
-        if not updated.report.mutations:
+    async def feedback(line: str, outcome: FeedbackOutcome) -> bool | None:
+        report = outcome.report
+        if report.needs_input and not _assumes_answers(line):
+            _print_needs_input(report.needs_input)
+            questions = "; ".join(report.needs_input)
+            session.append(line, f"{assistant_turn(report).content}\nNeeds: {questions}")
+            return None
+        session.append(line, assistant_turn(report).content)
+        if report.intent == "plan" and not report.mutations:
             console.print("[warn]No changes proposed anymore.[/warn]")
-            return True
-        if updated.report.intent != "plan":
-            console.print(
-                "[meta]The coach did not read that as a planning request; nothing is"
-                " proposed.[/meta]"
-            )
             return True
         console.print(
             '[hint]Nothing was written: reply exactly [bold]"yes"[/bold] to approve this'
@@ -338,6 +283,7 @@ async def _handle_proposal(
             executor=execute,
             on_feedback=feedback,
             restate=restate,
+            assume_answers=_assumes_answers(line),
             history=session.history,
         )
     except RECOVERABLE_EXCEPTIONS as exc:

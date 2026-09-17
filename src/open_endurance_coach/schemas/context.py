@@ -11,6 +11,8 @@ MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
 
 
 def _tokens_of(payload: Any) -> int:
+    if payload is None or payload == "" or payload == [] or payload == {}:
+        return 0
     return estimate_payload_tokens(payload)
 
 
@@ -127,9 +129,17 @@ class CoachContext(BaseModel):
     def estimated_tokens(self) -> int:
         return max(1, sum(self.section_tokens().values()))
 
+    def data_tokens(self) -> int:
+        """Tokens of athlete data, excluding the athlete's message.
+
+        The message is bounded separately against the request ceiling, so it never
+        competes with the data budget that ``build_within_budget`` trims.
+        """
+        return sum(tokens for key, tokens in self.section_tokens().items() if key != "focus")
+
     @model_validator(mode="after")
     def _within_budget(self) -> Self:
-        estimated = self.estimated_tokens()
-        if estimated > self.max_tokens:
-            raise ValueError(f"context exceeds token budget: {estimated} > {self.max_tokens}")
+        data = self.data_tokens()
+        if data > self.max_tokens:
+            raise ValueError(f"context data exceeds token budget: {data} > {self.max_tokens}")
         return self

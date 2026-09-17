@@ -55,7 +55,7 @@ def build_within_budget(
             "max_tokens": max_tokens,
         }
         probe = CoachContext.model_construct(**payload)
-        if probe.estimated_tokens() <= max_tokens:
+        if probe.data_tokens() <= max_tokens:
             return CoachContext.model_validate(payload)
         if activities and _activity_droppable(activities, today):
             droppable = [
@@ -89,4 +89,4 @@ def build_within_budget(
             )
             activities.pop(index)
         else:
-            raise RuntimeError(f"cannot fit focus in token budget: {max_tokens}")
+            raise RuntimeError(f"cannot fit the context data in token budget: {max_tokens}")

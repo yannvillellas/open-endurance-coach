@@ -18,7 +18,7 @@ from open_endurance_coach.cli.rendering import (
     wrap_plan_text,
 )
 from open_endurance_coach.clients.llm import LlmMessage
-from open_endurance_coach.engine.coach import CoachEngine
+from open_endurance_coach.engine.coach import CoachEngine, FeedbackOutcome
 from open_endurance_coach.store.records import Draft
 
 Executor = Callable[[CoachEngine], Awaitable[None]]
@@ -54,7 +54,8 @@ async def respond(
     *,
     executor: Executor,
     restate: Callable[[Draft], Awaitable[str]],
-    on_feedback: Callable[[str, Draft], Awaitable[bool | None]] | None = None,
+    on_feedback: Callable[[str, FeedbackOutcome], Awaitable[bool | None]] | None = None,
+    assume_answers: bool = False,
     history: list[LlmMessage] | None = None,
 ) -> Done | PlanSnapshot:
     match handle(line, snapshot):
@@ -68,8 +69,14 @@ async def respond(
             return snapshot
         case Feedback(feedback):
             async with thinking():
-                updated = await engine.submit_feedback(snapshot.draft_id, feedback, history=history)
-            render_report(updated.report)
-            if on_feedback is not None and await on_feedback(feedback, updated):
+                outcome = await engine.submit_feedback(
+                    snapshot.draft_id,
+                    feedback,
+                    focus=feedback,
+                    assume=assume_answers,
+                    history=history,
+                )
+            render_report(outcome.report)
+            if on_feedback is not None and await on_feedback(feedback, outcome):
                 return Done()
-            return replace(snapshot, plan_text=await restate(updated))
+            return replace(snapshot, plan_text=await restate(outcome.draft))

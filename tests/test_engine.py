@@ -16,8 +16,9 @@ from open_endurance_coach.engine.coach import (
     StaleDecisionError,
     _validate_report,
 )
+from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
 from open_endurance_coach.prompts.prompts import system_prompt
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
@@ -249,13 +250,137 @@ async def test_submit_feedback_updates_draft_and_injects_feedback(
     )
     engine = make_engine(settings, store, provider)
     draft = await engine.analyze("status check", today=TODAY)
-    updated = await engine.submit_feedback(draft.id, "Legs heavy, RPE 8")
-    assert updated.id == draft.id
-    assert updated.report.summary == "Revised after feedback."
-    assert updated.user_feedback == "Legs heavy, RPE 8"
-    assert updated.status is DraftStatus.PENDING
+    outcome = await engine.submit_feedback(draft.id, "Legs heavy, RPE 8")
+    assert outcome.draft.id == draft.id
+    assert outcome.report.summary == "Revised after feedback."
+    assert outcome.draft.report.summary == "Revised after feedback."
+    assert outcome.draft.user_feedback == "Legs heavy, RPE 8"
+    assert outcome.draft.status is DraftStatus.PENDING
     assert "Legs heavy, RPE 8" in provider.calls[1]["messages"][1].content
     assert [item.content for item in store.list_feedback(draft.id)] == ["Legs heavy, RPE 8"]
+
+
+async def test_submit_feedback_answer_does_not_replace_the_pending_plan(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider(
+        [completion(report_json()), completion(report_json("Answer.", intent="analysis"))]
+    )
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    outcome = await engine.submit_feedback(draft.id, "what about the hike?")
+    assert outcome.report.summary == "Answer."
+    assert outcome.draft.report.summary == "Load stable."
+    assert [row.content for row in store.list_feedback(draft.id)] == ["what about the hike?"]
+    stored = store.get_draft(draft.id)
+    assert stored is not None
+    assert stored.report.summary == "Load stable."
+
+
+async def test_recent_feedback_keeps_the_answer_report_for_transient_turns(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider(
+        [completion(report_json()), completion(report_json("Answer.", intent="analysis"))]
+    )
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+    await engine.submit_feedback(draft.id, "what about the hike?")
+    recent = store.recent_feedback(1)
+    assert recent[0].feedback.content == "what about the hike?"
+    assert recent[0].report.summary == "Answer."
+
+
+async def test_refocus_context_keeps_data_within_budget(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    base = CoachContext(
+        focus="hi",
+        max_tokens=400,
+        training_rollup=[
+            TrainingWeek(
+                week_start=date(2026, 8, 3) + timedelta(days=7 * index),
+                sessions=3,
+                time_s=1000,
+            )
+            for index in range(5)
+        ],
+    )
+    long_message = "x" * ((base.max_tokens + 100) * CHARS_PER_TOKEN)
+    context = engine.refocus_context(base, long_message, today=date(2026, 9, 17))
+    assert context.data_tokens() <= base.max_tokens
+    assert len(context.training_rollup) == len(base.training_rollup)
+    assert context.focus == long_message
+
+
+def test_check_focus_rejects_messages_over_the_limit(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    engine.check_focus("x" * 100)
+    over_limit = "x" * ((engine.focus_limit() + 10) * CHARS_PER_TOKEN)
+    with pytest.raises(ValueError, match="message too long"):
+        engine.check_focus(over_limit)
+
+
+def test_focus_limit_leaves_room_for_the_context(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    system_tokens = estimate_text_tokens(system_prompt(settings))
+    assert system_tokens + engine.focus_limit() + DEFAULT_MAX_TOKENS <= INPUT_TOKEN_CEILING
+
+
+async def test_analyze_rejects_a_message_over_the_focus_limit(
+    settings: Settings, tmp_path: Path
+) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    over_limit = "x" * ((engine.focus_limit() + 10) * CHARS_PER_TOKEN)
+    with pytest.raises(ValueError, match="message too long"):
+        await engine.analyze(over_limit, today=TODAY)
+
+
+async def test_submit_feedback_records_the_message_when_the_llm_fails(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check", today=TODAY)
+
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise LlmError("provider down")
+
+    monkeypatch.setattr(engine, "_run_llm", boom)
+    with pytest.raises(LlmError):
+        await engine.submit_feedback(draft.id, "legs heavy")
+    assert [row.content for row in store.list_feedback(draft.id)] == ["legs heavy"]
+
+
+async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    base = CoachContext(
+        focus="f",
+        training_rollup=[
+            TrainingWeek(
+                week_start=date(2026, 8, 3) + timedelta(days=7 * index),
+                sessions=3,
+                time_s=1000,
+            )
+            for index in range(6)
+        ],
+    )
+    draft_id = store.save_draft(
+        focus="f",
+        report=DecisionReport(summary="ok"),
+        context=base.model_copy(update={"max_tokens": base.data_tokens() + 100}),
+    )
+    provider = FakeLlmProvider([completion(report_json("Revised."))])
+    engine = make_engine(settings, store, provider)
+    long_message = "change the hike block please " * 500
+    outcome = await engine.submit_feedback(draft_id, long_message, focus=long_message)
+    assert outcome.draft.context.user_feedback is None
+    assert len(outcome.draft.context.training_rollup) == len(base.training_rollup)
+    assert long_message in provider.calls[0]["messages"][1].content
 
 
 async def test_submit_feedback_persists_feedback_context(
@@ -298,7 +423,7 @@ async def test_submit_feedback_trims_an_over_budget_context(
     assert len(provider.calls) == 1
     prompt = provider.calls[0]["messages"][1].content
     assert feedback in prompt
-    assert updated.context.estimated_tokens() <= updated.context.max_tokens
+    assert updated.draft.context.data_tokens() <= updated.draft.context.max_tokens
 
 
 async def test_submit_feedback_falls_back_without_current_proposal_on_budget_overflow(
@@ -313,17 +438,17 @@ async def test_submit_feedback_falls_back_without_current_proposal_on_budget_ove
     engine = make_engine(settings, store, provider)
     updated = await engine.submit_feedback(draft_id, "make it easier")
     assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
-    assert updated.context.current_proposal is None
-    assert updated.context.user_feedback == "make it easier"
+    assert updated.draft.context.current_proposal is None
+    assert updated.draft.context.user_feedback == "make it easier"
     assert updated.report.summary == "Revised."
 
 
-async def test_surface_unseen_falls_back_when_listing_overflows_budget(
+async def test_surface_unseen_falls_back_when_data_exceeds_budget(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     probe = CoachContext(focus="status check", recent_activities=[make_activity_model("fx-a", 20)])
-    context = probe.model_copy(update={"max_tokens": probe.estimated_tokens()})
+    context = probe.model_copy(update={"max_tokens": 1})
     engine = make_engine(settings, store, FakeLlmProvider())
     surfaced = engine._surface_unseen(context)
     assert surfaced.focus == "status check"
