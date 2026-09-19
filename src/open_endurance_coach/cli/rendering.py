@@ -268,6 +268,8 @@ def apply_plan_text(report: ApplyReport) -> str:
                 lines.append(f"  - {outcome.action} -> {outcome.target}: {escape(outcome.name)}")
             else:
                 lines.append(f"  - {outcome.action} -> {outcome.target}")
+            for note in outcome.drift:
+                lines.append(f"    note: {escape(note)}")
     return "\n".join(lines)
 
 

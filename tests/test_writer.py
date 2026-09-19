@@ -118,6 +118,7 @@ async def test_update_mutation_puts_only_changed_fields() -> None:
     outcomes = await writer.apply_decision(make_decision(mutation))
     assert client.updated == [("10001", {"moving_time": 4200})]
     assert outcomes[0].target == "updated"
+    assert outcomes[0].drift == []
 
 
 async def test_update_mutation_formats_new_date() -> None:
@@ -458,6 +459,65 @@ async def test_update_workout_payload_includes_distance() -> None:
         make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
     )
     assert client.updated[0][1]["distance"] == 12400
+
+
+class _RecomputingCalendar(FakeCalendarClient):
+    """Mimics Intervals recomputing duration and load from a workout step."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = await super().create_event(payload)
+        self._recompute(created["id"])
+        return created
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        self._recompute(event_id)
+        return updated
+
+    def _recompute(self, event_id: int | str) -> None:
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["moving_time"] = 4464
+                event["icu_training_load"] = 44
+
+
+class _DistanceRewritingCalendar(FakeCalendarClient):
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["distance"] = 5670
+        return updated
+
+
+async def test_create_reports_duration_and_load_drift() -> None:
+    client = _RecomputingCalendar()
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Hike Day 2",
+                start_date_local=date(2026, 9, 22),
+                type="Hike",
+                moving_time=19680,
+                icu_training_load=158,
+            )
+        )
+    )
+    assert outcomes[0].drift == [
+        "moving_time stored 1h14m, requested 5h28m",
+        "icu_training_load stored 44, requested 158",
+    ]
+
+
+async def test_update_reports_distance_drift() -> None:
+    client = _DistanceRewritingCalendar([make_event(10001, "2026-09-22")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
+    )
+    assert outcomes[0].drift == ["distance stored 5670, requested 12400m"]
 
 
 class _ServerErrorCalendar(FakeCalendarClient):
