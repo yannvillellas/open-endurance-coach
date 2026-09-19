@@ -7,6 +7,7 @@ class MutationOutcome:
     target: str
     event_id: int | str | None = None
     name: str | None = None
+    drift: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
