@@ -72,7 +72,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         "description": "3x10min sweet spot",
         "type": "Ride",
         "moving_time": 3600,
-        "distance": 2000,
+        "distance_target": 2000,
         "icu_training_load": 84.0,
         "id": 20000,
     }
@@ -453,13 +453,13 @@ async def test_update_race_payload_includes_distance() -> None:
     assert client.updated[0][1]["distance"] == 10900
 
 
-async def test_update_workout_payload_includes_distance() -> None:
+async def test_update_workout_payload_includes_distance_target() -> None:
     client = FakeCalendarClient([make_event(10001, "2024-02-05")])
     writer = CalendarWriter(client)
     await writer.apply_decision(
         make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
     )
-    assert client.updated[0][1]["distance"] == 12400
+    assert client.updated[0][1]["distance_target"] == 12400
 
 
 class _RecomputingCalendar(FakeCalendarClient):
@@ -487,7 +487,7 @@ class _DistanceRewritingCalendar(FakeCalendarClient):
         updated = await super().update_event(event_id, payload)
         for event in self.events:
             if str(event.get("id")) == str(event_id):
-                event["distance"] = 5670
+                event["distance_target"] = 5670
         return updated
 
 
@@ -630,7 +630,7 @@ def test_drift_tolerates_numeric_strings_and_formats_short_durations() -> None:
         distance=12400,
         icu_training_load=158,
     )
-    stored = {"moving_time": "3600.0", "distance": "12400.0", "icu_training_load": "158"}
+    stored = {"moving_time": "3600.0", "distance_target": "12400.0", "icu_training_load": "158"}
     assert _drift(stored, matching) == []
     short = UpdateWorkout(action="update", event_id=10001, moving_time=60)
     assert _drift({"moving_time": 44}, short) == ["moving_time stored 44s, requested 1m"]

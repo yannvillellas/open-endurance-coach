@@ -47,25 +47,38 @@ def _format_number(value: float) -> str:
     return str(int(value)) if value.is_integer() else f"{value:g}"
 
 
+def _distance_field(mutation: Mutation) -> str:
+    """A workout's planned distance is its distance target; a race carries distance directly."""
+    if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
+        return "distance_target"
+    return "distance"
+
+
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
     """Fields Intervals recomputed after the write, so a plan cannot silently diverge."""
     checks = (
-        ("moving_time", getattr(mutation, "moving_time", None), _format_seconds),
+        ("moving_time", "moving_time", getattr(mutation, "moving_time", None), _format_seconds),
         (
             "distance",
+            _distance_field(mutation),
             getattr(mutation, "distance", None),
             lambda value: f"{_format_number(value)}m",
         ),
-        ("icu_training_load", getattr(mutation, "icu_training_load", None), _format_number),
+        (
+            "icu_training_load",
+            "icu_training_load",
+            getattr(mutation, "icu_training_load", None),
+            _format_number,
+        ),
     )
     notes: list[str] = []
-    for field, requested, render in checks:
+    for label, field, requested, render in checks:
         if requested is None:
             continue
         actual = _number(stored.get(field))
         if actual is None or actual != _number(requested):
             shown = "unknown" if actual is None else render(actual)
-            notes.append(f"{field} stored {shown}, requested {render(float(requested))}")
+            notes.append(f"{label} stored {shown}, requested {render(float(requested))}")
     return notes
 
 
@@ -124,10 +137,12 @@ class CalendarWriter:
         payload: dict[str, Any],
         mutation: CreateWorkout | UpdateWorkout | CreateRace | UpdateRace,
     ) -> None:
-        for field in ("description", "type", "moving_time", "distance", "icu_training_load"):
+        for field in ("description", "type", "moving_time", "icu_training_load"):
             value = getattr(mutation, field)
             if value is not None:
                 payload[field] = value
+        if mutation.distance is not None:
+            payload[_distance_field(mutation)] = mutation.distance
 
     def _create_payload(self, mutation: CreateWorkout) -> dict[str, Any]:
         payload: dict[str, Any] = {
