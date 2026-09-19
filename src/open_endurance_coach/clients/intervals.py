@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -148,6 +148,14 @@ class IntervalsClient:
         params = {"intervals": str(intervals).lower()}
         response = await self._request("GET", f"/activity/{activity_id}", params=params)
         return response.json()
+
+    async def get_activity_streams(
+        self, activity_id: str, types: Sequence[str]
+    ) -> dict[str, list[Any]]:
+        response = await self._request(
+            "GET", f"/activity/{activity_id}/streams", params={"types": list(types)}
+        )
+        return {row.get("type"): row.get("data") or [] for row in response.json()}
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
         response = await self._request(
