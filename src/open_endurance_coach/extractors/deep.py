@@ -196,12 +196,14 @@ class DeepHistoricalExtractor:
                 <= query.reference + window
             }
         activities = sorted(activities, key=self._relevance(query), reverse=True)
+        referenced = [activity for activity in activities if activity.id in keep_ids]
+        detail_source = referenced[0] if referenced else (activities[0] if activities else None)
         activity_detail = None
         activity_splits: list[ActivitySplit] = []
-        if activities:
-            detail_raw = await self._client.get_activity(activities[0].id, intervals=True)
+        if detail_source is not None:
+            detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
             activity_detail = Activity.model_validate(detail_raw)
-            streams = await self._client.get_activity_streams(activities[0].id, STREAM_TYPES)
+            streams = await self._client.get_activity_streams(detail_source.id, STREAM_TYPES)
             activity_splits = per_km_splits(streams)
         wellness_raw = await self._client.list_wellness(
             (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest

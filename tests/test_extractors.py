@@ -136,6 +136,26 @@ async def test_deep_extraction_includes_activity_splits(settings: Settings) -> N
     assert context.activity_splits[0].average_heartrate == 150
 
 
+async def test_deep_extraction_prefers_the_referenced_activity(settings: Settings) -> None:
+    activities = [make_activity("fx-a", 20), make_activity("fx-b", 5)]
+    streams = {
+        "time": list(range(301)),
+        "distance": [index * 1000 / 300 for index in range(301)],
+    }
+    client = make_intervals_client(activities=activities, streams=streams)
+    focus = "analyse my race on 2024-01-05 and how my heart rate held"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert ("detail", "fx-b") in client.calls
+    assert any(call[0] == "streams" and call[1] == "fx-b" for call in client.calls)
+    assert [split.label for split in context.activity_splits] == ["km 1"]
+
+
 async def test_standard_extraction_has_no_activity_splits(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
     context = await extractor.extract("status check", today=TODAY)
