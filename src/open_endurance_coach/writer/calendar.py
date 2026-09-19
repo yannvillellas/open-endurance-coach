@@ -56,12 +56,26 @@ def _same_number(actual: Any, requested: Any) -> bool:
     return left is not None and right is not None and left == right
 
 
+_NUMERIC_FIELDS = frozenset(
+    {
+        "moving_time",
+        "distance",
+        "distance_target",
+        "time_target",
+        "load_target",
+        "icu_training_load",
+    }
+)
+_DATE_FIELDS = frozenset({"start_date_local"})
+
+
 def _same_text(actual: Any, requested: Any) -> bool:
     return actual == requested
 
 
-def _same_date(actual: Any, requested: date) -> bool:
-    return isinstance(actual, str) and actual[:10] == requested.isoformat()
+def _same_date(actual: Any, requested: Any) -> bool:
+    wanted = requested.isoformat() if isinstance(requested, date) else str(requested)
+    return isinstance(actual, str) and actual[:10] == wanted[:10]
 
 
 def _render_text(value: Any) -> str:
@@ -123,6 +137,21 @@ def _drift_checks(
         ("distance", "distance", distance, _metres, _same_number),
         ("load", "icu_training_load", load, _format_number, _same_number),
     )
+
+
+def _matches(payload: dict[str, Any], stored: dict[str, Any]) -> bool:
+    """True when every field we would send already holds the same value."""
+    for field, wanted in payload.items():
+        actual = stored.get(field)
+        if field in _NUMERIC_FIELDS:
+            same = _same_number(actual, wanted)
+        elif field in _DATE_FIELDS:
+            same = _same_date(actual, wanted)
+        else:
+            same = actual == wanted
+        if not same:
+            return False
+    return True
 
 
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
@@ -269,6 +298,13 @@ class CalendarWriter:
                     f"refusing to update non-WORKOUT event {existing.get('id')}"
                     f" (category: {existing.get('category')})"
                 )
+            if _matches(payload, existing):
+                return MutationOutcome(
+                    action="create",
+                    target="unchanged",
+                    event_id=existing["id"],
+                    name=mutation.name,
+                )
             await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
                 action="create",
@@ -327,6 +363,8 @@ class CalendarWriter:
         if mutation.start_date_local is not None:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         self._add_detail_fields(payload, mutation)
+        if _matches(payload, event):
+            return MutationOutcome(action="update", target="unchanged", event_id=mutation.event_id)
         await self._client.update_event(str(mutation.event_id), payload)
         return MutationOutcome(
             action="update",
@@ -364,6 +402,13 @@ class CalendarWriter:
                 raise WriterError(
                     f"refusing to update non-RACE event {existing.get('id')}"
                     f" (category: {existing.get('category')})"
+                )
+            if _matches(payload, existing):
+                return MutationOutcome(
+                    action="create_race",
+                    target="unchanged",
+                    event_id=existing["id"],
+                    name=mutation.name,
                 )
             await self._client.update_event(str(existing["id"]), payload)
             return MutationOutcome(
@@ -403,6 +448,10 @@ class CalendarWriter:
         if mutation.category is not None:
             payload["category"] = mutation.category
         self._add_detail_fields(payload, mutation)
+        if _matches(payload, event):
+            return MutationOutcome(
+                action="update_race", target="unchanged", event_id=mutation.event_id
+            )
         await self._client.update_event(str(mutation.event_id), payload)
         return MutationOutcome(
             action="update_race",

@@ -79,7 +79,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
     }
 
 
-async def test_create_updates_existing_workout_with_same_name_and_date() -> None:
+async def test_create_with_identical_existing_workout_writes_nothing() -> None:
     client = FakeCalendarClient([make_event(10001, "2024-02-05", name="Tempo Session")])
     writer = CalendarWriter(client)
     mutation = CreateWorkout(
@@ -87,17 +87,8 @@ async def test_create_updates_existing_workout_with_same_name_and_date() -> None
     )
     outcomes = await writer.apply_decision(make_decision(mutation))
     assert client.created == []
-    assert client.updated == [
-        (
-            "10001",
-            {
-                "category": "WORKOUT",
-                "name": "Tempo Session",
-                "start_date_local": "2024-02-05T00:00:00",
-            },
-        )
-    ]
-    assert outcomes[0].target == "updated"
+    assert client.updated == []
+    assert outcomes[0].target == "unchanged"
     assert outcomes[0].event_id == 10001
 
 
@@ -119,6 +110,41 @@ async def test_update_mutation_puts_only_changed_fields() -> None:
     outcomes = await writer.apply_decision(make_decision(mutation))
     assert client.updated == [("10001", {"moving_time": 4200, "time_target": 4200})]
     assert outcomes[0].target == "updated"
+
+
+async def test_update_with_identical_values_writes_nothing() -> None:
+    event = make_event(10001, "2024-02-05", name="Tempo Session")
+    event["moving_time"] = 4200
+    event["time_target"] = 4200
+    client = FakeCalendarClient([event])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+    )
+    assert client.updated == []
+    assert outcomes[0].target == "unchanged"
+
+
+async def test_update_race_with_identical_values_writes_nothing() -> None:
+    event = make_event(10001, "2099-01-01", name="Autumn Trail Race", category="RACE_B")
+    event["moving_time"] = 7200
+    event["distance"] = 10900
+    event["icu_training_load"] = 120
+    client = FakeCalendarClient([event])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            UpdateRace(
+                action="update_race",
+                event_id=10001,
+                moving_time=7200,
+                distance=10900,
+                icu_training_load=120,
+            )
+        )
+    )
+    assert client.updated == []
+    assert outcomes[0].target == "unchanged"
 
 
 async def test_update_mutation_formats_new_date() -> None:
@@ -303,7 +329,7 @@ async def test_delete_race_missing_event_is_skipped() -> None:
 
 async def test_mixed_workout_and_race_decision_applies_in_order() -> None:
     client = FakeCalendarClient(
-        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_A")]
+        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
     )
     writer = CalendarWriter(client)
     decision = make_decision(
