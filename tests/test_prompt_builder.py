@@ -259,6 +259,7 @@ def test_contract_forbids_distance_steps_without_a_pace_model() -> None:
     assert "Hike or Walk have no pace model" in system
     assert "no distance steps" in system
     assert "rewrite an existing distance step when revising" in system
+    assert "use a time step whose duration equals moving_time" in system
     assert "Distance steps (not Hike or Walk)" in system
 
 
