@@ -157,8 +157,9 @@ class CalendarWriter:
     ) -> None:
         """Write the plan where Intervals reads it: a workout's distance is derived from
         its steps, so the planned kilometres go to ``distance_target``; a race carries
-        ``distance`` directly. ``time_target`` and ``load_target`` mirror the plan
-        alongside the values Intervals may compute."""
+        ``distance`` directly. On a parsed workout Intervals computes
+        ``icu_training_load`` itself, sometimes asynchronously, so our estimate is sent
+        as ``load_target`` and never pinned to the computed field."""
         for field in ("description", "type"):
             value = getattr(mutation, field)
             if value is not None:
@@ -170,7 +171,6 @@ class CalendarWriter:
             if mutation.distance is not None:
                 payload["distance_target"] = mutation.distance
             if mutation.icu_training_load is not None:
-                payload["icu_training_load"] = mutation.icu_training_load
                 payload["load_target"] = mutation.icu_training_load
             return
         if mutation.moving_time is not None:

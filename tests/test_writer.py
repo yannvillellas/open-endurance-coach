@@ -74,7 +74,6 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         "moving_time": 3600,
         "time_target": 3600,
         "distance_target": 2000,
-        "icu_training_load": 84.0,
         "load_target": 84.0,
         "id": 20000,
     }
@@ -471,7 +470,6 @@ async def test_update_workout_payload_includes_targets() -> None:
         "moving_time": 6540,
         "time_target": 6540,
         "distance_target": 5670,
-        "icu_training_load": 42,
         "load_target": 42,
     }
 
