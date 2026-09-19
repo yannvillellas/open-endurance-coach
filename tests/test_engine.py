@@ -893,7 +893,7 @@ def test_validate_report_rejects_placeholder_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(ValueError, match="duration/load must be real values"):
+    with pytest.raises(ValueError, match="duration/load/distance must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -929,7 +929,9 @@ def test_validate_report_rejects_a_race_create_without_load() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1064,7 +1066,9 @@ def test_validate_report_rejects_negative_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1084,7 +1088,9 @@ def test_validate_report_rejects_a_zero_race_distance() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1173,7 +1179,9 @@ def test_validate_report_rejects_placeholder_workout_duration() -> None:
                 ]
             )
         )
-        with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+        with pytest.raises(
+            PlaceholderMutationError, match="duration/load/distance must be real values"
+        ):
             _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1181,7 +1189,29 @@ def test_validate_report_rejects_zero_workout_load_on_update() -> None:
     payload = json.loads(
         report_json(mutations=[{"action": "update", "event_id": 10001, "icu_training_load": 0}])
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_zero_workout_distance() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create",
+                    "name": "Hike",
+                    "start_date_local": "2024-03-01",
+                    "moving_time": 3600,
+                    "distance": 0,
+                }
+            ]
+        )
+    )
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 

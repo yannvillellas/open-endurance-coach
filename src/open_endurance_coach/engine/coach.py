@@ -117,12 +117,16 @@ def _is_placeholder(mutation: Any) -> bool:
     ):
         return True
     if isinstance(mutation, CreateWorkout):
-        return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
-            mutation.icu_training_load, required=False
+        return (
+            _bad_race_number(mutation.moving_time, required=True)
+            or _bad_race_number(mutation.distance, required=False)
+            or _bad_race_number(mutation.icu_training_load, required=False)
         )
     if isinstance(mutation, UpdateWorkout):
-        return _bad_race_number(mutation.moving_time, required=False) or _bad_race_number(
-            mutation.icu_training_load, required=False
+        return (
+            _bad_race_number(mutation.moving_time, required=False)
+            or _bad_race_number(mutation.distance, required=False)
+            or _bad_race_number(mutation.icu_training_load, required=False)
         )
     if isinstance(mutation, CreateRace):
         return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
@@ -159,7 +163,7 @@ def _reject_placeholders(report: DecisionReport) -> None:
     for mutation in report.mutations:
         if _is_placeholder(mutation):
             raise PlaceholderMutationError(
-                "duration/load must be real values; ask the athlete instead of"
+                "duration/load/distance must be real values; ask the athlete instead of"
                 " copying the example zeros"
             )
 
