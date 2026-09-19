@@ -132,8 +132,33 @@ async def test_deep_extraction_includes_activity_splits(settings: Settings) -> N
     context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
 
     assert [split.label for split in context.activity_splits] == ["km 1", "km 2"]
-    assert context.activity_splits[0].pace_s_per_km == 300
+    assert context.activity_splits[0].average_speed_kmh == 12.0
+    assert context.activity_splits[0].pace_s_per_km is None
     assert context.activity_splits[0].average_heartrate == 150
+    assert any(call[0] == "streams" and "watts" in call[2] for call in client.calls)
+
+
+async def test_deep_extraction_paces_a_run_without_power_streams(settings: Settings) -> None:
+    streams = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+    }
+    client = make_intervals_client(
+        activities=[make_activity("fx-r", 5, activity_type="Run")],
+        streams=streams,
+        detail={
+            "start_date_local": "2024-02-01T08:00:00",
+            "type": "Run",
+            "name": "Synthetic Run",
+        },
+    )
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+
+    assert context.activity_splits[0].pace_s_per_km == 300
+    assert context.activity_splits[0].average_speed_kmh is None
+    assert not any(call[0] == "streams" and "watts" in call[2] for call in client.calls)
 
 
 async def test_deep_extraction_prefers_the_referenced_activity(settings: Settings) -> None:

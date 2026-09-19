@@ -57,6 +57,8 @@ class ActivitySplit(BaseModel):
     distance_m: float
     time_s: int
     pace_s_per_km: int | None = None
+    average_speed_kmh: float | None = None
+    average_watts: float | None = None
     average_heartrate: int | None = None
     max_heartrate: int | None = None
     elevation_gain_m: float = 0.0

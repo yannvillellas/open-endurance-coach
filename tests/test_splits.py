@@ -56,6 +56,17 @@ def test_per_km_splits_tolerate_missing_series() -> None:
     assert all(split.elevation_gain_m == 0 for split in splits)
 
 
+def test_speed_based_splits_report_speed_and_power() -> None:
+    streams = steady_streams(600)
+    streams["watts"] = [200] * 601
+    splits = per_km_splits(streams, speed_based=True)
+
+    assert [split.label for split in splits] == ["km 1", "km 2"]
+    assert all(split.average_speed_kmh == 12.0 for split in splits)
+    assert all(split.average_watts == 200 for split in splits)
+    assert all(split.pace_s_per_km is None for split in splits)
+
+
 def test_per_km_splits_need_time_and_distance() -> None:
     assert per_km_splits({}) == []
     assert per_km_splits({"time": [0, 1, 2]}) == []

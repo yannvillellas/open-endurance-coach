@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.extractors.splits import STREAM_TYPES, per_km_splits
+from open_endurance_coach.extractors.splits import per_km_splits, stream_types
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
     DEFAULT_MAX_TOKENS,
@@ -203,8 +203,11 @@ class DeepHistoricalExtractor:
         if detail_source is not None:
             detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
             activity_detail = Activity.model_validate(detail_raw)
-            streams = await self._client.get_activity_streams(detail_source.id, STREAM_TYPES)
-            activity_splits = per_km_splits(streams)
+            speed_based = activity_detail.type in _RIDE_TYPES
+            streams = await self._client.get_activity_streams(
+                detail_source.id, stream_types(speed_based)
+            )
+            activity_splits = per_km_splits(streams, speed_based=speed_based)
         wellness_raw = await self._client.list_wellness(
             (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
         )

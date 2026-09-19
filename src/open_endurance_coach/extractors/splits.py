@@ -5,6 +5,14 @@ from typing import Any
 from open_endurance_coach.schemas.intervals import ActivitySplit
 
 STREAM_TYPES = ("time", "distance", "altitude", "heartrate")
+RIDE_STREAM_TYPES = (*STREAM_TYPES, "watts")
+
+
+def stream_types(speed_based: bool) -> tuple[str, ...]:
+    """Streams to request: rides add watts, since power is their intensity metric."""
+    return RIDE_STREAM_TYPES if speed_based else STREAM_TYPES
+
+
 _KM = 1000.0
 _MIN_TAIL_M = 100.0
 
@@ -25,6 +33,8 @@ def _segment(
     distances: Sequence[Any],
     altitudes: Sequence[Any],
     heart_rates: Sequence[Any],
+    watts: Sequence[Any],
+    speed_based: bool,
     start: int,
     end: int,
 ) -> ActivitySplit | None:
@@ -41,6 +51,7 @@ def _segment(
     if seconds <= 0:
         return None
 
+    power = [value for value in (_number(v) for v in watts[start : end + 1]) if value is not None]
     rates = [
         rate
         for rate in (_number(value) for value in heart_rates[start : end + 1])
@@ -59,7 +70,9 @@ def _segment(
         label=label,
         distance_m=round(distance, 1),
         time_s=seconds,
-        pace_s_per_km=round(seconds / (distance / _KM)),
+        pace_s_per_km=None if speed_based else round(seconds / (distance / _KM)),
+        average_speed_kmh=(round((distance / _KM) / (seconds / 3600), 1) if speed_based else None),
+        average_watts=round(sum(power) / len(power)) if power else None,
         average_heartrate=round(sum(rates) / len(rates)) if rates else None,
         max_heartrate=round(max(rates)) if rates else None,
         elevation_gain_m=round(gain, 1),
@@ -68,7 +81,9 @@ def _segment(
     )
 
 
-def per_km_splits(streams: Mapping[str, Sequence[Any]]) -> list[ActivitySplit]:
+def per_km_splits(
+    streams: Mapping[str, Sequence[Any]], *, speed_based: bool = False
+) -> list[ActivitySplit]:
     """Per-kilometre splits computed from streams, plus a trailing partial kilometre.
 
     Read-only: nothing is written to Intervals and no intervals need to exist on the
@@ -78,6 +93,7 @@ def per_km_splits(streams: Mapping[str, Sequence[Any]]) -> list[ActivitySplit]:
     distances = streams.get("distance") or []
     altitudes = streams.get("altitude") or []
     heart_rates = streams.get("heartrate") or []
+    watts = streams.get("watts") or []
     if not times or not distances:
         return []
 
@@ -96,6 +112,8 @@ def per_km_splits(streams: Mapping[str, Sequence[Any]]) -> list[ActivitySplit]:
             distances=distances,
             altitudes=altitudes,
             heart_rates=heart_rates,
+            watts=watts,
+            speed_based=speed_based,
             start=start,
             end=index,
         )
@@ -119,6 +137,8 @@ def per_km_splits(streams: Mapping[str, Sequence[Any]]) -> list[ActivitySplit]:
             distances=distances,
             altitudes=altitudes,
             heart_rates=heart_rates,
+            watts=watts,
+            speed_based=speed_based,
             start=start,
             end=last,
         )
