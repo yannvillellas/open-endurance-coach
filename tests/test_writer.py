@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,7 +14,7 @@ from open_endurance_coach.schemas.decisions import (
     UpdateWorkout,
 )
 from open_endurance_coach.store.records import Decision
-from open_endurance_coach.writer.calendar import CalendarWriter, WriterError
+from open_endurance_coach.writer.calendar import CalendarWriter, WriterError, _drift
 
 from .fakes import FakeCalendarClient, make_event
 
@@ -474,6 +474,249 @@ async def test_update_workout_payload_includes_targets() -> None:
         "icu_training_load": 42,
         "load_target": 42,
     }
+
+
+class _RecomputingCalendar(FakeCalendarClient):
+    """Mimics Intervals recomputing duration and load from a parsed workout step."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = await super().create_event(payload)
+        self._recompute(created["id"])
+        return created
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        self._recompute(event_id)
+        return updated
+
+    def _recompute(self, event_id: int | str) -> None:
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["moving_time"] = 4464
+                event["icu_training_load"] = 44
+                event["load_target"] = 44
+
+
+class _DistanceRewritingCalendar(FakeCalendarClient):
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["distance_target"] = 5670
+        return updated
+
+
+class _ReadBackFailingCalendar(FakeCalendarClient):
+    def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(events)
+        self.fail_read_back = False
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = await super().create_event(payload)
+        self.fail_read_back = True
+        return created
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await super().update_event(event_id, payload)
+        self.fail_read_back = True
+        return result
+
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        if self.fail_read_back:
+            raise IntervalsApiError(500, "calendar unavailable")
+        return await super().get_event(event_id)
+
+
+class _IdlessCalendar(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+
+async def test_create_reports_duration_and_load_drift() -> None:
+    client = _RecomputingCalendar()
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Hike Day 2",
+                start_date_local=date(2026, 9, 22),
+                type="Hike",
+                moving_time=19680,
+                icu_training_load=158,
+            )
+        )
+    )
+    assert outcomes[0].drift == [
+        "moving_time stored 1h14m24s, requested 5h28m",
+        "load stored 44, requested 158",
+    ]
+
+
+async def test_update_reports_distance_drift() -> None:
+    client = _DistanceRewritingCalendar([make_event(10001, "2026-09-22")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
+    )
+    assert outcomes[0].drift == ["distance stored 5670m, requested 12400m"]
+
+
+async def test_update_race_reports_drift() -> None:
+    client = _RecomputingCalendar(
+        [make_event(10001, "2099-01-01", name="Autumn Trail Race", category="RACE_B")]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            UpdateRace(
+                action="update_race",
+                event_id=10001,
+                moving_time=7200,
+                icu_training_load=120,
+            )
+        )
+    )
+    assert outcomes[0].drift == [
+        "moving_time stored 1h14m24s, requested 2h00m",
+        "load stored 44, requested 120",
+    ]
+
+
+async def test_create_mutation_without_drift() -> None:
+    client = FakeCalendarClient()
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Sweet Spot",
+                start_date_local=date(2024, 2, 6),
+                moving_time=3600,
+                distance=2000,
+                icu_training_load=84.0,
+            )
+        )
+    )
+    assert outcomes[0].drift == []
+
+
+async def test_update_survives_a_failed_read_back() -> None:
+    client = _ReadBackFailingCalendar([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+    )
+    assert outcomes[0].target == "updated"
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+
+
+async def test_create_survives_a_failed_read_back() -> None:
+    client = _ReadBackFailingCalendar()
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Session",
+                start_date_local=date(2024, 2, 5),
+                moving_time=3600,
+            )
+        )
+    )
+    assert outcomes[0].target == "created"
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+    assert client.created
+
+
+async def test_failed_read_back_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    client = _ReadBackFailingCalendar([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    with caplog.at_level("WARNING"):
+        await writer.apply_decision(
+            make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+        )
+    assert "could not read event 10001 back" in caplog.text
+
+
+async def test_create_without_an_id_reports_unverified() -> None:
+    writer = CalendarWriter(_IdlessCalendar())
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Session",
+                start_date_local=date(2024, 2, 5),
+                moving_time=3600,
+            )
+        )
+    )
+    assert outcomes[0].event_id is None
+    assert outcomes[0].drift == ["create returned no id; planned values were not verified"]
+
+
+class _NonMappingReadBackCalendar(FakeCalendarClient):
+    def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(events)
+        self.after_update = False
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await super().update_event(event_id, payload)
+        self.after_update = True
+        return result
+
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        if self.after_update:
+            return cast(dict[str, Any], [])
+        return await super().get_event(event_id)
+
+
+async def test_a_non_mapping_read_back_does_not_fail_the_write() -> None:
+    writer = CalendarWriter(_NonMappingReadBackCalendar([make_event(10001, "2024-02-05")]))
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+    )
+    assert outcomes[0].target == "updated"
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+
+
+class _ComputedDistanceCalendar(FakeCalendarClient):
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["distance"] = 5670
+        return updated
+
+
+async def test_update_reports_a_parsed_distance_step() -> None:
+    client = _ComputedDistanceCalendar([make_event(10001, "2026-09-22")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, distance=8690))
+    )
+    assert outcomes[0].drift == ["computed distance stored 5670m, target 8690m"]
+
+
+def test_drift_reads_the_target_fields_per_event_kind() -> None:
+    workout = UpdateWorkout(
+        action="update",
+        event_id=10001,
+        moving_time=3600,
+        distance=12400,
+        icu_training_load=158,
+    )
+    stored = {"moving_time": "3600.0", "distance_target": "12400.0", "load_target": "158"}
+    assert _drift(stored, workout) == []
+    race = UpdateRace(action="update_race", event_id=10001, distance=10900, moving_time=7200)
+    race_stored = {"moving_time": 7200, "distance": 10900}
+    assert _drift(race_stored, race) == []
+    short = UpdateWorkout(action="update", event_id=10001, moving_time=60)
+    assert _drift({"moving_time": 44}, short) == ["moving_time stored 44s, requested 1m"]
+    parsed_wrong = UpdateWorkout(action="update", event_id=10001, moving_time=6540)
+    assert _drift({"moving_time": 3649}, parsed_wrong) == [
+        "moving_time stored 1h00m49s, requested 1h49m"
+    ]
 
 
 class _ServerErrorCalendar(FakeCalendarClient):
