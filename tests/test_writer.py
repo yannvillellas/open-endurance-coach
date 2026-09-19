@@ -704,16 +704,58 @@ def test_drift_reads_the_target_fields_per_event_kind() -> None:
         distance=12400,
         icu_training_load=158,
     )
-    stored = {"moving_time": "3600.0", "distance_target": "12400.0", "load_target": "158"}
+    stored = {
+        "moving_time": "3600.0",
+        "time_target": "3600.0",
+        "distance_target": "12400.0",
+        "load_target": "158",
+    }
     assert _drift(stored, workout) == []
     race = UpdateRace(action="update_race", event_id=10001, distance=10900, moving_time=7200)
     race_stored = {"moving_time": 7200, "distance": 10900}
     assert _drift(race_stored, race) == []
     short = UpdateWorkout(action="update", event_id=10001, moving_time=60)
-    assert _drift({"moving_time": 44}, short) == ["moving_time stored 44s, requested 1m"]
+    assert _drift({"moving_time": 44, "time_target": 60}, short) == [
+        "moving_time stored 44s, requested 1m"
+    ]
     parsed_wrong = UpdateWorkout(action="update", event_id=10001, moving_time=6540)
-    assert _drift({"moving_time": 3649}, parsed_wrong) == [
+    assert _drift({"moving_time": 3649, "time_target": 6540}, parsed_wrong) == [
         "moving_time stored 1h00m49s, requested 1h49m"
+    ]
+
+
+class _RewritingCalendar(FakeCalendarClient):
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        updated = await super().update_event(event_id, payload)
+        for event in self.events:
+            if str(event.get("id")) == str(event_id):
+                event["name"] = "Renamed by Intervals"
+                event["start_date_local"] = "2024-02-06T00:00:00"
+                event["type"] = "Ride"
+                event["description"] = "normalised"
+        return updated
+
+
+async def test_update_reports_identity_and_description_drift() -> None:
+    client = _RewritingCalendar([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            UpdateWorkout(
+                action="update",
+                event_id=10001,
+                name="Hill Sharpening",
+                start_date_local=date(2024, 2, 5),
+                type="TrailRun",
+                description="- 45m Z1 HR",
+            )
+        )
+    )
+    assert outcomes[0].drift == [
+        'name stored "Renamed by Intervals", requested "Hill Sharpening"',
+        "date stored 2024-02-06, requested 2024-02-05",
+        'type stored "Ride", requested "TrailRun"',
+        'description stored "normalised", requested "- 45m Z1 HR"',
     ]
 
 

@@ -51,10 +51,32 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _same_number(actual: Any, requested: Any) -> bool:
+    left, right = _number(actual), _number(requested)
+    return left is not None and right is not None and left == right
+
+
+def _same_text(actual: Any, requested: Any) -> bool:
+    return actual == requested
+
+
+def _same_date(actual: Any, requested: date) -> bool:
+    return isinstance(actual, str) and actual[:10] == requested.isoformat()
+
+
+def _render_text(value: Any) -> str:
+    text = str(value)
+    return f'"{text[:40]}…"' if len(text) > 40 else f'"{text}"'
+
+
+def _render_date(value: Any) -> str:
+    return value.isoformat() if isinstance(value, date) else str(value)[:10]
+
+
 def _drift_checks(
     mutation: Mutation,
-) -> tuple[tuple[str, str, Any, Any], ...]:
-    """The fields we own per event kind, and where Intervals stores them.
+) -> tuple[tuple[str, str, Any, Any, Any], ...]:
+    """(label, stored field, requested, renderer, comparator) for every field we send.
 
     A workout keeps the plan in its targets (``time_target``, ``distance_target``,
     ``load_target``) because a parsed description makes Intervals compute ``moving_time``
@@ -63,29 +85,56 @@ def _drift_checks(
     moving_time = getattr(mutation, "moving_time", None)
     distance = getattr(mutation, "distance", None)
     load = getattr(mutation, "icu_training_load", None)
+    shared = (
+        ("name", "name", getattr(mutation, "name", None), _render_text, _same_text),
+        (
+            "date",
+            "start_date_local",
+            getattr(mutation, "start_date_local", None),
+            _render_date,
+            _same_date,
+        ),
+        ("type", "type", getattr(mutation, "type", None), _render_text, _same_text),
+        ("moving_time", "moving_time", moving_time, _format_seconds, _same_number),
+        (
+            "description",
+            "description",
+            getattr(mutation, "description", None),
+            _render_text,
+            _same_text,
+        ),
+    )
     if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
         return (
-            ("moving_time", "moving_time", moving_time, _format_seconds),
-            ("distance", "distance_target", distance, _metres),
-            ("load", "load_target", load, _format_number),
+            *shared,
+            ("time_target", "time_target", moving_time, _format_seconds, _same_number),
+            ("distance", "distance_target", distance, _metres, _same_number),
+            ("load", "load_target", load, _format_number, _same_number),
         )
     return (
-        ("moving_time", "moving_time", moving_time, _format_seconds),
-        ("distance", "distance", distance, _metres),
-        ("load", "icu_training_load", load, _format_number),
+        *shared,
+        (
+            "category",
+            "category",
+            getattr(mutation, "category", None),
+            _render_text,
+            _same_text,
+        ),
+        ("distance", "distance", distance, _metres, _same_number),
+        ("load", "icu_training_load", load, _format_number, _same_number),
     )
 
 
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
     """Fields that differ from the plan after the write, so it cannot diverge silently."""
     notes: list[str] = []
-    for label, field, requested, render in _drift_checks(mutation):
+    for label, field, requested, render, same in _drift_checks(mutation):
         if requested is None:
             continue
-        actual = _number(stored.get(field))
-        if actual is None or actual != _number(requested):
+        actual = stored.get(field)
+        if not same(actual, requested):
             shown = "unknown" if actual is None else render(actual)
-            notes.append(f"{label} stored {shown}, requested {render(float(requested))}")
+            notes.append(f"{label} stored {shown}, requested {render(requested)}")
     if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
         planned = _number(getattr(mutation, "distance", None))
         computed = _number(stored.get("distance"))
