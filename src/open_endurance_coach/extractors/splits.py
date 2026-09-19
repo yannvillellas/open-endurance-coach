@@ -16,7 +16,7 @@ def stream_types(speed_based: bool) -> tuple[str, ...]:
 
 _KM = 1000.0
 _MIN_TAIL_M = 100.0
-MAX_SPLITS = 20
+MAX_SPLITS = 40
 
 
 def _number(value: Any) -> float | None:

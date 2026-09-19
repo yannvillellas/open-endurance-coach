@@ -75,12 +75,18 @@ def test_long_activity_splits_are_capped_by_merging_kilometres() -> None:
     assert all(split.distance_m == 3000.0 for split in splits)
 
 
-def test_default_cap_merges_a_marathon_length_activity() -> None:
-    splits = per_km_splits(steady_streams(7500))
-    assert len(splits) == 13
+def test_default_cap_keeps_per_kilometre_up_to_forty() -> None:
+    splits = per_km_splits(steady_streams(9900))
+    assert len(splits) == 33
+    assert splits[0].label == "km 1"
+    assert splits[-1].label == "km 33"
+
+
+def test_default_cap_merges_beyond_forty_kilometres() -> None:
+    splits = per_km_splits(steady_streams(15000))
+    assert len(splits) == 25
     assert splits[0].label == "km 1-2"
-    assert splits[-1].label == "km 25-end"
-    assert splits[-1].distance_m == 1000.0
+    assert splits[-1].label == "km 49-50"
 
 
 def test_per_km_splits_need_time_and_distance() -> None:
