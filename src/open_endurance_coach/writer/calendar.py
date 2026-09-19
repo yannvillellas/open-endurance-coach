@@ -41,16 +41,20 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _format_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
     """Fields Intervals recomputed after the write, so a plan cannot silently diverge."""
     checks = (
         ("moving_time", getattr(mutation, "moving_time", None), _format_seconds),
-        ("distance", getattr(mutation, "distance", None), lambda value: f"{value:g}m"),
         (
-            "icu_training_load",
-            getattr(mutation, "icu_training_load", None),
-            lambda value: f"{value:g}",
+            "distance",
+            getattr(mutation, "distance", None),
+            lambda value: f"{_format_number(value)}m",
         ),
+        ("icu_training_load", getattr(mutation, "icu_training_load", None), _format_number),
     )
     notes: list[str] = []
     for field, requested, render in checks:
@@ -101,13 +105,17 @@ class CalendarWriter:
     async def _read_back(self, event_id: int | str) -> dict[str, Any] | None:
         try:
             return await self._client.get_event(str(event_id))
-        except IntervalsApiError:
-            logger.warning("could not read event %s back; drift not checked", event_id)
+        except (IntervalsApiError, ValueError):
+            logger.warning(
+                "could not read event %s back; drift not checked", event_id, exc_info=True
+            )
             return None
 
     async def _drift_after_write(self, event_id: int | str, mutation: Mutation) -> list[str]:
         stored = await self._read_back(event_id)
-        return [] if stored is None else _drift(stored, mutation)
+        if stored is None:
+            return ["read-back failed; planned values were not verified"]
+        return _drift(stored, mutation)
 
     @staticmethod
     def _add_detail_fields(

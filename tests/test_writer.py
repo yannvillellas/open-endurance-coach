@@ -568,6 +568,11 @@ class _ReadBackFailingCalendar(FakeCalendarClient):
         super().__init__(events)
         self.fail_read_back = False
 
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = await super().create_event(payload)
+        self.fail_read_back = True
+        return created
+
     async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         result = await super().update_event(event_id, payload)
         self.fail_read_back = True
@@ -586,7 +591,35 @@ async def test_update_survives_a_failed_read_back() -> None:
         make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
     )
     assert outcomes[0].target == "updated"
-    assert outcomes[0].drift == []
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+
+
+async def test_create_survives_a_failed_read_back() -> None:
+    client = _ReadBackFailingCalendar()
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Session",
+                start_date_local=date(2024, 2, 5),
+                moving_time=3600,
+            )
+        )
+    )
+    assert outcomes[0].target == "created"
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+    assert client.created
+
+
+async def test_failed_read_back_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    client = _ReadBackFailingCalendar([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    with caplog.at_level("WARNING"):
+        await writer.apply_decision(
+            make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+        )
+    assert "could not read event 10001 back" in caplog.text
 
 
 def test_drift_tolerates_numeric_strings_and_formats_short_durations() -> None:
