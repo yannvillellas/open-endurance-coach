@@ -507,7 +507,7 @@ async def test_create_reports_duration_and_load_drift() -> None:
         )
     )
     assert outcomes[0].drift == [
-        "moving_time stored 1h14m, requested 5h28m",
+        "moving_time stored 1h14m24s, requested 5h28m",
         "icu_training_load stored 44, requested 158",
     ]
 
@@ -537,7 +537,7 @@ async def test_update_race_reports_drift() -> None:
         )
     )
     assert outcomes[0].drift == [
-        "moving_time stored 1h14m, requested 2h00m",
+        "moving_time stored 1h14m24s, requested 2h00m",
         "icu_training_load stored 44, requested 120",
     ]
 
@@ -634,6 +634,10 @@ def test_drift_tolerates_numeric_strings_and_formats_short_durations() -> None:
     assert _drift(stored, matching) == []
     short = UpdateWorkout(action="update", event_id=10001, moving_time=60)
     assert _drift({"moving_time": 44}, short) == ["moving_time stored 44s, requested 1m"]
+    parsed_wrong = UpdateWorkout(action="update", event_id=10001, moving_time=6540)
+    assert _drift({"moving_time": 3649}, parsed_wrong) == [
+        "moving_time stored 1h00m49s, requested 1h49m"
+    ]
 
 
 class _ServerErrorCalendar(FakeCalendarClient):

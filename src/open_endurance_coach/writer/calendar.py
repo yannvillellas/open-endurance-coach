@@ -28,7 +28,9 @@ def _format_seconds(value: float) -> str:
     if total < 60:
         return f"{total}s"
     hours, remainder = divmod(total, 3600)
-    minutes = remainder // 60
+    minutes, seconds = divmod(remainder, 60)
+    if seconds:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s" if hours else f"{minutes}m{seconds:02d}s"
     return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m"
 
 
