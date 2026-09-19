@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 from typing import Any, assert_never
 
@@ -19,6 +20,78 @@ from .records import MutationOutcome
 
 WORKOUT_CATEGORY = "WORKOUT"
 _RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
+logger = logging.getLogger(__name__)
+
+
+def _format_seconds(value: float) -> str:
+    total = round(value)
+    if total < 60:
+        return f"{total}s"
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if seconds:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s" if hours else f"{minutes}m{seconds:02d}s"
+    return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m"
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _metres(value: float) -> str:
+    return f"{_format_number(value)}m"
+
+
+def _number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _drift_checks(
+    mutation: Mutation,
+) -> tuple[tuple[str, str, Any, Any], ...]:
+    """The fields we own per event kind, and where Intervals stores them.
+
+    A workout keeps the plan in its targets (``time_target``, ``distance_target``,
+    ``load_target``) because a parsed description makes Intervals compute ``moving_time``
+    and ``icu_training_load``; a race stores ``distance`` directly.
+    """
+    moving_time = getattr(mutation, "moving_time", None)
+    distance = getattr(mutation, "distance", None)
+    load = getattr(mutation, "icu_training_load", None)
+    if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
+        return (
+            ("moving_time", "moving_time", moving_time, _format_seconds),
+            ("distance", "distance_target", distance, _metres),
+            ("load", "load_target", load, _format_number),
+        )
+    return (
+        ("moving_time", "moving_time", moving_time, _format_seconds),
+        ("distance", "distance", distance, _metres),
+        ("load", "icu_training_load", load, _format_number),
+    )
+
+
+def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
+    """Fields that differ from the plan after the write, so it cannot diverge silently."""
+    notes: list[str] = []
+    for label, field, requested, render in _drift_checks(mutation):
+        if requested is None:
+            continue
+        actual = _number(stored.get(field))
+        if actual is None or actual != _number(requested):
+            shown = "unknown" if actual is None else render(actual)
+            notes.append(f"{label} stored {shown}, requested {render(float(requested))}")
+    if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
+        planned = _number(getattr(mutation, "distance", None))
+        computed = _number(stored.get("distance"))
+        if planned is not None and computed and computed != planned:
+            notes.append(f"computed distance stored {_metres(computed)}, target {_metres(planned)}")
+    return notes
 
 
 class WriterError(RuntimeError):
@@ -56,15 +129,56 @@ class CalendarWriter:
     def _date_string(day: date) -> str:
         return f"{day.isoformat()}T00:00:00"
 
+    async def _read_back(self, event_id: int | str) -> dict[str, Any] | None:
+        try:
+            stored: Any = await self._client.get_event(str(event_id))
+        except (IntervalsApiError, ValueError):
+            logger.warning(
+                "could not read event %s back; drift not checked", event_id, exc_info=True
+            )
+            return None
+        if not isinstance(stored, dict):
+            logger.warning(
+                "event %s read back as %s; drift not checked", event_id, type(stored).__name__
+            )
+            return None
+        return stored
+
+    async def _drift_after_write(self, event_id: int | str, mutation: Mutation) -> list[str]:
+        stored = await self._read_back(event_id)
+        if stored is None:
+            return ["read-back failed; planned values were not verified"]
+        return _drift(stored, mutation)
+
     @staticmethod
     def _add_detail_fields(
         payload: dict[str, Any],
         mutation: CreateWorkout | UpdateWorkout | CreateRace | UpdateRace,
     ) -> None:
-        for field in ("description", "type", "moving_time", "icu_training_load"):
+        """Write the plan where Intervals reads it: a workout's distance is derived from
+        its steps, so the planned kilometres go to ``distance_target``; a race carries
+        ``distance`` directly. ``time_target`` and ``load_target`` mirror the plan
+        alongside the values Intervals may compute."""
+        for field in ("description", "type"):
             value = getattr(mutation, field)
             if value is not None:
                 payload[field] = value
+        if isinstance(mutation, (CreateWorkout, UpdateWorkout)):
+            if mutation.moving_time is not None:
+                payload["moving_time"] = mutation.moving_time
+                payload["time_target"] = mutation.moving_time
+            if mutation.distance is not None:
+                payload["distance_target"] = mutation.distance
+            if mutation.icu_training_load is not None:
+                payload["icu_training_load"] = mutation.icu_training_load
+                payload["load_target"] = mutation.icu_training_load
+            return
+        if mutation.moving_time is not None:
+            payload["moving_time"] = mutation.moving_time
+        if mutation.distance is not None:
+            payload["distance"] = mutation.distance
+        if mutation.icu_training_load is not None:
+            payload["icu_training_load"] = mutation.icu_training_load
 
     def _create_payload(self, mutation: CreateWorkout) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -82,8 +196,6 @@ class CalendarWriter:
             "start_date_local": self._date_string(mutation.start_date_local),
         }
         self._add_detail_fields(payload, mutation)
-        if mutation.distance is not None:
-            payload["distance"] = mutation.distance
         return payload
 
     async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
@@ -114,10 +226,24 @@ class CalendarWriter:
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
+                drift=await self._drift_after_write(existing["id"], mutation),
             )
         created = await self._client.create_event(payload)
+        event_id = created.get("id")
+        if event_id is None:
+            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            return MutationOutcome(
+                action="create",
+                target="created",
+                name=mutation.name,
+                drift=["create returned no id; planned values were not verified"],
+            )
         return MutationOutcome(
-            action="create", target="created", event_id=created.get("id"), name=mutation.name
+            action="create",
+            target="created",
+            event_id=event_id,
+            name=mutation.name,
+            drift=await self._drift_after_write(event_id, mutation),
         )
 
     async def _fetch_event(
@@ -153,7 +279,12 @@ class CalendarWriter:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         self._add_detail_fields(payload, mutation)
         await self._client.update_event(str(mutation.event_id), payload)
-        return MutationOutcome(action="update", target="updated", event_id=mutation.event_id)
+        return MutationOutcome(
+            action="update",
+            target="updated",
+            event_id=mutation.event_id,
+            drift=await self._drift_after_write(mutation.event_id, mutation),
+        )
 
     async def _apply_delete(self, mutation: DeleteWorkout) -> MutationOutcome:
         event = await self._fetch_workout(mutation.event_id)
@@ -191,13 +322,24 @@ class CalendarWriter:
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
+                drift=await self._drift_after_write(existing["id"], mutation),
             )
         created = await self._client.create_event(payload)
+        event_id = created.get("id")
+        if event_id is None:
+            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            return MutationOutcome(
+                action="create_race",
+                target="created",
+                name=mutation.name,
+                drift=["create returned no id; planned values were not verified"],
+            )
         return MutationOutcome(
             action="create_race",
             target="created",
-            event_id=created.get("id"),
+            event_id=event_id,
             name=mutation.name,
+            drift=await self._drift_after_write(event_id, mutation),
         )
 
     async def _apply_update_race(self, mutation: UpdateRace) -> MutationOutcome:
@@ -211,11 +353,14 @@ class CalendarWriter:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         if mutation.category is not None:
             payload["category"] = mutation.category
-        if mutation.distance is not None:
-            payload["distance"] = mutation.distance
         self._add_detail_fields(payload, mutation)
         await self._client.update_event(str(mutation.event_id), payload)
-        return MutationOutcome(action="update_race", target="updated", event_id=mutation.event_id)
+        return MutationOutcome(
+            action="update_race",
+            target="updated",
+            event_id=mutation.event_id,
+            drift=await self._drift_after_write(mutation.event_id, mutation),
+        )
 
     async def _apply_delete_race(self, mutation: DeleteRace) -> MutationOutcome:
         event = await self._fetch_race(mutation.event_id)

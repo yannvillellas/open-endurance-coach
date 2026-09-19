@@ -306,6 +306,43 @@ def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
     assert "only partially updated" in out
 
 
+def test_apply_plan_text_reports_drift() -> None:
+    report = ApplyReport(
+        decisions=[
+            AppliedDecision(
+                decision_id=10,
+                outcomes=[
+                    MutationOutcome(
+                        action="update",
+                        target="updated",
+                        event_id=136925322,
+                        drift=["moving_time stored 1h14m, requested 5h28m"],
+                    )
+                ],
+            )
+        ]
+    )
+    text = apply_plan_text(report)
+    assert "  - update -> updated event 136925322" in text
+    assert "    note: moving_time stored 1h14m, requested 5h28m" in text
+
+
+def test_mutations_plan_text_renders_workout_distance() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Long Hike",
+            start_date_local=date(2024, 2, 5),
+            type="Hike",
+            moving_time=6540,
+            distance=5670,
+            icu_training_load=42,
+        )
+    ]
+    text = mutations_plan_text(mutations)
+    assert "(Hike, moving_time=6540, distance=5670m, load=42)" in text
+
+
 def test_wrap_plan_text_keeps_hanging_indent() -> None:
     line = "    - create Trail Hill Sharpening (TrailRun, moving_time=2580, load=55)"
     wrapped = wrap_plan_text(line, 40).splitlines()

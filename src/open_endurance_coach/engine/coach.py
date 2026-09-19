@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -106,30 +107,31 @@ def _is_stale(mutation: Any, *, today: date) -> bool:
 def _bad_race_number(value: float | None, *, required: bool) -> bool:
     if value is None:
         return required
-    return value <= 0
+    return not math.isfinite(value) or value <= 0
 
 
 def _is_placeholder(mutation: Any) -> bool:
-    if (
-        isinstance(mutation, (CreateRace, UpdateRace))
-        and mutation.distance is not None
-        and mutation.distance <= 0
-    ):
-        return True
     if isinstance(mutation, CreateWorkout):
-        return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
-            mutation.icu_training_load, required=False
+        return (
+            _bad_race_number(mutation.moving_time, required=True)
+            or _bad_race_number(mutation.distance, required=False)
+            or _bad_race_number(mutation.icu_training_load, required=False)
         )
     if isinstance(mutation, UpdateWorkout):
-        return _bad_race_number(mutation.moving_time, required=False) or _bad_race_number(
-            mutation.icu_training_load, required=False
+        return (
+            _bad_race_number(mutation.moving_time, required=False)
+            or _bad_race_number(mutation.distance, required=False)
+            or _bad_race_number(mutation.icu_training_load, required=False)
         )
     if isinstance(mutation, CreateRace):
-        return _bad_race_number(mutation.moving_time, required=True) or _bad_race_number(
-            mutation.icu_training_load, required=True
+        return (
+            _bad_race_number(mutation.moving_time, required=True)
+            or _bad_race_number(mutation.distance, required=False)
+            or _bad_race_number(mutation.icu_training_load, required=True)
         )
     return isinstance(mutation, UpdateRace) and (
         _bad_race_number(mutation.moving_time, required=False)
+        or _bad_race_number(mutation.distance, required=False)
         or _bad_race_number(mutation.icu_training_load, required=False)
     )
 
@@ -159,7 +161,7 @@ def _reject_placeholders(report: DecisionReport) -> None:
     for mutation in report.mutations:
         if _is_placeholder(mutation):
             raise PlaceholderMutationError(
-                "duration/load must be real values; ask the athlete instead of"
+                "duration/load/distance must be real values; ask the athlete instead of"
                 " copying the example zeros"
             )
 
