@@ -15,6 +15,7 @@ from open_endurance_coach.engine.coach import (
     CoachEngine,
     PlaceholderMutationError,
     StaleDecisionError,
+    _bad_race_number,
     _validate_report,
 )
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
@@ -893,7 +894,7 @@ def test_validate_report_rejects_placeholder_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(ValueError, match="duration/load must be real values"):
+    with pytest.raises(ValueError, match="duration/load/distance must be real values"):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -929,7 +930,9 @@ def test_validate_report_rejects_a_race_create_without_load() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1064,7 +1067,9 @@ def test_validate_report_rejects_negative_race_values() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1084,7 +1089,9 @@ def test_validate_report_rejects_a_zero_race_distance() -> None:
             ]
         )
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1173,7 +1180,9 @@ def test_validate_report_rejects_placeholder_workout_duration() -> None:
                 ]
             )
         )
-        with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+        with pytest.raises(
+            PlaceholderMutationError, match="duration/load/distance must be real values"
+        ):
             _validate_report(payload, today=date(2024, 2, 1))
 
 
@@ -1181,8 +1190,62 @@ def test_validate_report_rejects_zero_workout_load_on_update() -> None:
     payload = json.loads(
         report_json(mutations=[{"action": "update", "event_id": 10001, "icu_training_load": 0}])
     )
-    with pytest.raises(PlaceholderMutationError, match="duration/load must be real values"):
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
         _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_zero_workout_distance() -> None:
+    payload = json.loads(
+        report_json(
+            mutations=[
+                {
+                    "action": "create",
+                    "name": "Hike",
+                    "start_date_local": "2024-03-01",
+                    "moving_time": 3600,
+                    "distance": 0,
+                }
+            ]
+        )
+    )
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_zero_workout_distance_on_update() -> None:
+    payload = json.loads(
+        report_json(mutations=[{"action": "update", "event_id": 10001, "distance": 0}])
+    )
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_non_finite_numbers_are_placeholders() -> None:
+    assert _bad_race_number(float("nan"), required=False) is True
+    assert _bad_race_number(float("inf"), required=False) is True
+
+
+def test_validate_report_rejects_non_finite_race_distance() -> None:
+    for payload in (
+        {
+            "action": "create_race",
+            "name": "Race",
+            "start_date_local": "2024-03-01",
+            "category": "RACE_B",
+        },
+        {"action": "update_race", "event_id": 10001},
+    ):
+        reported = json.loads(report_json(mutations=[{**payload, "distance": float("nan")}]))
+        with pytest.raises(
+            PlaceholderMutationError, match="duration/load/distance must be real values"
+        ):
+            _validate_report(reported, today=date(2024, 2, 1))
 
 
 def test_validate_report_rejects_dates_beyond_the_planning_horizon() -> None:
