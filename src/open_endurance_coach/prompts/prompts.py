@@ -22,6 +22,7 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
             ),
             "type": "<Run | Ride | Swim | ...>",
             "moving_time": 0,
+            "distance": 0,
             "icu_training_load": 0,
         },
         {"action": "update", "event_id": "EVENT_ID", "moving_time": 0},

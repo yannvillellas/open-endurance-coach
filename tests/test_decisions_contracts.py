@@ -66,6 +66,18 @@ def test_create_mutation_parses_full_payload() -> None:
     assert mutation.moving_time == 3600
 
 
+def test_create_mutation_accepts_distance() -> None:
+    mutation = CreateWorkout.model_validate({**CREATE_PAYLOAD, "distance": 12400})
+    assert mutation.distance == 12400
+
+
+def test_update_mutation_accepts_distance_as_its_only_change() -> None:
+    mutation = UpdateWorkout.model_validate(
+        {"action": "update", "event_id": 10001, "distance": 12400}
+    )
+    assert mutation.distance == 12400
+
+
 def test_update_accepts_int_or_str_event_id() -> None:
     assert UpdateWorkout.model_validate(UPDATE_PAYLOAD).event_id == 10001
     assert (

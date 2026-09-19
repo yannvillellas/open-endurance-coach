@@ -200,6 +200,8 @@ def _mutation_lines(mutation: Mutation) -> list[str]:
             details.append(escape(mutation.type))
         if mutation.moving_time is not None:
             details.append(f"moving_time={mutation.moving_time}")
+        if mutation.distance is not None:
+            details.append(f"distance={mutation.distance:g}m")
         if mutation.icu_training_load is not None:
             details.append(f"load={mutation.icu_training_load:g}")
         if details:
@@ -214,6 +216,8 @@ def _mutation_lines(mutation: Mutation) -> list[str]:
             fields.append(f"date={mutation.start_date_local.isoformat()}")
         if mutation.moving_time is not None:
             fields.append(f"moving_time={mutation.moving_time}")
+        if mutation.distance is not None:
+            fields.append(f"distance={mutation.distance:g}m")
         if mutation.description is not None and "\n" not in mutation.description:
             fields.append(f"description={escape(mutation.description)}")
         if mutation.icu_training_load is not None:

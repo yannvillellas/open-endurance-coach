@@ -306,6 +306,22 @@ def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
     assert "only partially updated" in out
 
 
+def test_mutations_plan_text_renders_workout_distance() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Long Hike",
+            start_date_local=date(2024, 2, 5),
+            type="Hike",
+            moving_time=19680,
+            distance=12400,
+            icu_training_load=158,
+        )
+    ]
+    text = mutations_plan_text(mutations)
+    assert "(Hike, moving_time=19680, distance=12400m, load=158)" in text
+
+
 def test_wrap_plan_text_keeps_hanging_indent() -> None:
     line = "    - create Trail Hill Sharpening (TrailRun, moving_time=2580, load=55)"
     wrapped = wrap_plan_text(line, 40).splitlines()

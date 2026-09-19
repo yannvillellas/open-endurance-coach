@@ -61,6 +61,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         description="3x10min sweet spot",
         type="Ride",
         moving_time=3600,
+        distance=2000,
         icu_training_load=84.0,
     )
     await writer.apply_decision(make_decision(mutation))
@@ -71,6 +72,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         "description": "3x10min sweet spot",
         "type": "Ride",
         "moving_time": 3600,
+        "distance": 2000,
         "icu_training_load": 84.0,
         "id": 20000,
     }
@@ -447,6 +449,15 @@ async def test_update_race_payload_includes_distance() -> None:
         make_decision(UpdateRace(action="update_race", event_id=10001, distance=10900))
     )
     assert client.updated[0][1]["distance"] == 10900
+
+
+async def test_update_workout_payload_includes_distance() -> None:
+    client = FakeCalendarClient([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
+    )
+    assert client.updated[0][1]["distance"] == 12400
 
 
 class _ServerErrorCalendar(FakeCalendarClient):

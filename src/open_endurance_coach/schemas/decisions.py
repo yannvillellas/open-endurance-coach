@@ -32,6 +32,7 @@ class CreateWorkout(BaseModel):
     description: str | None = None
     type: str | None = None
     moving_time: int | None = None
+    distance: float | None = None
     icu_training_load: float | None = None
 
 
@@ -45,6 +46,7 @@ class UpdateWorkout(BaseModel):
     description: str | None = None
     type: str | None = None
     moving_time: int | None = None
+    distance: float | None = None
     icu_training_load: float | None = None
 
     @model_validator(mode="after")
@@ -57,6 +59,7 @@ class UpdateWorkout(BaseModel):
                 self.description,
                 self.type,
                 self.moving_time,
+                self.distance,
                 self.icu_training_load,
             )
         ):
