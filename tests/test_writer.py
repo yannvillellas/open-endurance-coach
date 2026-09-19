@@ -64,7 +64,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         distance=2000,
         icu_training_load=84.0,
     )
-    await writer.apply_decision(make_decision(mutation))
+    outcomes = await writer.apply_decision(make_decision(mutation))
     assert client.created[0] == {
         "category": "WORKOUT",
         "name": "Sweet Spot",
@@ -76,6 +76,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         "icu_training_load": 84.0,
         "id": 20000,
     }
+    assert outcomes[0].drift == []
 
 
 async def test_create_updates_existing_workout_with_same_name_and_date() -> None:
@@ -518,6 +519,48 @@ async def test_update_reports_distance_drift() -> None:
         make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
     )
     assert outcomes[0].drift == ["distance stored 5670m, requested 12400m"]
+
+
+async def test_update_race_reports_drift() -> None:
+    client = _RecomputingCalendar(
+        [make_event(10001, "2099-01-01", name="Autumn Trail Race", category="RACE_B")]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            UpdateRace(
+                action="update_race",
+                event_id=10001,
+                moving_time=7200,
+                icu_training_load=120,
+            )
+        )
+    )
+    assert outcomes[0].drift == [
+        "moving_time stored 1h14m, requested 2h00m",
+        "icu_training_load stored 44, requested 120",
+    ]
+
+
+class _IdlessCalendar(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+
+async def test_create_without_an_id_skips_the_read_back() -> None:
+    writer = CalendarWriter(_IdlessCalendar())
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(
+                action="create",
+                name="Session",
+                start_date_local=date(2024, 2, 5),
+                moving_time=3600,
+            )
+        )
+    )
+    assert outcomes[0].event_id is None
+    assert outcomes[0].drift == []
 
 
 class _ReadBackFailingCalendar(FakeCalendarClient):
