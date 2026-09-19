@@ -214,7 +214,7 @@ def test_empty_sections_cost_only_the_payload_they_render() -> None:
 
 
 def test_focus_is_bounded_by_the_request_not_the_data_budget() -> None:
-    context = CoachContext.model_validate({"focus": "x" * 30000, "recent_activities": [ACTIVITY]})
+    context = CoachContext.model_validate({"focus": "x" * 60000, "recent_activities": [ACTIVITY]})
     assert context.data_tokens() <= context.max_tokens
     assert context.estimated_tokens() > context.max_tokens
 

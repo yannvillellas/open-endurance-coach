@@ -114,7 +114,7 @@ class CoachContext(BaseModel):
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
-    max_tokens: int = Field(default=8192, gt=0)
+    max_tokens: int = Field(default=12288, gt=0)
 
     def sections(self) -> dict[str, Any]:
         sections: dict[str, Any] = {
