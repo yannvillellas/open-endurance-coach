@@ -11,6 +11,7 @@ from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
     DEFAULT_MAX_TOKENS,
+    RECENT_EVENT_DAYS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
     fetch_goal_races,
@@ -196,11 +197,16 @@ class DeepHistoricalExtractor:
             (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
         )
         events_raw = await self._client.list_events(
-            current.isoformat(), (current + timedelta(days=UPCOMING_DAYS)).isoformat()
+            (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
+            (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
         )
         goal_races = await fetch_goal_races(self._client, current)
         rollup = await fetch_training_rollup(self._client, current)
         settings_raw = await self._client.get_sport_settings()
+        events = sorted(
+            (Event.model_validate(item) for item in events_raw),
+            key=lambda event: event.start_date_local,
+        )
         return build_within_budget(
             focus=focus,
             recent_activities=activities,
@@ -209,10 +215,10 @@ class DeepHistoricalExtractor:
                 key=lambda row: row.id,
                 reverse=True,
             ),
-            upcoming_events=sorted(
-                (Event.model_validate(item) for item in events_raw),
-                key=lambda event: event.start_date_local,
-            ),
+            upcoming_events=[event for event in events if event.start_date_local.date() >= current],
+            recent_events=[
+                event for event in reversed(events) if event.start_date_local.date() < current
+            ],
             goal_races=goal_races,
             training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],

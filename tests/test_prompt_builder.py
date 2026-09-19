@@ -243,6 +243,12 @@ def test_contract_requires_topic_labels_on_findings() -> None:
     assert "Every finding must start with a short topic label" in system
 
 
+def test_contract_tells_the_model_to_compare_recent_events() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "recent_events lists the calendar entries" in system
+    assert "compare it against recent_activities" in system
+
+
 def test_intake_example_demonstrates_blocking() -> None:
     report = DecisionReport.model_validate(INTAKE_EXAMPLE)
     assert report.intent == "plan"

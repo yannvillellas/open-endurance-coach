@@ -127,6 +127,19 @@ async def test_resolve_event_dates_backfills_out_of_window_events(
     assert dates == {"136743073": date(2026, 9, 17)}
 
 
+async def test_resolve_event_dates_uses_recent_events(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    context = CoachContext(
+        focus="review yesterday",
+        today=TODAY,
+        recent_events=[make_event(136743074, "2024-01-31", name="Hill Sharpening")],
+    )
+    dates = await engine.resolve_event_dates(
+        context, [UpdateWorkout(action="update", event_id=136743074, moving_time=3600)]
+    )
+    assert dates == {"136743074": date(2024, 1, 31)}
+
+
 async def test_resolve_event_dates_keeps_explicit_mutation_dates(
     settings: Settings, tmp_path: Path
 ) -> None:
@@ -397,6 +410,17 @@ async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
     assert outcome.draft.context.user_feedback is None
     assert len(outcome.draft.context.training_rollup) == len(base.training_rollup)
     assert long_message in provider.calls[0]["messages"][1].content
+
+
+async def test_refocus_context_keeps_recent_events(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    base = CoachContext(
+        focus="f",
+        today=TODAY,
+        recent_events=[make_event(1, "2024-01-31", name="Prescribed hill session")],
+    )
+    context = engine.refocus_context(base, "review yesterday", today=TODAY)
+    assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
 
 
 async def test_submit_feedback_persists_feedback_context(

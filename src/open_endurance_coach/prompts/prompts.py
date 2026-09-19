@@ -84,6 +84,10 @@ PROPOSAL_POLICY = (
     'mutations list unless intent is "plan": for chat and analysis put the answer in '
     "summary/findings and, if a change would help, offer it as a question - never "
     "encode a change the athlete did not ask for.\n"
+    "recent_events lists the calendar entries from the last 14 days (workouts, races "
+    "and notes) and may be trimmed under budget pressure: compare it against "
+    "recent_activities before judging whether the athlete followed the plan, and say "
+    "which prescribed session each executed activity does or does not match.\n"
     "Every finding must start with a short topic label of one to three words followed "
     "by ': ' so the list can be scanned (for example 'Wellness: ...', 'Load: ...'); "
     "keep the full detail after the label, never shorten the finding.\n"

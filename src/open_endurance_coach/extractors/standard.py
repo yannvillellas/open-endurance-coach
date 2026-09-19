@@ -19,6 +19,7 @@ from open_endurance_coach.schemas.intervals import Activity, Event, SportSetting
 
 ACTIVITY_LOOKBACK_DAYS = 14
 WELLNESS_LOOKBACK_DAYS = 7
+RECENT_EVENT_DAYS = 14
 UPCOMING_DAYS = 14
 RACE_HORIZON_DAYS = 120
 ROLLUP_LOOKBACK_DAYS = 90
@@ -163,7 +164,8 @@ class StandardExtractor:
             (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
         )
         events_raw = await self._client.list_events(
-            current.isoformat(), (current + timedelta(days=UPCOMING_DAYS)).isoformat()
+            (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
+            (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
         )
         goal_races = await fetch_goal_races(self._client, current)
         rollup = await fetch_training_rollup(self._client, current)
@@ -182,11 +184,16 @@ class StandardExtractor:
             (Event.model_validate(item) for item in events_raw),
             key=lambda event: event.start_date_local,
         )
+        recent_events = [
+            event for event in reversed(events) if event.start_date_local.date() < current
+        ]
+        upcoming_events = [event for event in events if event.start_date_local.date() >= current]
         return build_within_budget(
             focus=focus,
             recent_activities=activities,
             wellness=wellness,
-            upcoming_events=events,
+            upcoming_events=upcoming_events,
+            recent_events=recent_events,
             goal_races=goal_races,
             training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],

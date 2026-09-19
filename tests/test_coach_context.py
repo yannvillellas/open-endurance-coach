@@ -58,6 +58,7 @@ def test_sections_default_to_empty() -> None:
     assert context.recent_activities == []
     assert context.wellness == []
     assert context.upcoming_events == []
+    assert context.recent_events == []
     assert context.sport_settings == []
     assert context.activity_detail is None
     assert context.user_feedback is None
@@ -73,6 +74,61 @@ def test_estimated_tokens_match_the_indented_payload() -> None:
     assert indented > compact
     assert context.data_tokens() == indented
     assert context.estimated_tokens() == indented + estimate_text_tokens(context.focus)
+
+
+@pytest.mark.parametrize("section", ["recent_events", "upcoming_events"])
+def test_event_sections_drop_machine_fields_but_keep_the_rest(section: str) -> None:
+    event = {
+        "id": 136743074,
+        "name": "Hill Sharpening",
+        "start_date_local": "2024-01-31T00:00:00",
+        "category": "WORKOUT",
+        "type": "TrailRun",
+        "description": "- 10m Z1 warmup",
+        "end_date_local": "2024-01-31T00:00:00",
+        "moving_time": 1800,
+        "distance": 5000.0,
+        "icu_training_load": 36.0,
+        "workout_doc": {"steps": [{"duration": 600}]},
+        "plan_folder_id": 42,
+        "plan_workout_id": 43,
+    }
+    context = CoachContext.model_validate(
+        {"focus": "status check", section: [event], "max_tokens": 4096}
+    )
+    payload = context.sections()[section][0]
+    assert payload["id"] == 136743074
+    assert payload["description"] == "- 10m Z1 warmup"
+    assert payload["end_date_local"] == "2024-01-31T00:00:00"
+    assert payload["moving_time"] == 1800
+    assert payload["distance"] == 5000.0
+    assert payload["icu_training_load"] == 36.0
+    for dropped in ("workout_doc", "plan_folder_id", "plan_workout_id"):
+        assert dropped not in payload
+
+
+def test_prompt_includes_past_planned_events() -> None:
+    from open_endurance_coach.config import Settings
+    from open_endurance_coach.prompts.prompts import build_messages
+
+    context = CoachContext.model_validate(
+        {
+            "focus": "review yesterday",
+            "today": "2026-09-19",
+            "recent_events": [
+                {
+                    "id": 136743074,
+                    "name": "Hill Sharpening 3x3m Z4-Z5 HR",
+                    "start_date_local": "2026-09-18T00:00:00",
+                    "category": "WORKOUT",
+                    "type": "TrailRun",
+                }
+            ],
+        }
+    )
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    prompt = build_messages(context, settings)[1].content
+    assert "Hill Sharpening 3x3m Z4-Z5 HR" in prompt
 
 
 def test_sections_match_the_prompt_payload() -> None:
@@ -132,6 +188,7 @@ def test_section_tokens_reports_per_section() -> None:
         "recent_activities",
         "activity_detail",
         "wellness",
+        "recent_events",
         "upcoming_events",
         "goal_races",
         "training_rollup",

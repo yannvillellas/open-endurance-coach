@@ -72,7 +72,7 @@ def _context_event_dates(context: CoachContext) -> dict[str, date]:
     for race in context.goal_races:
         if race.event_id is not None:
             dates[str(race.event_id)] = race.date
-    for event in context.upcoming_events:
+    for event in (*context.recent_events, *context.upcoming_events):
         if event.id is not None:
             dates[str(event.id)] = event.start_date_local.date()
     return dates
@@ -425,6 +425,7 @@ class CoachEngine:
             base.sport_settings,
             goal_races=base.goal_races,
             training_rollup=base.training_rollup,
+            recent_events=base.recent_events,
             current_proposal=proposal,
             user_feedback=user_feedback,
             activity_detail=base.activity_detail,

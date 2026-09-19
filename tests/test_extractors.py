@@ -7,9 +7,16 @@ from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, Wellness
+from open_endurance_coach.schemas.intervals import Activity, Event, Wellness
 
-from .fakes import TODAY, make_activity, make_intervals_client, make_summary_week, make_wellness
+from .fakes import (
+    TODAY,
+    make_activity,
+    make_event,
+    make_intervals_client,
+    make_summary_week,
+    make_wellness,
+)
 
 
 async def test_standard_extraction_populates_all_sections(settings: Settings) -> None:
@@ -31,11 +38,86 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert client.calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-02-01", "2024-02-15", None),
+        ("events", "2024-01-18", "2024-02-15", None),
         ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
         ("athlete_summary", "2023-11-03", "2024-02-01"),
         ("sport_settings",),
     ]
+
+
+async def test_standard_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            make_event(0, "2024-01-29", name="Older past session"),
+            make_event(1, "2024-01-30", name="Prescribed hill session"),
+            make_event(2, "2024-02-01", name="Today session"),
+            make_event(3, "2024-02-03", name="Tempo Session"),
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("review yesterday", today=TODAY)
+    assert [event.name for event in context.recent_events] == [
+        "Prescribed hill session",
+        "Older past session",
+    ]
+    assert [event.name for event in context.upcoming_events] == [
+        "Today session",
+        "Tempo Session",
+    ]
+
+
+async def test_deep_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            make_event(1, "2024-01-30", name="Past session"),
+            make_event(2, "2024-02-10", name="Future session"),
+        ]
+    )
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert ("events", "2024-01-18", "2024-02-15", None) in client.calls
+    assert [event.name for event in context.recent_events] == ["Past session"]
+    assert [event.name for event in context.upcoming_events] == ["Future session"]
+
+
+async def test_budget_drops_past_events_before_upcoming(settings: Settings) -> None:
+    events = [
+        make_event(
+            100 + index, (TODAY - timedelta(days=index + 1)).isoformat(), name=f"Past {index}"
+        )
+        for index in range(14)
+    ] + [make_event(200, (TODAY + timedelta(days=1)).isoformat(), name="Tomorrow")]
+    extractor = StandardExtractor(settings, make_intervals_client(events=events))
+    context = await extractor.extract("status check", today=TODAY, max_tokens=500)
+    assert [event.name for event in context.upcoming_events] == ["Tomorrow"]
+    recent_names = [event.name for event in context.recent_events]
+    assert 0 < len(recent_names) < 14
+    assert recent_names == [f"Past {index}" for index in range(len(recent_names))]
+
+
+def test_budget_drops_the_oldest_recent_event_regardless_of_order() -> None:
+    oldest = Event.model_validate(make_event(1, "2024-01-25", name="Oldest"))
+    middle = Event.model_validate(make_event(3, "2024-01-28", name="Middle"))
+    newest = Event.model_validate(make_event(2, "2024-01-31", name="Newest"))
+
+    def build(recent: list[Event], max_tokens: int) -> CoachContext:
+        return build_within_budget(
+            "status check",
+            [],
+            [],
+            [],
+            [],
+            recent_events=recent,
+            user_feedback=None,
+            activity_detail=None,
+            max_tokens=max_tokens,
+            today=TODAY,
+        )
+
+    limit = build([middle, newest], max_tokens=10_000).data_tokens()
+    context = build([middle, oldest, newest], max_tokens=limit)
+    assert [event.name for event in context.recent_events] == ["Middle", "Newest"]
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:

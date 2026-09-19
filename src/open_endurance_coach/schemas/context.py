@@ -23,12 +23,32 @@ _SECTION_KEYS = (
     "recent_activities",
     "activity_detail",
     "wellness",
+    "recent_events",
     "upcoming_events",
     "goal_races",
     "training_rollup",
     "sport_settings",
     "user_feedback",
 )
+
+# Events are projected to the fields the model needs: ``workout_doc`` and the plan
+# ids are large and unused, while ``id`` must stay so mutations can reference it.
+_EVENT_FIELDS = (
+    "id",
+    "name",
+    "start_date_local",
+    "category",
+    "type",
+    "description",
+    "end_date_local",
+    "moving_time",
+    "distance",
+    "icu_training_load",
+)
+
+
+def _event_payload(event: Event) -> dict[str, Any]:
+    return event.model_dump(mode="json", include=set(_EVENT_FIELDS), exclude_none=True)
 
 
 class SportWeek(BaseModel):
@@ -80,6 +100,7 @@ class CoachContext(BaseModel):
     recent_activities: list[Activity] = Field(default_factory=list)
     activity_detail: Activity | None = None
     wellness: list[Wellness] = Field(default_factory=list)
+    recent_events: list[Event] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
     goal_races: list[GoalRace] = Field(default_factory=list)
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
@@ -99,9 +120,8 @@ class CoachContext(BaseModel):
                 else None
             ),
             "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
-            "upcoming_events": [
-                item.model_dump(mode="json", exclude_none=True) for item in self.upcoming_events
-            ],
+            "recent_events": [_event_payload(event) for event in self.recent_events],
+            "upcoming_events": [_event_payload(event) for event in self.upcoming_events],
             "goal_races": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.goal_races
             ],

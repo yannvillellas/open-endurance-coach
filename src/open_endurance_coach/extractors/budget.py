@@ -26,6 +26,7 @@ def build_within_budget(
     *,
     goal_races: list[GoalRace] | None = None,
     training_rollup: list[TrainingWeek] | None = None,
+    recent_events: list[Event] | None = None,
     activity_keep_ids: set[str] | None = None,
     current_proposal: DecisionReport | None = None,
     user_feedback: str | None,
@@ -36,6 +37,7 @@ def build_within_budget(
     activities = list(recent_activities)
     wellness_rows = list(wellness)
     events = list(upcoming_events)
+    past_events = list(recent_events or [])
     races = list(goal_races or [])
     rollup = list(training_rollup or [])
     keep_ids = activity_keep_ids or set()
@@ -46,6 +48,7 @@ def build_within_budget(
             "recent_activities": activities,
             "activity_detail": activity_detail,
             "wellness": wellness_rows,
+            "recent_events": past_events,
             "upcoming_events": events,
             "goal_races": races,
             "training_rollup": rollup,
@@ -69,8 +72,14 @@ def build_within_budget(
             rollup.pop(0)
         elif wellness_rows:
             wellness_rows.pop()
+        elif past_events:
+            oldest = min(
+                range(len(past_events)), key=lambda index: past_events[index].start_date_local
+            )
+            past_events.pop(oldest)
         elif events:
-            events.pop()
+            furthest = max(range(len(events)), key=lambda index: events[index].start_date_local)
+            events.pop(furthest)
         elif activity_detail is not None:
             activity_detail = None
         elif current_proposal is not None:
