@@ -1,3 +1,4 @@
+import math
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import Any
@@ -15,6 +16,7 @@ def stream_types(speed_based: bool) -> tuple[str, ...]:
 
 _KM = 1000.0
 _MIN_TAIL_M = 100.0
+MAX_SPLITS = 20
 
 
 def _number(value: Any) -> float | None:
@@ -81,13 +83,27 @@ def _segment(
     )
 
 
-def per_km_splits(
-    streams: Mapping[str, Sequence[Any]], *, speed_based: bool = False
-) -> list[ActivitySplit]:
-    """Per-kilometre splits computed from streams, plus a trailing partial kilometre.
+def _chunk_label(number: int, chunk_km: int, *, final: bool = False) -> str:
+    if chunk_km <= 1:
+        return f"km {number}" + (" (partial)" if final else "")
+    first = (number - 1) * chunk_km + 1
+    if final:
+        return f"km {first}-end"
+    return f"km {first}-{number * chunk_km}"
 
-    Read-only: nothing is written to Intervals and no intervals need to exist on the
-    activity. Returns [] when the streams lack a usable time or distance series.
+
+def per_km_splits(
+    streams: Mapping[str, Sequence[Any]],
+    *,
+    speed_based: bool = False,
+    max_splits: int = MAX_SPLITS,
+) -> list[ActivitySplit]:
+    """Splits computed from streams, capped so a long activity stays readable.
+
+    One row per kilometre, plus a trailing partial; when that would exceed
+    ``max_splits`` rows (a 150 km ride, say) consecutive kilometres are merged so the
+    table stays bounded. Read-only: nothing is written to Intervals and no intervals
+    need to exist on the activity. Returns [] without a usable time or distance series.
     """
     times = streams.get("time") or []
     distances = streams.get("distance") or []
@@ -97,17 +113,25 @@ def per_km_splits(
     if not times or not distances:
         return []
 
+    count = min(len(times), len(distances))
+    total = _number(distances[count - 1]) or 0.0
+    if total <= 0:
+        return []
+    chunk_km = 1
+    if max_splits > 0 and total > max_splits * _KM:
+        chunk_km = math.ceil(total / _KM / max_splits)
+    chunk_m = chunk_km * _KM
+
     splits: list[ActivitySplit] = []
     start = 0
-    boundary = _KM
+    boundary = chunk_m
     number = 1
-    count = min(len(times), len(distances))
     for index in range(count):
         distance = _number(distances[index])
         if distance is None or distance < boundary:
             continue
         split = _segment(
-            label=f"km {number}",
+            label=_chunk_label(number, chunk_km),
             times=times,
             distances=distances,
             altitudes=altitudes,
@@ -120,7 +144,7 @@ def per_km_splits(
         if split is not None:
             splits.append(split)
         start = index
-        boundary += _KM
+        boundary += chunk_m
         number += 1
 
     last = count - 1
@@ -132,7 +156,7 @@ def per_km_splits(
         and end_distance - start_distance >= _MIN_TAIL_M
     ):
         tail = _segment(
-            label=f"km {number} (partial)",
+            label=_chunk_label(number, chunk_km, final=True),
             times=times,
             distances=distances,
             altitudes=altitudes,

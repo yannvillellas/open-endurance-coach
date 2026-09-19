@@ -67,6 +67,22 @@ def test_speed_based_splits_report_speed_and_power() -> None:
     assert all(split.pace_s_per_km is None for split in splits)
 
 
+def test_long_activity_splits_are_capped_by_merging_kilometres() -> None:
+    splits = per_km_splits(steady_streams(9000), max_splits=10)
+    assert len(splits) == 10
+    assert splits[0].label == "km 1-3"
+    assert splits[-1].label == "km 28-30"
+    assert all(split.distance_m == 3000.0 for split in splits)
+
+
+def test_default_cap_merges_a_marathon_length_activity() -> None:
+    splits = per_km_splits(steady_streams(7500))
+    assert len(splits) == 13
+    assert splits[0].label == "km 1-2"
+    assert splits[-1].label == "km 25-end"
+    assert splits[-1].distance_m == 1000.0
+
+
 def test_per_km_splits_need_time_and_distance() -> None:
     assert per_km_splits({}) == []
     assert per_km_splits({"time": [0, 1, 2]}) == []
