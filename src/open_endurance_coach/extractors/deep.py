@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -5,9 +6,11 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
+from open_endurance_coach.extractors.splits import per_km_splits, stream_types
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
     DEFAULT_MAX_TOKENS,
@@ -18,7 +21,15 @@ from open_endurance_coach.extractors.standard import (
     fetch_training_rollup,
 )
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+from open_endurance_coach.schemas.intervals import (
+    Activity,
+    ActivitySplit,
+    Event,
+    SportSettings,
+    Wellness,
+)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
 REFERENCE_WINDOW_DAYS = 3
@@ -189,10 +200,35 @@ class DeepHistoricalExtractor:
                 <= query.reference + window
             }
         activities = sorted(activities, key=self._relevance(query), reverse=True)
+        detail_source: Activity | None = None
+        if query.reference is not None:
+            # The cited date wins: exact day first, then the nearest, then relevance.
+            reference = query.reference
+            candidates = [activity for activity in activities if activity.id in keep_ids]
+            candidates.sort(
+                key=lambda activity: abs((activity.start_date_local.date() - reference).days)
+            )
+            detail_source = candidates[0] if candidates else None
+        elif activities:
+            detail_source = activities[0]
         activity_detail = None
-        if activities:
-            detail_raw = await self._client.get_activity(activities[0].id, intervals=True)
+        activity_splits: list[ActivitySplit] = []
+        if detail_source is not None:
+            detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
             activity_detail = Activity.model_validate(detail_raw)
+            speed_based = activity_detail.type in _RIDE_TYPES
+            streams: dict[str, list[Any]] = {}
+            try:
+                streams = await self._client.get_activity_streams(
+                    detail_source.id, stream_types(speed_based)
+                )
+            except IntervalsApiError:
+                logger.warning(
+                    "could not read streams for %s; splits skipped",
+                    detail_source.id,
+                    exc_info=True,
+                )
+            activity_splits = per_km_splits(streams, speed_based=speed_based)
         wellness_raw = await self._client.list_wellness(
             (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
         )
@@ -225,6 +261,7 @@ class DeepHistoricalExtractor:
             user_feedback=user_feedback,
             activity_keep_ids=keep_ids,
             activity_detail=activity_detail,
+            activity_splits=activity_splits,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
             today=current,
         )

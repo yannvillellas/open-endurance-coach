@@ -48,6 +48,24 @@ class Activity(BaseModel):
     icu_intervals: list[Interval] | None = None
 
 
+class ActivitySplit(BaseModel):
+    """One computed split of an activity: a kilometre or a trailing part of one."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    label: str
+    distance_m: float
+    time_s: int
+    pace_s_per_km: int | None = None
+    average_speed_kmh: float | None = None
+    average_watts: float | None = None
+    average_heartrate: int | None = None
+    max_heartrate: int | None = None
+    elevation_gain_m: float = 0.0
+    elevation_loss_m: float = 0.0
+    grade_pct: float | None = None
+
+
 class SportInfo(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

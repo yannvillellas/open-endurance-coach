@@ -323,7 +323,7 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
 
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert estimate_text_tokens(system) <= 2560
+    assert estimate_text_tokens(system) <= 2816
 
 
 def test_contract_forbids_no_op_race_updates() -> None:

@@ -2,12 +2,13 @@ from datetime import date, timedelta
 
 import pytest
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, Event, Wellness
+from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Event, Wellness
 
 from .fakes import (
     TODAY,
@@ -118,6 +119,121 @@ def test_budget_drops_the_oldest_recent_event_regardless_of_order() -> None:
     limit = build([middle, newest], max_tokens=10_000).data_tokens()
     context = build([middle, oldest, newest], max_tokens=limit)
     assert [event.name for event in context.recent_events] == ["Middle", "Newest"]
+
+
+async def test_deep_extraction_includes_activity_splits(settings: Settings) -> None:
+    streams = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+        "heartrate": [150] * 601,
+    }
+    client = make_intervals_client(streams=streams)
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+
+    assert [split.label for split in context.activity_splits] == ["km 1", "km 2"]
+    assert context.activity_splits[0].average_speed_kmh == 12.0
+    assert context.activity_splits[0].pace_s_per_km is None
+    assert context.activity_splits[0].average_heartrate == 150
+    assert any(call[0] == "streams" and "watts" in call[2] for call in client.calls)
+
+
+async def test_deep_extraction_paces_a_run_without_power_streams(settings: Settings) -> None:
+    streams = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+    }
+    client = make_intervals_client(
+        activities=[make_activity("fx-r", 5, activity_type="Run")],
+        streams=streams,
+        detail={
+            "start_date_local": "2024-02-01T08:00:00",
+            "type": "Run",
+            "name": "Synthetic Run",
+        },
+    )
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+
+    assert context.activity_splits[0].pace_s_per_km == 300
+    assert context.activity_splits[0].average_speed_kmh is None
+    assert not any(call[0] == "streams" and "watts" in call[2] for call in client.calls)
+
+
+async def test_deep_extraction_prefers_the_referenced_activity(settings: Settings) -> None:
+    activities = [make_activity("fx-a", 20), make_activity("fx-b", 5)]
+    streams = {
+        "time": list(range(301)),
+        "distance": [index * 1000 / 300 for index in range(301)],
+    }
+    client = make_intervals_client(activities=activities, streams=streams)
+    focus = "analyse my race on 2024-01-05 and how my heart rate held"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert ("detail", "fx-b") in client.calls
+    assert any(call[0] == "streams" and call[1] == "fx-b" for call in client.calls)
+    assert [split.label for split in context.activity_splits] == ["km 1"]
+
+
+async def test_deep_extraction_prefers_the_cited_date_over_rank(settings: Settings) -> None:
+    exact = make_activity("fx-exact", 5)
+    exact["total_elevation_gain"] = 100.0
+    neighbour = make_activity("fx-neighbour", 7)
+    neighbour["total_elevation_gain"] = 2000.0
+    client = make_intervals_client(activities=[neighbour, exact])
+    focus = "analyse my run on 2024-01-05 and how my heart rate held on the hills"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    await DeepHistoricalExtractor(settings, client).extract(focus, query=query, today=TODAY)
+
+    assert ("detail", "fx-exact") in client.calls
+
+
+async def test_deep_extraction_with_no_activity_near_the_cited_date(settings: Settings) -> None:
+    client = make_intervals_client(activities=[make_activity("fx-far", 20)])
+    focus = "analyse my run on 2024-01-05 and how my heart rate held"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert context.activity_detail is None
+    assert context.activity_splits == []
+    assert not any(call[0] == "detail" for call in client.calls)
+
+
+async def test_deep_extraction_survives_missing_streams(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_intervals_client()
+
+    async def boom(activity_id: str, types: object) -> dict[str, list]:
+        raise IntervalsApiError(404, "no streams")
+
+    monkeypatch.setattr(client, "get_activity_streams", boom)
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=detect_deep_query(focus), today=TODAY
+    )
+
+    assert context.activity_detail is not None
+    assert context.activity_splits == []
+
+
+async def test_standard_extraction_has_no_activity_splits(settings: Settings) -> None:
+    extractor = StandardExtractor(settings, make_intervals_client())
+    context = await extractor.extract("status check", today=TODAY)
+    assert context.activity_splits == []
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:
@@ -602,6 +718,28 @@ def test_budget_keeps_pinned_activities_under_pressure() -> None:
         today=TODAY,
     )
     assert [activity.id for activity in context.recent_activities] == [pinned.id]
+
+
+def test_budget_trims_splits_from_the_end_under_pressure() -> None:
+    splits = [
+        ActivitySplit(label=f"km {index}", distance_m=1000.0, time_s=300) for index in range(1, 41)
+    ]
+    target = CoachContext(focus="f", activity_splits=splits[:10], today=TODAY)
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        activity_splits=splits,
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=target.estimated_tokens(),
+        today=TODAY,
+    )
+    assert [split.label for split in context.activity_splits] == [
+        f"km {index}" for index in range(1, 11)
+    ]
 
 
 def test_day_month_with_a_relative_year_resolves_to_last_year() -> None:

@@ -11,7 +11,7 @@ CHARS_PER_TOKEN = 3
 # trimmed against whatever remains. This is a focus/latency policy, not a provider limit,
 # so it stays well below the models' context windows while leaving room for several
 # exchanges even when an open proposal inflates the context.
-INPUT_TOKEN_CEILING = 24576
+INPUT_TOKEN_CEILING = 40960
 
 
 def estimate_text_tokens(text: str) -> int:
