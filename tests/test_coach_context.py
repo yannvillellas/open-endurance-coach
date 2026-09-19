@@ -61,6 +61,7 @@ def test_sections_default_to_empty() -> None:
     assert context.recent_events == []
     assert context.sport_settings == []
     assert context.activity_detail is None
+    assert context.activity_splits == []
     assert context.user_feedback is None
 
 
@@ -187,6 +188,7 @@ def test_section_tokens_reports_per_section() -> None:
         "current_proposal",
         "recent_activities",
         "activity_detail",
+        "activity_splits",
         "wellness",
         "recent_events",
         "upcoming_events",

@@ -4,7 +4,13 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from open_endurance_coach.schemas.decisions import DecisionReport, RaceCategory
-from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
+from open_endurance_coach.schemas.intervals import (
+    Activity,
+    ActivitySplit,
+    Event,
+    SportSettings,
+    Wellness,
+)
 from open_endurance_coach.tokens import estimate_payload_tokens, estimate_text_tokens
 
 MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
@@ -22,6 +28,7 @@ _SECTION_KEYS = (
     "current_proposal",
     "recent_activities",
     "activity_detail",
+    "activity_splits",
     "wellness",
     "recent_events",
     "upcoming_events",
@@ -99,6 +106,7 @@ class CoachContext(BaseModel):
     current_proposal: DecisionReport | None = None
     recent_activities: list[Activity] = Field(default_factory=list)
     activity_detail: Activity | None = None
+    activity_splits: list[ActivitySplit] = Field(default_factory=list)
     wellness: list[Wellness] = Field(default_factory=list)
     recent_events: list[Event] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
@@ -132,6 +140,10 @@ class CoachContext(BaseModel):
                 item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings
             ],
         }
+        if self.activity_splits:
+            sections["activity_splits"] = [
+                item.model_dump(mode="json", exclude_none=True) for item in self.activity_splits
+            ]
         if self.today:
             sections["today"] = f"Today's date (athlete local): {self.today.isoformat()}"
         if self.current_proposal:

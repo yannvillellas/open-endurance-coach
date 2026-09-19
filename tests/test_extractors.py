@@ -120,6 +120,28 @@ def test_budget_drops_the_oldest_recent_event_regardless_of_order() -> None:
     assert [event.name for event in context.recent_events] == ["Middle", "Newest"]
 
 
+async def test_deep_extraction_includes_activity_splits(settings: Settings) -> None:
+    streams = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+        "heartrate": [150] * 601,
+    }
+    client = make_intervals_client(streams=streams)
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+
+    assert [split.label for split in context.activity_splits] == ["km 1", "km 2"]
+    assert context.activity_splits[0].pace_s_per_km == 300
+    assert context.activity_splits[0].average_heartrate == 150
+
+
+async def test_standard_extraction_has_no_activity_splits(settings: Settings) -> None:
+    extractor = StandardExtractor(settings, make_intervals_client())
+    context = await extractor.extract("status check", today=TODAY)
+    assert context.activity_splits == []
+
+
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
     context = await extractor.extract("status check", today=TODAY)
