@@ -8,7 +8,7 @@ from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, Event, Wellness
+from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Event, Wellness
 
 from .fakes import (
     TODAY,
@@ -718,6 +718,28 @@ def test_budget_keeps_pinned_activities_under_pressure() -> None:
         today=TODAY,
     )
     assert [activity.id for activity in context.recent_activities] == [pinned.id]
+
+
+def test_budget_trims_splits_from_the_end_under_pressure() -> None:
+    splits = [
+        ActivitySplit(label=f"km {index}", distance_m=1000.0, time_s=300) for index in range(1, 41)
+    ]
+    target = CoachContext(focus="f", activity_splits=splits[:10], today=TODAY)
+    context = build_within_budget(
+        focus="f",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        activity_splits=splits,
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=target.estimated_tokens(),
+        today=TODAY,
+    )
+    assert [split.label for split in context.activity_splits] == [
+        f"km {index}" for index in range(1, 11)
+    ]
 
 
 def test_day_month_with_a_relative_year_resolves_to_last_year() -> None:
