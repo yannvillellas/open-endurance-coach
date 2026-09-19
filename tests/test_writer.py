@@ -61,6 +61,7 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         description="3x10min sweet spot",
         type="Ride",
         moving_time=3600,
+        distance=2000,
         icu_training_load=84.0,
     )
     await writer.apply_decision(make_decision(mutation))
@@ -71,7 +72,10 @@ async def test_create_mutation_passes_all_fields_through() -> None:
         "description": "3x10min sweet spot",
         "type": "Ride",
         "moving_time": 3600,
+        "time_target": 3600,
+        "distance_target": 2000,
         "icu_training_load": 84.0,
+        "load_target": 84.0,
         "id": 20000,
     }
 
@@ -114,7 +118,7 @@ async def test_update_mutation_puts_only_changed_fields() -> None:
     writer = CalendarWriter(client)
     mutation = UpdateWorkout(action="update", event_id=10001, moving_time=4200)
     outcomes = await writer.apply_decision(make_decision(mutation))
-    assert client.updated == [("10001", {"moving_time": 4200})]
+    assert client.updated == [("10001", {"moving_time": 4200, "time_target": 4200})]
     assert outcomes[0].target == "updated"
 
 
@@ -181,7 +185,7 @@ async def test_mixed_decision_applies_in_order() -> None:
     outcomes = await writer.apply_decision(decision)
     assert [outcome.action for outcome in outcomes] == ["create", "update", "delete"]
     assert len(client.created) == 1
-    assert client.updated == [("10001", {"moving_time": 4200})]
+    assert client.updated == [("10001", {"moving_time": 4200, "time_target": 4200})]
     assert client.deleted == ["10001"]
 
 
@@ -447,6 +451,29 @@ async def test_update_race_payload_includes_distance() -> None:
         make_decision(UpdateRace(action="update_race", event_id=10001, distance=10900))
     )
     assert client.updated[0][1]["distance"] == 10900
+
+
+async def test_update_workout_payload_includes_targets() -> None:
+    client = FakeCalendarClient([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    await writer.apply_decision(
+        make_decision(
+            UpdateWorkout(
+                action="update",
+                event_id=10001,
+                moving_time=6540,
+                distance=5670,
+                icu_training_load=42,
+            )
+        )
+    )
+    assert client.updated[0][1] == {
+        "moving_time": 6540,
+        "time_target": 6540,
+        "distance_target": 5670,
+        "icu_training_load": 42,
+        "load_target": 42,
+    }
 
 
 class _ServerErrorCalendar(FakeCalendarClient):
