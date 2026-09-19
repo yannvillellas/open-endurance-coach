@@ -76,6 +76,7 @@ async def test_deep_extraction_splits_past_and_upcoming_events(settings: Setting
     focus = "how did my heart rate improve on hills in the last 3 months"
     extractor = DeepHistoricalExtractor(settings, client)
     context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert ("events", "2024-01-18", "2024-02-15", None) in client.calls
     assert [event.name for event in context.recent_events] == ["Past session"]
     assert [event.name for event in context.upcoming_events] == ["Future session"]
 
@@ -91,7 +92,7 @@ async def test_budget_drops_past_events_before_upcoming(settings: Settings) -> N
     context = await extractor.extract("status check", today=TODAY, max_tokens=500)
     assert [event.name for event in context.upcoming_events] == ["Tomorrow"]
     recent_names = [event.name for event in context.recent_events]
-    assert len(recent_names) < 14
+    assert 0 < len(recent_names) < 14
     assert recent_names == [f"Past {index}" for index in range(len(recent_names))]
 
 

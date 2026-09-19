@@ -76,31 +76,33 @@ def test_estimated_tokens_match_the_indented_payload() -> None:
     assert context.estimated_tokens() == indented + estimate_text_tokens(context.focus)
 
 
-def test_event_sections_drop_machine_fields_but_keep_id() -> None:
+@pytest.mark.parametrize("section", ["recent_events", "upcoming_events"])
+def test_event_sections_drop_machine_fields_but_keep_the_rest(section: str) -> None:
+    event = {
+        "id": 136743074,
+        "name": "Hill Sharpening",
+        "start_date_local": "2024-01-31T00:00:00",
+        "category": "WORKOUT",
+        "type": "TrailRun",
+        "description": "- 10m Z1 warmup",
+        "end_date_local": "2024-01-31T00:00:00",
+        "moving_time": 1800,
+        "distance": 5000.0,
+        "icu_training_load": 36.0,
+        "workout_doc": {"steps": [{"duration": 600}]},
+        "plan_folder_id": 42,
+        "plan_workout_id": 43,
+    }
     context = CoachContext.model_validate(
-        {
-            "focus": "status check",
-            "recent_events": [
-                {
-                    "id": 136743074,
-                    "name": "Hill Sharpening",
-                    "start_date_local": "2024-01-31T00:00:00",
-                    "category": "WORKOUT",
-                    "type": "TrailRun",
-                    "description": "- 10m Z1 warmup",
-                    "workout_doc": {"steps": [{"duration": 600}]},
-                    "plan_folder_id": 42,
-                    "plan_workout_id": 43,
-                    "end_date_local": "2024-01-31T00:00:00",
-                }
-            ],
-            "max_tokens": 4096,
-        }
+        {"focus": "status check", section: [event], "max_tokens": 4096}
     )
-    payload = context.sections()["recent_events"][0]
+    payload = context.sections()[section][0]
     assert payload["id"] == 136743074
     assert payload["description"] == "- 10m Z1 warmup"
     assert payload["end_date_local"] == "2024-01-31T00:00:00"
+    assert payload["moving_time"] == 1800
+    assert payload["distance"] == 5000.0
+    assert payload["icu_training_load"] == 36.0
     for dropped in ("workout_doc", "plan_folder_id", "plan_workout_id"):
         assert dropped not in payload
 
