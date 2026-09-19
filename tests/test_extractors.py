@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
+from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
@@ -179,6 +180,54 @@ async def test_deep_extraction_prefers_the_referenced_activity(settings: Setting
     assert ("detail", "fx-b") in client.calls
     assert any(call[0] == "streams" and call[1] == "fx-b" for call in client.calls)
     assert [split.label for split in context.activity_splits] == ["km 1"]
+
+
+async def test_deep_extraction_prefers_the_cited_date_over_rank(settings: Settings) -> None:
+    exact = make_activity("fx-exact", 5)
+    exact["total_elevation_gain"] = 100.0
+    neighbour = make_activity("fx-neighbour", 7)
+    neighbour["total_elevation_gain"] = 2000.0
+    client = make_intervals_client(activities=[neighbour, exact])
+    focus = "analyse my run on 2024-01-05 and how my heart rate held on the hills"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    await DeepHistoricalExtractor(settings, client).extract(focus, query=query, today=TODAY)
+
+    assert ("detail", "fx-exact") in client.calls
+
+
+async def test_deep_extraction_with_no_activity_near_the_cited_date(settings: Settings) -> None:
+    client = make_intervals_client(activities=[make_activity("fx-far", 20)])
+    focus = "analyse my run on 2024-01-05 and how my heart rate held"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None and query.reference == date(2024, 1, 5)
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert context.activity_detail is None
+    assert context.activity_splits == []
+    assert not any(call[0] == "detail" for call in client.calls)
+
+
+async def test_deep_extraction_survives_missing_streams(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_intervals_client()
+
+    async def boom(activity_id: str, types: object) -> dict[str, list]:
+        raise IntervalsApiError(404, "no streams")
+
+    monkeypatch.setattr(client, "get_activity_streams", boom)
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=detect_deep_query(focus), today=TODAY
+    )
+
+    assert context.activity_detail is not None
+    assert context.activity_splits == []
 
 
 async def test_standard_extraction_has_no_activity_splits(settings: Settings) -> None:
