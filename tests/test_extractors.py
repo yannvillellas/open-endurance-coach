@@ -7,7 +7,7 @@ from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, Wellness
+from open_endurance_coach.schemas.intervals import Activity, Event, Wellness
 
 from .fakes import (
     TODAY,
@@ -94,6 +94,30 @@ async def test_budget_drops_past_events_before_upcoming(settings: Settings) -> N
     recent_names = [event.name for event in context.recent_events]
     assert 0 < len(recent_names) < 14
     assert recent_names == [f"Past {index}" for index in range(len(recent_names))]
+
+
+def test_budget_drops_the_oldest_recent_event_regardless_of_order() -> None:
+    oldest = Event.model_validate(make_event(1, "2024-01-25", name="Oldest"))
+    middle = Event.model_validate(make_event(3, "2024-01-28", name="Middle"))
+    newest = Event.model_validate(make_event(2, "2024-01-31", name="Newest"))
+
+    def build(recent: list[Event], max_tokens: int) -> CoachContext:
+        return build_within_budget(
+            "status check",
+            [],
+            [],
+            [],
+            [],
+            recent_events=recent,
+            user_feedback=None,
+            activity_detail=None,
+            max_tokens=max_tokens,
+            today=TODAY,
+        )
+
+    limit = build([middle, newest], max_tokens=10_000).data_tokens()
+    context = build([middle, oldest, newest], max_tokens=limit)
+    assert [event.name for event in context.recent_events] == ["Middle", "Newest"]
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:

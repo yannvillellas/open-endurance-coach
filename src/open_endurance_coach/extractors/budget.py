@@ -73,9 +73,13 @@ def build_within_budget(
         elif wellness_rows:
             wellness_rows.pop()
         elif past_events:
-            past_events.pop()
+            oldest = min(
+                range(len(past_events)), key=lambda index: past_events[index].start_date_local
+            )
+            past_events.pop(oldest)
         elif events:
-            events.pop()
+            furthest = max(range(len(events)), key=lambda index: events[index].start_date_local)
+            events.pop(furthest)
         elif activity_detail is not None:
             activity_detail = None
         elif current_proposal is not None:
