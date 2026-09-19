@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 from typing import Any, assert_never
 
@@ -19,41 +20,46 @@ from .records import MutationOutcome
 
 WORKOUT_CATEGORY = "WORKOUT"
 _RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
+logger = logging.getLogger(__name__)
 
 
 def _format_seconds(value: float) -> str:
     total = round(value)
+    if total < 60:
+        return f"{total}s"
     hours, remainder = divmod(total, 3600)
     minutes = remainder // 60
     return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m"
 
 
-def _human_time(value: float | int | None) -> str:
-    return "unknown" if value is None else _format_seconds(float(value))
+def _number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
     """Fields Intervals recomputed after the write, so a plan cannot silently diverge."""
+    checks = (
+        ("moving_time", getattr(mutation, "moving_time", None), _format_seconds),
+        ("distance", getattr(mutation, "distance", None), lambda value: f"{value:g}m"),
+        (
+            "icu_training_load",
+            getattr(mutation, "icu_training_load", None),
+            lambda value: f"{value:g}",
+        ),
+    )
     notes: list[str] = []
-    moving_time = getattr(mutation, "moving_time", None)
-    if moving_time is not None:
-        actual = stored.get("moving_time")
-        if actual is None or int(actual) != int(moving_time):
-            notes.append(
-                f"moving_time stored {_human_time(actual)}, requested {_human_time(moving_time)}"
-            )
-    distance = getattr(mutation, "distance", None)
-    if distance is not None:
-        actual = stored.get("distance")
-        if actual is None or float(actual) != float(distance):
-            shown = "unknown" if actual is None else f"{float(actual):g}"
-            notes.append(f"distance stored {shown}, requested {float(distance):g}m")
-    load = getattr(mutation, "icu_training_load", None)
-    if load is not None:
-        actual = stored.get("icu_training_load")
-        if actual is None or float(actual) != float(load):
-            shown = "unknown" if actual is None else f"{float(actual):g}"
-            notes.append(f"icu_training_load stored {shown}, requested {float(load):g}")
+    for field, requested, render in checks:
+        if requested is None:
+            continue
+        actual = _number(stored.get(field))
+        if actual is None or actual != _number(requested):
+            shown = "unknown" if actual is None else render(actual)
+            notes.append(f"{field} stored {shown}, requested {render(float(requested))}")
     return notes
 
 
@@ -91,6 +97,17 @@ class CalendarWriter:
     @staticmethod
     def _date_string(day: date) -> str:
         return f"{day.isoformat()}T00:00:00"
+
+    async def _read_back(self, event_id: int | str) -> dict[str, Any] | None:
+        try:
+            return await self._client.get_event(str(event_id))
+        except IntervalsApiError:
+            logger.warning("could not read event %s back; drift not checked", event_id)
+            return None
+
+    async def _drift_after_write(self, event_id: int | str, mutation: Mutation) -> list[str]:
+        stored = await self._read_back(event_id)
+        return [] if stored is None else _drift(stored, mutation)
 
     @staticmethod
     def _add_detail_fields(
@@ -143,25 +160,23 @@ class CalendarWriter:
                     f" (category: {existing.get('category')})"
                 )
             await self._client.update_event(str(existing["id"]), payload)
-            stored = await self._client.get_event(str(existing["id"]))
             return MutationOutcome(
                 action="create",
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
-                drift=_drift(stored, mutation),
+                drift=await self._drift_after_write(existing["id"], mutation),
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
             return MutationOutcome(action="create", target="created", name=mutation.name)
-        stored = await self._client.get_event(str(event_id))
         return MutationOutcome(
             action="create",
             target="created",
             event_id=event_id,
             name=mutation.name,
-            drift=_drift(stored, mutation),
+            drift=await self._drift_after_write(event_id, mutation),
         )
 
     async def _fetch_event(
@@ -197,12 +212,11 @@ class CalendarWriter:
             payload["start_date_local"] = self._date_string(mutation.start_date_local)
         self._add_detail_fields(payload, mutation)
         await self._client.update_event(str(mutation.event_id), payload)
-        stored = await self._client.get_event(str(mutation.event_id))
         return MutationOutcome(
             action="update",
             target="updated",
             event_id=mutation.event_id,
-            drift=_drift(stored, mutation),
+            drift=await self._drift_after_write(mutation.event_id, mutation),
         )
 
     async def _apply_delete(self, mutation: DeleteWorkout) -> MutationOutcome:
@@ -236,25 +250,23 @@ class CalendarWriter:
                     f" (category: {existing.get('category')})"
                 )
             await self._client.update_event(str(existing["id"]), payload)
-            stored = await self._client.get_event(str(existing["id"]))
             return MutationOutcome(
                 action="create_race",
                 target="updated",
                 event_id=existing["id"],
                 name=mutation.name,
-                drift=_drift(stored, mutation),
+                drift=await self._drift_after_write(existing["id"], mutation),
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
             return MutationOutcome(action="create_race", target="created", name=mutation.name)
-        stored = await self._client.get_event(str(event_id))
         return MutationOutcome(
             action="create_race",
             target="created",
             event_id=event_id,
             name=mutation.name,
-            drift=_drift(stored, mutation),
+            drift=await self._drift_after_write(event_id, mutation),
         )
 
     async def _apply_update_race(self, mutation: UpdateRace) -> MutationOutcome:
@@ -270,12 +282,11 @@ class CalendarWriter:
             payload["category"] = mutation.category
         self._add_detail_fields(payload, mutation)
         await self._client.update_event(str(mutation.event_id), payload)
-        stored = await self._client.get_event(str(mutation.event_id))
         return MutationOutcome(
             action="update_race",
             target="updated",
             event_id=mutation.event_id,
-            drift=_drift(stored, mutation),
+            drift=await self._drift_after_write(mutation.event_id, mutation),
         )
 
     async def _apply_delete_race(self, mutation: DeleteRace) -> MutationOutcome:

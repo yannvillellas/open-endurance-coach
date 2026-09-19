@@ -14,7 +14,7 @@ from open_endurance_coach.schemas.decisions import (
     UpdateWorkout,
 )
 from open_endurance_coach.store.records import Decision
-from open_endurance_coach.writer.calendar import CalendarWriter, WriterError
+from open_endurance_coach.writer.calendar import CalendarWriter, WriterError, _drift
 
 from .fakes import FakeCalendarClient, make_event
 
@@ -517,7 +517,47 @@ async def test_update_reports_distance_drift() -> None:
     outcomes = await writer.apply_decision(
         make_decision(UpdateWorkout(action="update", event_id=10001, distance=12400))
     )
-    assert outcomes[0].drift == ["distance stored 5670, requested 12400m"]
+    assert outcomes[0].drift == ["distance stored 5670m, requested 12400m"]
+
+
+class _ReadBackFailingCalendar(FakeCalendarClient):
+    def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(events)
+        self.fail_read_back = False
+
+    async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await super().update_event(event_id, payload)
+        self.fail_read_back = True
+        return result
+
+    async def get_event(self, event_id: str) -> dict[str, Any]:
+        if self.fail_read_back:
+            raise IntervalsApiError(500, "calendar unavailable")
+        return await super().get_event(event_id)
+
+
+async def test_update_survives_a_failed_read_back() -> None:
+    client = _ReadBackFailingCalendar([make_event(10001, "2024-02-05")])
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(UpdateWorkout(action="update", event_id=10001, moving_time=4200))
+    )
+    assert outcomes[0].target == "updated"
+    assert outcomes[0].drift == []
+
+
+def test_drift_tolerates_numeric_strings_and_formats_short_durations() -> None:
+    matching = UpdateWorkout(
+        action="update",
+        event_id=10001,
+        moving_time=3600,
+        distance=12400,
+        icu_training_load=158,
+    )
+    stored = {"moving_time": "3600.0", "distance": "12400.0", "icu_training_load": "158"}
+    assert _drift(stored, matching) == []
+    short = UpdateWorkout(action="update", event_id=10001, moving_time=60)
+    assert _drift({"moving_time": 44}, short) == ["moving_time stored 44s, requested 1m"]
 
 
 class _ServerErrorCalendar(FakeCalendarClient):
