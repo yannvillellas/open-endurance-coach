@@ -184,7 +184,9 @@ class StandardExtractor:
             (Event.model_validate(item) for item in events_raw),
             key=lambda event: event.start_date_local,
         )
-        recent_events = [event for event in events if event.start_date_local.date() < current]
+        recent_events = [
+            event for event in reversed(events) if event.start_date_local.date() < current
+        ]
         upcoming_events = [event for event in events if event.start_date_local.date() >= current]
         return build_within_budget(
             focus=focus,

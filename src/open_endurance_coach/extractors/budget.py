@@ -73,7 +73,7 @@ def build_within_budget(
         elif wellness_rows:
             wellness_rows.pop()
         elif past_events:
-            past_events.pop(0)
+            past_events.pop()
         elif events:
             events.pop()
         elif activity_detail is not None:

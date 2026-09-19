@@ -216,7 +216,9 @@ class DeepHistoricalExtractor:
                 reverse=True,
             ),
             upcoming_events=[event for event in events if event.start_date_local.date() >= current],
-            recent_events=[event for event in events if event.start_date_local.date() < current],
+            recent_events=[
+                event for event in reversed(events) if event.start_date_local.date() < current
+            ],
             goal_races=goal_races,
             training_rollup=rollup,
             sport_settings=[SportSettings.model_validate(item) for item in settings_raw],

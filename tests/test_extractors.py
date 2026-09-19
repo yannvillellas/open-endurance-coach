@@ -48,6 +48,7 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
 async def test_standard_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
     client = make_intervals_client(
         events=[
+            make_event(0, "2024-01-29", name="Older past session"),
             make_event(1, "2024-01-30", name="Prescribed hill session"),
             make_event(2, "2024-02-01", name="Today session"),
             make_event(3, "2024-02-03", name="Tempo Session"),
@@ -55,7 +56,10 @@ async def test_standard_extraction_splits_past_and_upcoming_events(settings: Set
     )
     extractor = StandardExtractor(settings, client)
     context = await extractor.extract("review yesterday", today=TODAY)
-    assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
+    assert [event.name for event in context.recent_events] == [
+        "Prescribed hill session",
+        "Older past session",
+    ]
     assert [event.name for event in context.upcoming_events] == [
         "Today session",
         "Tempo Session",
@@ -86,7 +90,9 @@ async def test_budget_drops_past_events_before_upcoming(settings: Settings) -> N
     extractor = StandardExtractor(settings, make_intervals_client(events=events))
     context = await extractor.extract("status check", today=TODAY, max_tokens=500)
     assert [event.name for event in context.upcoming_events] == ["Tomorrow"]
-    assert len(context.recent_events) < 14
+    recent_names = [event.name for event in context.recent_events]
+    assert len(recent_names) < 14
+    assert recent_names == [f"Past {index}" for index in range(len(recent_names))]
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:
