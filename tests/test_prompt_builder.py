@@ -325,7 +325,7 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
     assert "TrailRun" in system
 
 
-def test_system_prompt_stays_small() -> None:
+def test_contract_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert estimate_text_tokens(system) <= 2560
 

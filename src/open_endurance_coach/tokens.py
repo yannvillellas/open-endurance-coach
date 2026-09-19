@@ -7,10 +7,11 @@ from typing import Any
 CHARS_PER_TOKEN = 3
 
 # Soft cap for a whole request: system prompt + athlete context + conversation history.
-# The system contract alone measures ~2.4k tokens at the calibrated rate, so history is
-# trimmed against whatever remains. This is a focus/latency policy, not a provider limit,
-# so it stays well below the models' context windows while leaving room for several
-# exchanges even when an open proposal inflates the context.
+# The contract alone (no athlete profile or coach tone) measures ~2.5k tokens at the
+# calibrated rate and is guarded by test_contract_stays_small; the configured profile and
+# tone add more, so history is trimmed against whatever remains. This is a focus/latency
+# policy, not a provider limit, so it stays well below the models' context windows while
+# leaving room for several exchanges even when an open proposal inflates the context.
 INPUT_TOKEN_CEILING = 24576
 
 
