@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     coach_tone: str = "Be objective, strict, and analytical. Do not offer generic encouragement."
 
     chat_history_turns: int = Field(default=10, ge=1)
-    chat_history_max_tokens: int = Field(default=12288, ge=1)
+    chat_history_max_tokens: int = Field(default=16384, ge=1)
     chat_history_max_age_days: int = Field(default=90, ge=1)
     history_days: int = Field(default=180, ge=0)
 

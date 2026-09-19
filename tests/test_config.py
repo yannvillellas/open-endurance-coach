@@ -102,7 +102,7 @@ def test_missing_intervals_key_rejected(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_chat_history_defaults(settings: Settings) -> None:
     assert settings.chat_history_turns == 10
-    assert settings.chat_history_max_tokens == 12288
+    assert settings.chat_history_max_tokens == 16384
 
 
 def test_chat_history_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
