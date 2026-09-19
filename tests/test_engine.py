@@ -15,6 +15,7 @@ from open_endurance_coach.engine.coach import (
     CoachEngine,
     PlaceholderMutationError,
     StaleDecisionError,
+    _bad_race_number,
     _validate_report,
 )
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
@@ -1179,10 +1180,25 @@ def test_validate_report_rejects_placeholder_workout_duration() -> None:
                 ]
             )
         )
-        with pytest.raises(
-            PlaceholderMutationError, match="duration/load/distance must be real values"
-        ):
-            _validate_report(payload, today=date(2024, 2, 1))
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_validate_report_rejects_zero_workout_distance_on_update() -> None:
+    payload = json.loads(
+        report_json(mutations=[{"action": "update", "event_id": 10001, "distance": 0}])
+    )
+    with pytest.raises(
+        PlaceholderMutationError, match="duration/load/distance must be real values"
+    ):
+        _validate_report(payload, today=date(2024, 2, 1))
+
+
+def test_non_finite_numbers_are_placeholders() -> None:
+    assert _bad_race_number(float("nan"), required=False) is True
+    assert _bad_race_number(float("inf"), required=False) is True
 
 
 def test_validate_report_rejects_zero_workout_load_on_update() -> None:

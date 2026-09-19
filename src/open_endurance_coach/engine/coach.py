@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -106,7 +107,7 @@ def _is_stale(mutation: Any, *, today: date) -> bool:
 def _bad_race_number(value: float | None, *, required: bool) -> bool:
     if value is None:
         return required
-    return value <= 0
+    return not math.isfinite(value) or value <= 0
 
 
 def _is_placeholder(mutation: Any) -> bool:
