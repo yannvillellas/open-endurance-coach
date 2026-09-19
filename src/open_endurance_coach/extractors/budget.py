@@ -3,13 +3,7 @@ from typing import Any
 
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.decisions import DecisionReport
-from open_endurance_coach.schemas.intervals import (
-    Activity,
-    ActivitySplit,
-    Event,
-    SportSettings,
-    Wellness,
-)
+from open_endurance_coach.schemas.intervals import Activity, Event, SportSettings, Wellness
 
 RECENT_ACTIVITY_KEEP_DAYS = 7
 
@@ -37,12 +31,10 @@ def build_within_budget(
     current_proposal: DecisionReport | None = None,
     user_feedback: str | None,
     activity_detail: Activity | None,
-    activity_splits: list[ActivitySplit] | None = None,
     max_tokens: int,
     today: date | None = None,
 ) -> CoachContext:
     activities = list(recent_activities)
-    splits = list(activity_splits or [])
     wellness_rows = list(wellness)
     events = list(upcoming_events)
     past_events = list(recent_events or [])
@@ -55,7 +47,6 @@ def build_within_budget(
             "today": today,
             "recent_activities": activities,
             "activity_detail": activity_detail,
-            "activity_splits": splits,
             "wellness": wellness_rows,
             "recent_events": past_events,
             "upcoming_events": events,
@@ -91,8 +82,6 @@ def build_within_budget(
             events.pop(furthest)
         elif activity_detail is not None:
             activity_detail = None
-        elif splits:
-            splits.pop()
         elif current_proposal is not None:
             current_proposal = None
         elif user_feedback is not None:

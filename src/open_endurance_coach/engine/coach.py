@@ -431,7 +431,6 @@ class CoachEngine:
             current_proposal=proposal,
             user_feedback=user_feedback,
             activity_detail=base.activity_detail,
-            activity_splits=base.activity_splits,
             max_tokens=base.max_tokens,
             today=today,
         )

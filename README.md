@@ -21,7 +21,7 @@ Open Endurance Coach integrates multi-sport telemetry from Intervals.icu with La
 - **The coach decides what you need.** Every message is classified as _chat_ (answer from the analysis already in the session), _analysis_ (review executed training), or _plan_ (propose calendar changes). A full analysis is reused for follow-ups — there is no re-analysis until you ask for one or the question needs historical depth. If a change would help during a chat, he offers it instead of interrupting you with a confirmation gate.
 - **Material questions block proposals, for any plan** — a training block, a race event, or both. If an answer would change the plan (available training days, constraints, injury, RPE, race duration/climbing/expected load), the coach asks and does _not_ propose calendar changes until you answer — or say `proceed with assumptions` and he states the assumption in the plan.
 - **When he proposes calendar changes**, he asks: "Apply this to Intervals.icu: …". Reply with exactly `yes` and the changes are validated, approved, and written in one step. `no` declines, and **anything else is a change request** — he re-analyzes with your words and proposes again. Nothing is ever written without a literal yes. If a decision is approved but the write fails, say `retry`; a decision that is still unapplied at the next startup is offered again, or discarded with a notice once its dates have passed.
-- **Memory**: sessions are seeded with recent exchanges (last 10 feedback rows from the last 90 days, up to 16384 tokens, self-trimmed). Stored history is pruned automatically to `HISTORY_DAYS` (default 180) at startup; `/forget` wipes it now, or `/forget N` keeps only the last N days.
+- **Memory**: sessions are seeded with recent exchanges (last 10 feedback rows from the last 90 days, up to 8192 tokens, self-trimmed). Stored history is pruned automatically to `HISTORY_DAYS` (default 180) at startup; `/forget` wipes it now, or `/forget N` keeps only the last N days.
 - Session commands only: `/provider` and `/model` show or switch the LLM, `/forget [days]`, `/help`, `/exit` — everything else is conversation.
 
 ```text
@@ -73,7 +73,7 @@ All settings come from environment variables or a `.env` file (see `.env.example
 | `REQUESTS_PER_SECOND`              | `8`              | Intervals.icu rate-limit throttle                                                                                             |
 | `ATHLETE_PROFILE` / `COACH_TONE`   | configurable     | Persona injected into every prompt                                                                                            |
 | `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                                                                    |
-| `CHAT_HISTORY_MAX_TOKENS`          | `16384`          | Chat memory budget (self-trimmed) (>= 1)                                                                                      |
+| `CHAT_HISTORY_MAX_TOKENS`          | `8192`           | Chat memory budget (self-trimmed) (>= 1)                                                                                      |
 | `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for feedback rows loaded as chat memory (>= 1)                                                                     |
 | `HISTORY_DAYS`                     | `180`            | Stored history kept (drafts, decisions, feedback, seen activities); 0 = keep forever (>= 0)                                   |
 
