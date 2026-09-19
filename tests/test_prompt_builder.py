@@ -249,6 +249,17 @@ def test_contract_tells_the_model_to_compare_recent_events() -> None:
     assert "compare it against recent_activities" in system
 
 
+def test_contract_allows_distance_on_workout_mutations() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Workout mutations may also set distance" in system
+
+
+def test_contract_forbids_distance_steps_without_a_pace_model() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "No pace model for Hike or Walk" in system
+    assert "no distance steps" in system
+
+
 def test_intake_example_demonstrates_blocking() -> None:
     report = DecisionReport.model_validate(INTAKE_EXAMPLE)
     assert report.intent == "plan"
