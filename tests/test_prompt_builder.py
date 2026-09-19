@@ -103,10 +103,19 @@ def test_format_rules_carry_distance_zone_and_pace_forms() -> None:
     assert "blank line before and after" in system
 
 
+def test_contract_forbids_distance_steps_without_a_pace_model() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Hike or Walk have no pace model" in system
+    assert "no distance steps" in system
+    assert "rewrite an existing distance step when revising" in system
+    assert "Distance steps (not Hike or Walk)" in system
+
+
 def test_format_rules_carry_quick_guide_constructs() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "5m30s" in system
-    assert "1h2m30s" in system
+    assert "1h49m" in system
+    assert "a trailing number with no unit is seconds" in system
     assert "1'30\"" in system
     assert "Z2 Pace" in system
     assert "60% MMP 5m" in system
