@@ -9,7 +9,14 @@ from open_endurance_coach.extractors.standard import StandardExtractor, macro_ph
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Wellness
 
-from .fakes import TODAY, make_activity, make_intervals_client, make_summary_week, make_wellness
+from .fakes import (
+    TODAY,
+    make_activity,
+    make_event,
+    make_intervals_client,
+    make_summary_week,
+    make_wellness,
+)
 
 
 async def test_standard_extraction_populates_all_sections(settings: Settings) -> None:
@@ -31,11 +38,24 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert client.calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-02-01", "2024-02-15", None),
+        ("events", "2024-01-18", "2024-02-15", None),
         ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
         ("athlete_summary", "2023-11-03", "2024-02-01"),
         ("sport_settings",),
     ]
+
+
+async def test_standard_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            make_event(1, "2024-01-30", name="Prescribed hill session"),
+            make_event(2, "2024-02-03", name="Tempo Session"),
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("review yesterday", today=TODAY)
+    assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
+    assert [event.name for event in context.upcoming_events] == ["Tempo Session"]
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:

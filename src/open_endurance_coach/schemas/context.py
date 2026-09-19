@@ -23,6 +23,7 @@ _SECTION_KEYS = (
     "recent_activities",
     "activity_detail",
     "wellness",
+    "recent_events",
     "upcoming_events",
     "goal_races",
     "training_rollup",
@@ -80,6 +81,7 @@ class CoachContext(BaseModel):
     recent_activities: list[Activity] = Field(default_factory=list)
     activity_detail: Activity | None = None
     wellness: list[Wellness] = Field(default_factory=list)
+    recent_events: list[Event] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
     goal_races: list[GoalRace] = Field(default_factory=list)
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
@@ -99,6 +101,9 @@ class CoachContext(BaseModel):
                 else None
             ),
             "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
+            "recent_events": [
+                item.model_dump(mode="json", exclude_none=True) for item in self.recent_events
+            ],
             "upcoming_events": [
                 item.model_dump(mode="json", exclude_none=True) for item in self.upcoming_events
             ],
