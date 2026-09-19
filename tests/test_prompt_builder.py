@@ -106,7 +106,8 @@ def test_format_rules_carry_distance_zone_and_pace_forms() -> None:
 def test_format_rules_carry_quick_guide_constructs() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "5m30s" in system
-    assert "1h2m30s" in system
+    assert "1h49m" in system
+    assert "every number needs its unit" in system
     assert "1'30\"" in system
     assert "Z2 Pace" in system
     assert "60% MMP 5m" in system
@@ -261,6 +262,12 @@ def test_contract_forbids_distance_steps_without_a_pace_model() -> None:
     assert "rewrite an existing distance step when revising" in system
     assert "use a time step whose duration equals moving_time" in system
     assert "Distance steps (not Hike or Walk)" in system
+
+
+def test_contract_requires_duration_units() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "every number needs its unit" in system
+    assert "means 1h49s" in system
 
 
 def test_intake_example_demonstrates_blocking() -> None:

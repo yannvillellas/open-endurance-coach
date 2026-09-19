@@ -132,8 +132,8 @@ PROPOSAL_POLICY = (
 WORKOUT_TEXT_FORMAT = (
     "Workout descriptions must use the native Intervals.icu workout text format.\n"
     "One step per line starting with '- '.\n"
-    "Durations: 30s, 10m, 1m30, 5m30s, 1h2m30s (h hours, m minutes, s seconds;"
-    " short forms 5', 30\", 1'30\").\n"
+    "Durations: 30s, 10m, 1m30, 5m30s, 1h49m - every number needs its unit, so 1h49"
+    " means 1h49s (short forms 5', 30\", 1'30\").\n"
     "Targets: 100w, 80% (of FTP), 60% HR (of max heart rate), 100% LTHR"
     " (of threshold HR), 90rpm (cadence).\n"
     "Ranges: 100-140w, 80-90%. Ramps: Ramp 100-200w, Ramp 60-80%.\n"
