@@ -114,11 +114,14 @@ def per_km_splits(
         return []
 
     count = min(len(times), len(distances))
-    total = _number(distances[count - 1]) or 0.0
+    readings = (_number(value) for value in distances[:count])
+    total = max((value for value in readings if value is not None), default=0.0)
     if total <= 0:
         return []
+    if max_splits <= 0:
+        max_splits = MAX_SPLITS
     chunk_km = 1
-    if max_splits > 0 and total > max_splits * _KM:
+    if total > max_splits * _KM:
         chunk_km = math.ceil(total / _KM / max_splits)
     chunk_m = chunk_km * _KM
 

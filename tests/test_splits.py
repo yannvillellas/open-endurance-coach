@@ -89,6 +89,29 @@ def test_default_cap_merges_beyond_forty_kilometres() -> None:
     assert splits[-1].label == "km 49-50"
 
 
+def test_forty_kilometres_stay_per_kilometre_at_the_default_cap() -> None:
+    splits = per_km_splits(steady_streams(12000))
+    assert len(splits) == 40
+    assert splits[0].label == "km 1"
+    assert splits[-1].label == "km 40"
+    assert all(split.distance_m == 1000.0 for split in splits)
+
+
+def test_nonpositive_max_splits_falls_back_to_the_default_cap() -> None:
+    for max_splits in (0, -1):
+        splits = per_km_splits(steady_streams(15000), max_splits=max_splits)
+        assert len(splits) == 25
+        assert splits[0].label == "km 1-2"
+        assert splits[-1].label == "km 49-50"
+
+
+def test_corrupted_final_distance_sample_keeps_earlier_splits() -> None:
+    streams = steady_streams(900)
+    streams["distance"][-1] = 0.0
+    splits = per_km_splits(streams)
+    assert [split.label for split in splits] == ["km 1", "km 2"]
+
+
 def test_per_km_splits_need_time_and_distance() -> None:
     assert per_km_splits({}) == []
     assert per_km_splits({"time": [0, 1, 2]}) == []
