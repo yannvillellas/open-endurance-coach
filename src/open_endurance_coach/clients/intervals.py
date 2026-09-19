@@ -155,7 +155,8 @@ class IntervalsClient:
         response = await self._request(
             "GET", f"/activity/{activity_id}/streams", params={"types": list(types)}
         )
-        return {row.get("type"): row.get("data") or [] for row in response.json()}
+        rows = self._json_list(response, "streams")
+        return {row["type"]: row.get("data") or [] for row in rows}
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
         response = await self._request(

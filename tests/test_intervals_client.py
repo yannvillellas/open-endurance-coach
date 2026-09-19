@@ -199,6 +199,13 @@ async def test_get_activity_streams_path_params_and_parsing(settings: Settings) 
     await client.aclose()
 
 
+async def test_get_activity_streams_rejects_a_non_list_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"error": "boom"})])
+    with pytest.raises(IntervalsApiError, match="streams"):
+        await client.get_activity_streams("i7", ["time"])
+    await client.aclose()
+
+
 def test_rate_limits_from_headers_partial() -> None:
     limits = RateLimits.from_headers(httpx.Headers({"X-RateLimit-Limit": "2500,5000"}))
     assert limits.limit_15m == 2500
