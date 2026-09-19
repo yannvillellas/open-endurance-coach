@@ -412,6 +412,17 @@ async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
     assert long_message in provider.calls[0]["messages"][1].content
 
 
+async def test_refocus_context_keeps_recent_events(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    base = CoachContext(
+        focus="f",
+        today=TODAY,
+        recent_events=[make_event(1, "2024-01-31", name="Prescribed hill session")],
+    )
+    context = engine.refocus_context(base, "review yesterday", today=TODAY)
+    assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
+
+
 async def test_submit_feedback_persists_feedback_context(
     settings: Settings, tmp_path: Path
 ) -> None:

@@ -76,6 +76,59 @@ def test_estimated_tokens_match_the_indented_payload() -> None:
     assert context.estimated_tokens() == indented + estimate_text_tokens(context.focus)
 
 
+def test_event_sections_drop_machine_fields_but_keep_id() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "recent_events": [
+                {
+                    "id": 136743074,
+                    "name": "Hill Sharpening",
+                    "start_date_local": "2024-01-31T00:00:00",
+                    "category": "WORKOUT",
+                    "type": "TrailRun",
+                    "description": "- 10m Z1 warmup",
+                    "workout_doc": {"steps": [{"duration": 600}]},
+                    "plan_folder_id": 42,
+                    "plan_workout_id": 43,
+                    "end_date_local": "2024-01-31T00:00:00",
+                }
+            ],
+            "max_tokens": 4096,
+        }
+    )
+    payload = context.sections()["recent_events"][0]
+    assert payload["id"] == 136743074
+    assert payload["description"] == "- 10m Z1 warmup"
+    assert payload["end_date_local"] == "2024-01-31T00:00:00"
+    for dropped in ("workout_doc", "plan_folder_id", "plan_workout_id"):
+        assert dropped not in payload
+
+
+def test_prompt_includes_past_planned_events() -> None:
+    from open_endurance_coach.config import Settings
+    from open_endurance_coach.prompts.prompts import build_messages
+
+    context = CoachContext.model_validate(
+        {
+            "focus": "review yesterday",
+            "today": "2026-09-19",
+            "recent_events": [
+                {
+                    "id": 136743074,
+                    "name": "Hill Sharpening 3x3m Z4-Z5 HR",
+                    "start_date_local": "2026-09-18T00:00:00",
+                    "category": "WORKOUT",
+                    "type": "TrailRun",
+                }
+            ],
+        }
+    )
+    settings = Settings(intervals_api_key="k", deepseek_api_key="k")
+    prompt = build_messages(context, settings)[1].content
+    assert "Hill Sharpening 3x3m Z4-Z5 HR" in prompt
+
+
 def test_sections_match_the_prompt_payload() -> None:
     from open_endurance_coach.config import Settings
     from open_endurance_coach.prompts.prompts import build_messages

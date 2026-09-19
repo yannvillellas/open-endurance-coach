@@ -72,10 +72,10 @@ def build_within_budget(
             rollup.pop(0)
         elif wellness_rows:
             wellness_rows.pop()
-        elif events:
-            events.pop()
         elif past_events:
             past_events.pop(0)
+        elif events:
+            events.pop()
         elif activity_detail is not None:
             activity_detail = None
         elif current_proposal is not None:

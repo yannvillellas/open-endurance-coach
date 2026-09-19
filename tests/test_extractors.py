@@ -49,13 +49,44 @@ async def test_standard_extraction_splits_past_and_upcoming_events(settings: Set
     client = make_intervals_client(
         events=[
             make_event(1, "2024-01-30", name="Prescribed hill session"),
-            make_event(2, "2024-02-03", name="Tempo Session"),
+            make_event(2, "2024-02-01", name="Today session"),
+            make_event(3, "2024-02-03", name="Tempo Session"),
         ]
     )
     extractor = StandardExtractor(settings, client)
     context = await extractor.extract("review yesterday", today=TODAY)
     assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
-    assert [event.name for event in context.upcoming_events] == ["Tempo Session"]
+    assert [event.name for event in context.upcoming_events] == [
+        "Today session",
+        "Tempo Session",
+    ]
+
+
+async def test_deep_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            make_event(1, "2024-01-30", name="Past session"),
+            make_event(2, "2024-02-10", name="Future session"),
+        ]
+    )
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    extractor = DeepHistoricalExtractor(settings, client)
+    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    assert [event.name for event in context.recent_events] == ["Past session"]
+    assert [event.name for event in context.upcoming_events] == ["Future session"]
+
+
+async def test_budget_drops_past_events_before_upcoming(settings: Settings) -> None:
+    events = [
+        make_event(
+            100 + index, (TODAY - timedelta(days=index + 1)).isoformat(), name=f"Past {index}"
+        )
+        for index in range(14)
+    ] + [make_event(200, (TODAY + timedelta(days=1)).isoformat(), name="Tomorrow")]
+    extractor = StandardExtractor(settings, make_intervals_client(events=events))
+    context = await extractor.extract("status check", today=TODAY, max_tokens=500)
+    assert [event.name for event in context.upcoming_events] == ["Tomorrow"]
+    assert len(context.recent_events) < 14
 
 
 async def test_standard_extraction_keeps_newest_first(settings: Settings) -> None:
