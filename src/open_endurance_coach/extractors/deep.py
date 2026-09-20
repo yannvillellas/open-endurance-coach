@@ -237,7 +237,6 @@ class DeepHistoricalExtractor:
             except Exception:
                 logger.exception("unexpected error reading the detail of %s", detail_source.id)
                 return None, []
-            # A streams or splits failure must not discard the detail we did read.
             try:
                 speed_based = detail.type in _RIDE_TYPES
                 streams = await self._client.get_activity_streams(
@@ -256,7 +255,6 @@ class DeepHistoricalExtractor:
                 )
             return detail, []
 
-        # Independent reads are issued together; the client throttles their starts.
         (
             detail_result,
             wellness_raw,

@@ -70,8 +70,6 @@ def build_within_budget(
             "max_tokens": max_tokens,
         }
 
-    # Exact accounting: serialize once, then re-render only the section a drop
-    # changed, instead of re-serializing the whole payload on every iteration.
     fragments = CoachContext.model_construct(**build_payload()).data_fragments()
 
     def refresh(key: str, value: Any) -> None:

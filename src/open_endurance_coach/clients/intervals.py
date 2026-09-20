@@ -89,8 +89,6 @@ class IntervalsClient:
         return f"/athlete/{self._settings.intervals_athlete_id}{path}"
 
     async def _throttle(self) -> None:
-        # Reserve the next start slot under the lock, then sleep outside it: holding
-        # the lock during the sleep would serialize every concurrent caller behind it.
         async with self._throttle_lock:
             now = time.monotonic()
             wait = max(0.0, self._last_request_at + self._min_interval - now)

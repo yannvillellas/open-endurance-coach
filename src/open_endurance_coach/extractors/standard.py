@@ -158,7 +158,6 @@ class StandardExtractor:
     ) -> CoachContext:
         current = self._today(today)
         newest = (current + timedelta(days=1)).isoformat()
-        # Independent reads are issued together; the client throttles their starts.
         (
             activities_raw,
             wellness_raw,

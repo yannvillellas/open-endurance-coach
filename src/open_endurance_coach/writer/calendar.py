@@ -274,9 +274,6 @@ class CalendarWriter:
         return payload
 
     async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
-        # No category filter: an unlabelled event (or one whose category the
-        # server omits) must be found so it is adopted instead of duplicated.
-        # The family guard in _apply_create rejects a cross-family match.
         rows = await self._client.list_events(
             day.isoformat(), (day + timedelta(days=1)).isoformat()
         )
@@ -381,8 +378,6 @@ class CalendarWriter:
         return MutationOutcome(action="delete", target="deleted", event_id=mutation.event_id)
 
     async def _find_race_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
-        # No category filter: an unlabelled event must be found and adopted
-        # instead of duplicated; _apply_create_race rejects a cross-family match.
         rows = await self._client.list_events(
             day.isoformat(), (day + timedelta(days=1)).isoformat()
         )

@@ -94,11 +94,7 @@ class PlaceholderMutationError(ValueError):
 
 
 class StateDriftError(ValueError):
-    """Some of the decision's mutations are no longer valid, so none are applied.
-
-    An approval is atomic: a decision that can no longer be executed exactly as
-    approved is rejected and must be regenerated.
-    """
+    """Some of the decision's mutations are no longer valid."""
 
 
 def _is_stale(mutation: Any, *, today: date) -> bool:
@@ -547,10 +543,8 @@ class CoachEngine:
         the decision remains unapplied; re-running is safe because mutations are
         idempotent (create resolves by name+date, update re-applies, delete skips).
 
-        An approval is atomic: if any mutation is no longer valid (stale or
-        placeholder), the whole decision is rejected with ``StateDriftError`` before
-        anything is written and ``applied_at`` stays unset, so the plan must be
-        regenerated.
+        An approval is atomic: a decision with a stale or placeholder mutation is
+        rejected with ``StateDriftError`` and nothing is written.
         """
         if self._writer is None:
             raise InternalError("no calendar writer configured")

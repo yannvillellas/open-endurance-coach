@@ -167,7 +167,7 @@ class CoachContext(BaseModel):
 
     @staticmethod
     def section_fragment(key: str, value: Any) -> str:
-        """One section's own JSON, for exact incremental budgeting."""
+        """One section's own JSON."""
         return json.dumps(_section_payload(key, value), ensure_ascii=False, indent=2)
 
     def data_fragments(self) -> dict[str, str]:
@@ -180,19 +180,14 @@ class CoachContext(BaseModel):
 
     @staticmethod
     def payload_chars(fragments: dict[str, str]) -> int:
-        """Exact length of ``json.dumps(payload, indent=2)`` from its fragments.
-
-        Reproduces the top-level object layout (two-space key indent, embedded
-        value indented by two) so the budget can account for a single changed
-        section instead of re-serializing the whole payload.
-        """
-        total = 4  # "{\n" and "\n}"
+        """Exact length of ``json.dumps(payload, indent=2)``."""
+        total = 4
         for index, (key, fragment) in enumerate(fragments.items()):
             if index:
-                total += 2  # ",\n" between entries
-            total += 2  # two-space indent
+                total += 2
+            total += 2
             total += len(json.dumps(key, ensure_ascii=False))
-            total += 2  # ": "
+            total += 2
             total += len(fragment) + 2 * fragment.count("\n")
         return total
 
