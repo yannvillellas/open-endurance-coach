@@ -77,6 +77,21 @@ def test_estimated_tokens_match_the_indented_payload() -> None:
     assert context.estimated_tokens() == indented + estimate_text_tokens(context.focus)
 
 
+def test_data_fragments_reconstruct_the_exact_payload_length() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "recent_activities": [ACTIVITY],
+            "wellness": [WELLNESS],
+            "today": "2024-02-01",
+            "user_feedback": "legs heavy",
+            "max_tokens": 4096,
+        }
+    )
+    exact = len(json.dumps(context.data_payload(), ensure_ascii=False, indent=2))
+    assert CoachContext.payload_chars(context.data_fragments()) == exact
+
+
 @pytest.mark.parametrize("section", ["recent_events", "upcoming_events"])
 def test_event_sections_drop_machine_fields_but_keep_the_rest(section: str) -> None:
     event = {

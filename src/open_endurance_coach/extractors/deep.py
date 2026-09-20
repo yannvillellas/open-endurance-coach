@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from collections.abc import Callable
@@ -223,39 +224,60 @@ class DeepHistoricalExtractor:
             detail_source = candidates[0] if candidates else None
         elif activities:
             detail_source = activities[0]
-        activity_detail: Activity | None = None
-        activity_splits: list[ActivitySplit] = []
-        if detail_source is not None:
+
+        async def load_detail() -> tuple[Activity | None, list[ActivitySplit]]:
+            if detail_source is None:
+                return None, []
             try:
                 detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
-                activity_detail = Activity.model_validate(detail_raw)
-                speed_based = activity_detail.type in _RIDE_TYPES
+                detail = Activity.model_validate(detail_raw)
+            except (IntervalsApiError, ValueError) as exc:
+                logger.warning("could not read the detail of %s: %s", detail_source.id, exc)
+                return None, []
+            except Exception:
+                logger.exception("unexpected error reading the detail of %s", detail_source.id)
+                return None, []
+            # A streams or splits failure must not discard the detail we did read.
+            try:
+                speed_based = detail.type in _RIDE_TYPES
                 streams = await self._client.get_activity_streams(
                     detail_source.id, stream_types(speed_based)
                 )
-                activity_splits = per_km_splits(streams, speed_based=speed_based)
-                _warn_on_split_coverage(detail_source.id, activity_detail.distance, activity_splits)
+                splits = per_km_splits(streams, speed_based=speed_based)
+                _warn_on_split_coverage(detail_source.id, detail.distance, splits)
+                return detail, splits
             except (IntervalsApiError, ValueError) as exc:
                 logger.warning(
-                    "could not read the detail or streams of %s; splits skipped: %s",
-                    detail_source.id,
-                    exc,
+                    "could not read the streams of %s; splits skipped: %s", detail_source.id, exc
                 )
             except Exception:
                 logger.exception(
-                    "unexpected error reading the detail or streams of %s; splits skipped",
-                    detail_source.id,
+                    "unexpected error reading the streams of %s; splits skipped", detail_source.id
                 )
-        wellness_raw = await self._client.list_wellness(
-            (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
+            return detail, []
+
+        # Independent reads are issued together; the client throttles their starts.
+        (
+            detail_result,
+            wellness_raw,
+            events_raw,
+            goal_races,
+            rollup,
+            settings_raw,
+        ) = await asyncio.gather(
+            load_detail(),
+            self._client.list_wellness(
+                (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
+            ),
+            self._client.list_events(
+                (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
+                (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
+            ),
+            fetch_goal_races(self._client, current),
+            fetch_training_rollup(self._client, current),
+            self._client.get_sport_settings(),
         )
-        events_raw = await self._client.list_events(
-            (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
-            (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
-        )
-        goal_races = await fetch_goal_races(self._client, current)
-        rollup = await fetch_training_rollup(self._client, current)
-        settings_raw = await self._client.get_sport_settings()
+        activity_detail, activity_splits = detail_result
         events = sorted(
             (Event.model_validate(item) for item in events_raw),
             key=lambda event: event.start_date_local,

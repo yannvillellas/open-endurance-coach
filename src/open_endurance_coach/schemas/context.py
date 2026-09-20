@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from typing import Any, Literal, Self
 
@@ -58,6 +59,29 @@ def _event_payload(event: Event) -> dict[str, Any]:
     return event.model_dump(mode="json", include=set(_EVENT_FIELDS), exclude_none=True)
 
 
+_MODEL_LIST_KEYS = frozenset(
+    {
+        "recent_activities",
+        "wellness",
+        "goal_races",
+        "training_rollup",
+        "sport_settings",
+        "activity_splits",
+    }
+)
+
+
+def _section_payload(key: str, value: Any) -> Any:
+    """The rendered value of one section, shared by ``sections`` and budgeting."""
+    if key in ("recent_events", "upcoming_events"):
+        return [_event_payload(event) for event in value]
+    if key in _MODEL_LIST_KEYS:
+        return [item.model_dump(mode="json", exclude_none=True) for item in value]
+    if key in ("activity_detail", "current_proposal"):
+        return value.model_dump(mode="json", exclude_none=True) if value else None
+    return value
+
+
 class SportWeek(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -116,43 +140,61 @@ class CoachContext(BaseModel):
     user_feedback: str | None = None
     max_tokens: int = Field(default=16384, gt=0)
 
-    def sections(self) -> dict[str, Any]:
-        sections: dict[str, Any] = {
+    def _raw_sections(self) -> dict[str, Any]:
+        raw: dict[str, Any] = {
             "focus": self.focus,
-            "recent_activities": [
-                item.model_dump(mode="json", exclude_none=True) for item in self.recent_activities
-            ],
-            "activity_detail": (
-                self.activity_detail.model_dump(mode="json", exclude_none=True)
-                if self.activity_detail
-                else None
-            ),
-            "wellness": [item.model_dump(mode="json", exclude_none=True) for item in self.wellness],
-            "recent_events": [_event_payload(event) for event in self.recent_events],
-            "upcoming_events": [_event_payload(event) for event in self.upcoming_events],
-            "goal_races": [
-                item.model_dump(mode="json", exclude_none=True) for item in self.goal_races
-            ],
-            "training_rollup": [
-                item.model_dump(mode="json", exclude_none=True) for item in self.training_rollup
-            ],
-            "sport_settings": [
-                item.model_dump(mode="json", exclude_none=True) for item in self.sport_settings
-            ],
+            "recent_activities": self.recent_activities,
+            "activity_detail": self.activity_detail,
+            "wellness": self.wellness,
+            "recent_events": self.recent_events,
+            "upcoming_events": self.upcoming_events,
+            "goal_races": self.goal_races,
+            "training_rollup": self.training_rollup,
+            "sport_settings": self.sport_settings,
         }
         if self.activity_splits:
-            sections["activity_splits"] = [
-                item.model_dump(mode="json", exclude_none=True) for item in self.activity_splits
-            ]
+            raw["activity_splits"] = self.activity_splits
         if self.today:
-            sections["today"] = f"Today's date (athlete local): {self.today.isoformat()}"
+            raw["today"] = f"Today's date (athlete local): {self.today.isoformat()}"
         if self.current_proposal:
-            sections["current_proposal"] = self.current_proposal.model_dump(
-                mode="json", exclude_none=True
-            )
+            raw["current_proposal"] = self.current_proposal
         if self.user_feedback:
-            sections["user_feedback"] = self.user_feedback
-        return sections
+            raw["user_feedback"] = self.user_feedback
+        return raw
+
+    def sections(self) -> dict[str, Any]:
+        return {key: _section_payload(key, value) for key, value in self._raw_sections().items()}
+
+    @staticmethod
+    def section_fragment(key: str, value: Any) -> str:
+        """One section's own JSON, for exact incremental budgeting."""
+        return json.dumps(_section_payload(key, value), ensure_ascii=False, indent=2)
+
+    def data_fragments(self) -> dict[str, str]:
+        """Serialized fragments of the data payload (every section except focus)."""
+        return {
+            key: self.section_fragment(key, value)
+            for key, value in self._raw_sections().items()
+            if key != "focus"
+        }
+
+    @staticmethod
+    def payload_chars(fragments: dict[str, str]) -> int:
+        """Exact length of ``json.dumps(payload, indent=2)`` from its fragments.
+
+        Reproduces the top-level object layout (two-space key indent, embedded
+        value indented by two) so the budget can account for a single changed
+        section instead of re-serializing the whole payload.
+        """
+        total = 4  # "{\n" and "\n}"
+        for index, (key, fragment) in enumerate(fragments.items()):
+            if index:
+                total += 2  # ",\n" between entries
+            total += 2  # two-space indent
+            total += len(json.dumps(key, ensure_ascii=False))
+            total += 2  # ": "
+            total += len(fragment) + 2 * fragment.count("\n")
+        return total
 
     def section_tokens(self) -> dict[str, int]:
         """Per-section token estimates, for diagnostics only.

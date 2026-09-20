@@ -10,6 +10,7 @@ from open_endurance_coach.schemas.intervals import (
     SportSettings,
     Wellness,
 )
+from open_endurance_coach.tokens import CHARS_PER_TOKEN
 
 RECENT_ACTIVITY_KEEP_DAYS = 7
 
@@ -49,8 +50,9 @@ def build_within_budget(
     races = list(goal_races or [])
     rollup = list(training_rollup or [])
     keep_ids = activity_keep_ids or set()
-    while True:
-        payload: dict[str, Any] = {
+
+    def build_payload() -> dict[str, Any]:
+        return {
             "focus": focus,
             "today": today,
             "recent_activities": activities,
@@ -66,9 +68,15 @@ def build_within_budget(
             "user_feedback": user_feedback,
             "max_tokens": max_tokens,
         }
-        probe = CoachContext.model_construct(**payload)
-        if probe.data_tokens() <= max_tokens:
-            return CoachContext.model_validate(payload)
+
+    # Exact accounting: serialize once, then re-render only the section a drop
+    # changed, instead of re-serializing the whole payload on every iteration.
+    fragments = CoachContext.model_construct(**build_payload()).data_fragments()
+
+    def refresh(key: str, value: Any) -> None:
+        fragments[key] = CoachContext.section_fragment(key, value)
+
+    while CoachContext.payload_chars(fragments) // CHARS_PER_TOKEN > max_tokens:
         if activities and _activity_droppable(activities, today):
             droppable = [
                 index for index, activity in enumerate(activities) if activity.id not in keep_ids
@@ -76,29 +84,42 @@ def build_within_budget(
             if droppable:
                 oldest_index = min(droppable, key=lambda index: activities[index].start_date_local)
                 activities.pop(oldest_index)
+                refresh("recent_activities", activities)
                 continue
         if rollup:
             rollup.pop(0)
+            refresh("training_rollup", rollup)
         elif wellness_rows:
             wellness_rows.pop()
+            refresh("wellness", wellness_rows)
         elif past_events:
             oldest = min(
                 range(len(past_events)), key=lambda index: past_events[index].start_date_local
             )
             past_events.pop(oldest)
+            refresh("recent_events", past_events)
         elif events:
             furthest = max(range(len(events)), key=lambda index: events[index].start_date_local)
             events.pop(furthest)
+            refresh("upcoming_events", events)
         elif splits:
             splits.pop()
+            if splits:
+                refresh("activity_splits", splits)
+            else:
+                fragments.pop("activity_splits", None)
         elif activity_detail is not None:
             activity_detail = None
+            refresh("activity_detail", None)
         elif current_proposal is not None:
             current_proposal = None
+            fragments.pop("current_proposal", None)
         elif user_feedback is not None:
             user_feedback = None
+            fragments.pop("user_feedback", None)
         elif races:
             races.pop()
+            refresh("goal_races", races)
         elif activities:
             candidates = [
                 index for index, activity in enumerate(activities) if activity.id not in keep_ids
@@ -108,5 +129,7 @@ def build_within_budget(
                 key=lambda candidate: activities[candidate].start_date_local,
             )
             activities.pop(index)
+            refresh("recent_activities", activities)
         else:
             raise RuntimeError(f"cannot fit the context data in token budget: {max_tokens}")
+    return CoachContext.model_validate(build_payload())
