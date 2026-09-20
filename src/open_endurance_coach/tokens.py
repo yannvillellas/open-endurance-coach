@@ -7,11 +7,11 @@ from typing import Any
 CHARS_PER_TOKEN = 3
 
 # Soft cap for a whole request: system prompt + athlete context + conversation history.
-# The system contract alone measures ~2.4k tokens at the calibrated rate, so history is
-# trimmed against whatever remains. This is a focus/latency policy, not a provider limit,
-# so it stays well below the models' context windows while leaving room for several
-# exchanges even when an open proposal inflates the context.
-INPUT_TOKEN_CEILING = 24576
+# The system contract alone measures roughly 2.5k tokens at the calibrated rate, so
+# history is trimmed against whatever remains. This is a focus/latency policy, not a
+# provider limit, so it stays well below the models' context windows while leaving room
+# for several exchanges even when an open proposal inflates the context.
+INPUT_TOKEN_CEILING = 40960
 
 
 def estimate_text_tokens(text: str) -> int:

@@ -233,6 +233,15 @@ Live probe with the production analysis prompt (`build_messages` over a standard
 | OVHcloud | `Qwen3.5-397B-A17B` | 2,187         | 7,025             | hidden; no `reasoning_content` or token detail                  | `stop`          |
 
 - Both providers accepted `max_tokens=65536` with no ceiling rejection.
+- **Minimum model window required (2026-09-20):** a request can legitimately reach
+  `INPUT_TOKEN_CEILING` = 40,960 input tokens (system prompt + athlete context + conversation
+  history), and the client reserves up to `LLM_MAX_TOKENS` = 32,768 for the reply, so a model used
+  with this tool must accept **at least ~41k input tokens and ideally ~74k in total**. Typical
+  requests are far smaller: a standard analysis measures ~2k prompt tokens and a deep query with a
+  marathon's 43-row split table measures ~7k including the contract. For a model whose window is
+  smaller than ~74k, set `LLM_MAX_TOKENS` to `window − 40,960` (and lower the budgets if needed)
+  before using it, or a long question plus a large reply can be rejected by the provider. The
+  providers' windows are not recorded here; no code asserts a numeric window.
 - **Provider flags are explicit capability flags, not shared assumptions:** DeepSeek receives the
   `thinking` flag (`enabled`/`disabled`); OVHcloud reasons server-side and never receives it. Neither
   provider is sent `reasoning_effort` until a live probe confirms it is accepted — setting

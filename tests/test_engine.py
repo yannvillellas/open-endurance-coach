@@ -352,6 +352,11 @@ def test_focus_limit_leaves_room_for_the_context(settings: Settings, tmp_path: P
     assert system_tokens + engine.focus_limit() + DEFAULT_MAX_TOKENS <= INPUT_TOKEN_CEILING
 
 
+def test_focus_limit_allows_a_long_question(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    assert engine.focus_limit() >= 20_000
+
+
 def test_prompt_overhead_reserve_covers_the_rendered_message(settings: Settings) -> None:
     context = CoachContext(focus="status check", today=date(2026, 9, 17))
     overhead = estimate_user_message_tokens(context) - context.estimated_tokens()
