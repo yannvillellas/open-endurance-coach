@@ -53,15 +53,17 @@ def _width_m(total: float, rows: int) -> float:
     return max(_KM, math.ceil(total / rows / _KM) * _KM)
 
 
-def _label(row: int, width_km: int, total: float, *, last: bool) -> str:
+def _label(row: int, width_km: int, total: float, *, last: bool, partial: bool = False) -> str:
     first = row * width_km + 1
     if not last:
-        return f"km {first}" if width_km == 1 else f"km {first}-{first + width_km - 1}"
+        label = f"km {first}" if width_km == 1 else f"km {first}-{first + width_km - 1}"
+        return label + (" (partial)" if partial else "")
     last_km = max(first, math.ceil(total / _KM))
-    partial = total - math.floor(total / _KM) * _KM > _WHOLE_KM_M
+    short = total - math.floor(total / _KM) * _KM > _WHOLE_KM_M
+    marked = partial or short
     if last_km == first:
-        return f"km {first} (partial)" if partial else f"km {first}"
-    return f"km {first}-{last_km}" + (" (partial)" if partial else "")
+        return f"km {first} (partial)" if marked else f"km {first}"
+    return f"km {first}-{last_km}" + (" (partial)" if marked else "")
 
 
 def _segment(
@@ -82,7 +84,7 @@ def _segment(
     if start_time is None or end_time is None:
         return None
     elapsed = round(end_time - start_time)
-    if elapsed <= 0 or meters <= 0:
+    if elapsed <= 0 or round(meters, 1) <= 0:
         return None
 
     rates = _series(heart_rates, indexes)
@@ -152,21 +154,34 @@ def per_km_splits(
         buckets.setdefault(min(int(reading // width_m), row_count - 1), []).append(index)
 
     splits: list[ActivitySplit] = []
+    previous = False
     for row in range(row_count):
         indexes = buckets.get(row)
         if not indexes:
+            previous = False
             continue
         following = buckets.get(row + 1)
         end_index = following[0] if following else indexes[-1]
         start_distance = row * width_m
         end_distance = min(start_distance + width_m, total)
+        covered_start = start_distance if previous else readings[indexes[0]]
+        covered_end = end_distance if following else readings[end_index]
+        if covered_start is None or covered_end is None or covered_end <= covered_start:
+            previous = True
+            continue
         split = _segment(
-            label=_label(row, width_km, total, last=row == row_count - 1),
+            label=_label(
+                row,
+                width_km,
+                total,
+                last=row == row_count - 1,
+                partial=covered_start != start_distance or covered_end != end_distance,
+            ),
             times=times,
             indexes=indexes,
             start=indexes[0],
             end=end_index,
-            meters=end_distance - start_distance,
+            meters=covered_end - covered_start,
             altitudes=altitudes,
             heart_rates=heart_rates,
             watts=watts,
@@ -174,4 +189,5 @@ def per_km_splits(
         )
         if split is not None:
             splits.append(split)
+        previous = True
     return splits
