@@ -184,6 +184,71 @@ async def test_get_activity_with_intervals(settings: Settings) -> None:
     await client.aclose()
 
 
+async def test_get_activity_streams_path_params_and_parsing(settings: Settings) -> None:
+    payload = [
+        {"type": "time", "data": [0, 1, 2]},
+        {"type": "heartrate", "data": [90, 95, 100]},
+        {"type": "distance", "data": []},
+    ]
+    client, captured = make_client(settings, [httpx.Response(200, json=payload)])
+    streams = await client.get_activity_streams("i7", ["time", "heartrate", "distance"])
+    request = captured[0]
+    assert str(request.url).startswith("https://intervals.icu/api/v1/activity/i7/streams")
+    assert request.url.params["types"] == "time,heartrate,distance"
+    assert streams == {"time": [0, 1, 2], "heartrate": [90, 95, 100], "distance": []}
+    await client.aclose()
+
+
+async def test_get_activity_streams_skips_non_list_data(settings: Settings) -> None:
+    payload = [
+        {"type": "time", "data": [0, 1, 2]},
+        {"type": "heartrate", "data": 5},
+        {"type": "distance", "data": None},
+    ]
+    client, _ = make_client(settings, [httpx.Response(200, json=payload)])
+    streams = await client.get_activity_streams("i7", ["time", "heartrate", "distance"])
+    assert streams == {"time": [0, 1, 2]}
+    await client.aclose()
+
+
+async def test_get_activity_streams_rejects_a_non_json_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, text="<html>oops</html>")])
+    with pytest.raises(IntervalsApiError, match="streams"):
+        await client.get_activity_streams("i7", ["time"])
+    await client.aclose()
+
+
+async def test_get_activity_streams_rejects_a_non_list_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"error": "boom"})])
+    with pytest.raises(IntervalsApiError, match="streams"):
+        await client.get_activity_streams("i7", ["time"])
+    await client.aclose()
+
+
+async def test_get_activity_streams_skips_malformed_rows(settings: Settings) -> None:
+    payload = [{"type": "time", "data": [0, 1, 2]}, {"data": [9]}, "not-a-row"]
+    client, _ = make_client(settings, [httpx.Response(200, json=payload)])
+    streams = await client.get_activity_streams("i7", ["time"])
+    assert streams == {"time": [0, 1, 2]}
+    await client.aclose()
+
+
+async def test_get_activity_streams_with_no_types(settings: Settings) -> None:
+    client, captured = make_client(settings, [httpx.Response(200, json=[])])
+    streams = await client.get_activity_streams("i7", [])
+    assert streams == {}
+    assert captured[0].url.params["types"] == ""
+    await client.aclose()
+
+
+async def test_get_activity_streams_keeps_the_last_row_per_type(settings: Settings) -> None:
+    payload = [{"type": "time", "data": [0]}, {"type": "time", "data": [1]}]
+    client, _ = make_client(settings, [httpx.Response(200, json=payload)])
+    streams = await client.get_activity_streams("i7", ["time"])
+    assert streams == {"time": [1]}
+    await client.aclose()
+
+
 def test_rate_limits_from_headers_partial() -> None:
     limits = RateLimits.from_headers(httpx.Headers({"X-RateLimit-Limit": "2500,5000"}))
     assert limits.limit_15m == 2500

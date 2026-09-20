@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 
@@ -5,6 +6,10 @@ class IntervalsReadClient(Protocol):
     async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
 
     async def get_activity(self, activity_id: str, intervals: bool = True) -> dict[str, Any]: ...
+
+    async def get_activity_streams(
+        self, activity_id: str, types: Sequence[str]
+    ) -> dict[str, list[Any]]: ...
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]: ...
 
