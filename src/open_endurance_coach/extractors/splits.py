@@ -119,10 +119,11 @@ def per_km_splits(
     within ``max_splits``: a marathon fits one row per kilometre at the default cap, and
     longer activities widen the rows (2 km, 3 km, ...). Rows are cut at exact kilometre
     boundaries and labelled with the range they cover; the final row is ``(partial)``
-    when the stream stops mid-kilometre. The table ends at the last usable sample, so a
-    kilometre with no usable sample is left out rather than invented. Read-only: nothing
-    is written to Intervals and no intervals need to exist on the activity. Returns []
-    without a usable time or distance series.
+    when the stream stops mid-kilometre. The table ends at the stream's furthest usable sample (the
+    last one for a monotonic stream), so a kilometre with no usable sample is left out rather than
+    invented, and so is a final row with no measurable duration. Read-only: nothing is written to
+    Intervals and no intervals need to exist on the activity. Returns [] without a usable time or
+    distance series.
     """
     times = streams.get("time") or []
     distances = streams.get("distance") or []
