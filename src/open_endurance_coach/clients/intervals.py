@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -148,6 +148,28 @@ class IntervalsClient:
         params = {"intervals": str(intervals).lower()}
         response = await self._request("GET", f"/activity/{activity_id}", params=params)
         return response.json()
+
+    async def get_activity_streams(
+        self, activity_id: str, types: Sequence[str]
+    ) -> dict[str, list[Any]]:
+        response = await self._request(
+            "GET", f"/activity/{activity_id}/streams", params={"types": ",".join(types)}
+        )
+        try:
+            rows = response.json()
+        except ValueError as exc:
+            raise IntervalsApiError(response.status_code, "unexpected streams payload") from exc
+        if not isinstance(rows, list):
+            raise IntervalsApiError(response.status_code, "unexpected streams payload")
+        streams: dict[str, list[Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("type")
+            data = row.get("data")
+            if isinstance(name, str) and isinstance(data, list):
+                streams[name] = data
+        return streams
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
         response = await self._request(

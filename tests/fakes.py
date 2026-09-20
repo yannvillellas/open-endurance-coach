@@ -1,5 +1,5 @@
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ class FakeIntervalsClient:
         sport_settings: list[dict[str, Any]],
         detail: dict[str, Any] | None = None,
         athlete_summary: list[dict[str, Any]] | None = None,
+        streams: dict[str, list[Any]] | None = None,
     ) -> None:
         self.activities = activities
         self.wellness = wellness
@@ -44,6 +45,7 @@ class FakeIntervalsClient:
         self.sport_settings = sport_settings
         self.detail = detail or {}
         self.athlete_summary = athlete_summary or []
+        self.streams = streams or {}
         self.calls: list[tuple[Any, ...]] = []
 
     async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
@@ -55,6 +57,12 @@ class FakeIntervalsClient:
         detail = dict(self.detail)
         detail["id"] = activity_id
         return detail
+
+    async def get_activity_streams(
+        self, activity_id: str, types: Sequence[str]
+    ) -> dict[str, list[Any]]:
+        self.calls.append(("streams", activity_id, tuple(types)))
+        return {name: list(self.streams.get(name, [])) for name in types}
 
     async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
         self.calls.append(("wellness", oldest, newest))
