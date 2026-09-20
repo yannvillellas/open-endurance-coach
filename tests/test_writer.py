@@ -262,14 +262,15 @@ async def test_create_race_updates_same_name_and_date_across_race_categories() -
     assert outcomes[0].event_id == 10001
 
 
-async def test_create_race_ignores_same_name_workout_event() -> None:
+async def test_create_race_refuses_a_same_name_workout_event_with_a_compliant_server() -> None:
     client = FakeCalendarClient(
         [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="WORKOUT")]
     )
     writer = CalendarWriter(client)
-    outcomes = await writer.apply_decision(make_decision(make_race_create()))
-    assert len(client.created) == 1
-    assert outcomes[0].target == "created"
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert client.updated == []
 
 
 async def test_update_race_puts_only_changed_fields_including_category() -> None:
@@ -409,6 +410,41 @@ async def test_create_race_updates_a_leaked_category_less_event() -> None:
     outcomes = await writer.apply_decision(make_decision(make_race_create()))
     assert client.created == []
     assert outcomes[0].target == "updated"
+
+
+async def test_create_workout_adopts_a_category_less_event_with_a_compliant_server() -> None:
+    client = FakeCalendarClient(
+        [{"id": 10001, "name": "Tempo Session", "start_date_local": "2026-09-22T00:00:00"}]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2026, 9, 22))
+        )
+    )
+    assert client.created == []
+    assert outcomes[0].target == "updated"
+    assert client.updated == [
+        (
+            "10001",
+            {
+                "category": "WORKOUT",
+                "name": "Tempo Session",
+                "start_date_local": "2026-09-22T00:00:00",
+            },
+        )
+    ]
+
+
+async def test_create_race_adopts_a_category_less_event_with_a_compliant_server() -> None:
+    client = FakeCalendarClient(
+        [{"id": 10001, "name": "Autumn Trail Race", "start_date_local": "2026-09-27T00:00:00"}]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert outcomes[0].target == "updated"
+    assert client.updated[0][1]["category"] == "RACE_A"
 
 
 async def test_create_ignores_a_same_name_event_on_the_next_day() -> None:

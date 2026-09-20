@@ -19,7 +19,6 @@ from open_endurance_coach.store.records import Decision
 from .records import MutationOutcome
 
 WORKOUT_CATEGORY = "WORKOUT"
-_RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
 logger = logging.getLogger(__name__)
 
 
@@ -277,8 +276,11 @@ class CalendarWriter:
         return payload
 
     async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
+        # No category filter: an unlabelled event (or one whose category the
+        # server omits) must be found so it is adopted instead of duplicated.
+        # The family guard in _apply_create rejects a cross-family match.
         rows = await self._client.list_events(
-            day.isoformat(), (day + timedelta(days=1)).isoformat(), category=WORKOUT_CATEGORY
+            day.isoformat(), (day + timedelta(days=1)).isoformat()
         )
         for row in rows:
             if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
@@ -381,10 +383,10 @@ class CalendarWriter:
         return MutationOutcome(action="delete", target="deleted", event_id=mutation.event_id)
 
     async def _find_race_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
+        # No category filter: an unlabelled event must be found and adopted
+        # instead of duplicated; _apply_create_race rejects a cross-family match.
         rows = await self._client.list_events(
-            day.isoformat(),
-            (day + timedelta(days=1)).isoformat(),
-            category=_RACE_CATEGORY_FILTER,
+            day.isoformat(), (day + timedelta(days=1)).isoformat()
         )
         for row in rows:
             if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
