@@ -27,7 +27,7 @@ from open_endurance_coach.schemas.decisions import (
     DeleteWorkout,
     UpdateWorkout,
 )
-from open_endurance_coach.schemas.intervals import Activity
+from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, INPUT_TOKEN_CEILING, estimate_text_tokens
@@ -306,6 +306,15 @@ async def test_recent_feedback_keeps_the_answer_report_for_transient_turns(
     recent = store.recent_feedback(1)
     assert recent[0].feedback.content == "what about the hike?"
     assert recent[0].report.summary == "Answer."
+
+
+async def test_refocus_context_keeps_activity_splits(settings: Settings, tmp_path: Path) -> None:
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
+    splits = [ActivitySplit(label="km 1", distance_m=1000.0, time_s=300)]
+    base = CoachContext(focus="hi", activity_splits=splits)
+    context = engine.refocus_context(base, "review yesterday", today=TODAY)
+
+    assert [split.label for split in context.activity_splits] == ["km 1"]
 
 
 async def test_refocus_context_keeps_data_within_budget(settings: Settings, tmp_path: Path) -> None:

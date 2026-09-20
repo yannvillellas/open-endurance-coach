@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.intervals import Activity, Wellness
+from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Wellness
 from open_endurance_coach.tokens import (
     CHARS_PER_TOKEN,
     estimate_payload_tokens,
@@ -61,6 +61,7 @@ def test_sections_default_to_empty() -> None:
     assert context.recent_events == []
     assert context.sport_settings == []
     assert context.activity_detail is None
+    assert context.activity_splits == []
     assert context.user_feedback is None
 
 
@@ -166,6 +167,15 @@ def test_estimated_tokens_grow_with_content() -> None:
     assert larger.estimated_tokens() > small.estimated_tokens()
 
 
+def test_activity_splits_survive_a_json_round_trip() -> None:
+    context = CoachContext(
+        focus="status check",
+        activity_splits=[ActivitySplit(label="km 1-2 (partial)", distance_m=1500.0, time_s=300)],
+    )
+    restored = CoachContext.model_validate(context.model_dump(mode="json"))
+    assert restored.activity_splits == context.activity_splits
+
+
 def test_context_over_budget_is_rejected() -> None:
     with pytest.raises(ValidationError, match="token budget"):
         CoachContext.model_validate(
@@ -176,17 +186,44 @@ def test_context_over_budget_is_rejected() -> None:
     )
 
 
+def test_section_tokens_order_matches_the_rendered_sections() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "status check",
+            "recent_activities": [ACTIVITY],
+            "activity_splits": [{"label": "km 1", "distance_m": 1000.0, "time_s": 300}],
+            "today": "2024-02-01",
+            "user_feedback": "felt tired",
+            "current_proposal": {
+                "intent": "chat",
+                "summary": "hello",
+                "findings": [],
+                "questions": [],
+                "needs_input": [],
+                "mutations": [],
+            },
+        }
+    )
+    sections = context.section_tokens()
+    rendered = [key for key in context.sections() if key in sections]
+    assert rendered == [key for key in sections if key in rendered]
+    assert {"activity_splits", "today", "current_proposal", "user_feedback"} <= set(rendered)
+
+
 def test_section_tokens_reports_per_section() -> None:
     context = CoachContext.model_validate(
         {"focus": "status check", "recent_activities": [ACTIVITY], "wellness": [WELLNESS]}
     )
     sections = context.section_tokens()
+    rendered = [key for key in context.sections() if key in sections]
+    assert rendered == [key for key in sections if key in rendered]
     assert set(sections) == {
         "focus",
         "today",
         "current_proposal",
         "recent_activities",
         "activity_detail",
+        "activity_splits",
         "wellness",
         "recent_events",
         "upcoming_events",
@@ -212,7 +249,7 @@ def test_empty_sections_cost_only_the_payload_they_render() -> None:
 
 
 def test_focus_is_bounded_by_the_request_not_the_data_budget() -> None:
-    context = CoachContext.model_validate({"focus": "x" * 30000, "recent_activities": [ACTIVITY]})
+    context = CoachContext.model_validate({"focus": "x" * 60000, "recent_activities": [ACTIVITY]})
     assert context.data_tokens() <= context.max_tokens
     assert context.estimated_tokens() > context.max_tokens
 
