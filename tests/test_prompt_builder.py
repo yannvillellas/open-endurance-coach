@@ -323,7 +323,30 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
 
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert estimate_text_tokens(system) <= 2560
+    assert estimate_text_tokens(system) <= 2816
+    defaults = Settings(intervals_api_key="test-key", deepseek_api_key="test-llm-key")
+    operator = build_messages(CONTEXT, defaults)[0].content
+    assert estimate_text_tokens(operator) <= 2816
+
+
+def test_contract_describes_the_split_labels() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "rows of consecutive kilometres" in system
+    assert "labels never overlap" in system
+    assert "(partial) marks the final row when it stops mid-kilometre" in system
+    assert "a kilometre with no samples is left out" in system
+
+
+def test_user_message_renders_activity_splits() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "analyse the race",
+            "activity_splits": [{"label": "km 1-2 (partial)", "distance_m": 1500.0, "time_s": 300}],
+        }
+    )
+    user = build_messages(context, make_settings())[1].content
+    assert '"activity_splits"' in user
+    assert "km 1-2 (partial)" in user
 
 
 def test_contract_forbids_no_op_race_updates() -> None:
