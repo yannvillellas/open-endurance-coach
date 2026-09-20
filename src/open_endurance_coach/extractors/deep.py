@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
 REFERENCE_WINDOW_DAYS = 3
+SPLIT_COVERAGE_TOLERANCE = 0.02
 
 _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
@@ -87,6 +88,17 @@ _MONTHS = {
     "dec": 12,
     "december": 12,
 }
+
+
+def _warn_on_split_coverage(
+    activity_id: str, declared_m: float | None, splits: list[ActivitySplit]
+) -> None:
+    """Note when the split table does not cover the activity's own distance."""
+    if declared_m is None or declared_m <= 0:
+        return
+    covered = sum(split.distance_m for split in splits)
+    if not splits or abs(covered - declared_m) / declared_m > SPLIT_COVERAGE_TOLERANCE:
+        logger.warning("splits for %s cover %.0f of %.0f m", activity_id, covered, declared_m)
 
 
 def _referenced_date(focus: str, today: date) -> date | None:
@@ -222,6 +234,7 @@ class DeepHistoricalExtractor:
                     detail_source.id, stream_types(speed_based)
                 )
                 activity_splits = per_km_splits(streams, speed_based=speed_based)
+                _warn_on_split_coverage(detail_source.id, activity_detail.distance, activity_splits)
             except (IntervalsApiError, ValueError) as exc:
                 logger.warning(
                     "could not read the detail or streams of %s; splits skipped: %s",

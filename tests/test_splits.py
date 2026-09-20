@@ -99,8 +99,55 @@ def test_kilometres_without_samples_are_left_out() -> None:
         "distance": [0.0, 500.0, 5100.0, 5150.0, 5200.0],
     }
     splits = per_km_splits(streams)
-    assert labels(splits) == ["km 1", "km 6 (partial)"]
-    assert [split.distance_m for split in splits] == [1000.0, 200.0]
+    assert labels(splits) == ["km 1 (partial)", "km 6 (partial)"]
+    assert [split.distance_m for split in splits] == [500.0, 100.0]
+
+
+def test_a_sub_metre_tail_yields_no_row() -> None:
+    streams: dict[str, list[Any]] = {
+        "time": [0, 1, 2],
+        "distance": [4999.0, 5000.0, 5000.02],
+    }
+    assert [row.label for row in per_km_splits(streams)] == ["km 5 (partial)"]
+
+
+def test_a_sample_exactly_on_a_cell_edge_with_a_following_row() -> None:
+    streams: dict[str, list[Any]] = {
+        "time": [0, 1, 2],
+        "distance": [0.0, 1000.0, 1500.0],
+    }
+    rows = per_km_splits(streams)
+    assert [(row.label, row.distance_m) for row in rows] == [
+        ("km 1", 1000.0),
+        ("km 2 (partial)", 500.0),
+    ]
+
+
+def test_a_gap_that_straddles_a_cell_boundary_is_left_as_is() -> None:
+    distance = [float(m) for m in range(0, 601, 10)] + [float(m) for m in range(1500, 2001, 10)]
+    streams: dict[str, list[Any]] = {
+        "time": list(range(len(distance))),
+        "distance": distance,
+    }
+    rows = per_km_splits(streams, speed_based=True)
+    assert [(row.label, row.distance_m, row.average_speed_kmh) for row in rows] == [
+        ("km 1", 1000.0, 59.0),
+        ("km 2", 1000.0, 72.0),
+    ]
+
+
+def test_a_gap_adjacent_row_reports_the_span_it_covers() -> None:
+    distance = [float(m) for m in range(0, 201, 10)] + [float(m) for m in range(9800, 10001, 10)]
+    streams: dict[str, list[Any]] = {
+        "time": list(range(len(distance))),
+        "distance": distance,
+    }
+    rows = per_km_splits(streams, speed_based=True)
+    assert [(row.label, row.distance_m, row.average_speed_kmh) for row in rows] == [
+        ("km 1 (partial)", 200.0, 36.0),
+        ("km 10 (partial)", 200.0, 36.0),
+    ]
+    assert sum(row.distance_m for row in rows) == 400.0
 
 
 def test_labels_cover_consecutive_kilometres_without_overlap() -> None:
@@ -137,6 +184,45 @@ def test_climbing_and_descending_rows_report_gain_and_grade() -> None:
         "altitude": [200.0, 150.0, 100.0],
     }
     split = per_km_splits(descent)[0]
+    assert split.elevation_loss_m == 100.0
+    assert split.grade_pct == -10.0
+
+
+def test_negative_heart_rate_and_watts_are_treated_as_missing() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [-40, 150] * 300 + [-40]
+    streams["watts"] = [-100, 200] * 300 + [-100]
+    rides = per_km_splits(streams, speed_based=True)
+    assert all(split.average_heartrate == 150 for split in rides)
+    assert all(split.average_watts == 200 for split in rides)
+
+
+def test_all_negative_heart_rate_and_watts_yield_missing_values() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [-50] * len(streams["time"])
+    streams["watts"] = [-50] * len(streams["time"])
+    rows = per_km_splits(streams, speed_based=True)
+    assert all(row.average_heartrate is None and row.max_heartrate is None for row in rows)
+    assert all(row.average_watts is None for row in rows)
+
+
+def test_zero_heart_rate_and_watts_are_real_readings() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [0] * len(streams["time"])
+    streams["watts"] = [0] * len(streams["time"])
+    rows = per_km_splits(streams, speed_based=True)
+    assert all(row.average_heartrate == 0 and row.max_heartrate == 0 for row in rows)
+    assert all(row.average_watts == 0 for row in rows)
+
+
+def test_negative_altitude_stays_signed() -> None:
+    streams: dict[str, list[Any]] = {
+        "time": [0, 100, 200],
+        "distance": [0.0, 500.0, 1000.0],
+        "altitude": [-50.0, -100.0, -150.0],
+    }
+    split = per_km_splits(streams)[0]
+    assert split.elevation_gain_m == 0.0
     assert split.elevation_loss_m == 100.0
     assert split.grade_pct == -10.0
 

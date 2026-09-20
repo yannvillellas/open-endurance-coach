@@ -133,9 +133,21 @@ class IntervalsClient:
             )
         return response
 
-    def _json_list(self, response: httpx.Response, label: str) -> list[dict[str, Any]]:
-        data = response.json()
+    def _json(self, response: httpx.Response, label: str) -> Any:
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise IntervalsApiError(response.status_code, f"unexpected {label} payload") from exc
+
+    def _json_list(self, response: httpx.Response, label: str) -> list[Any]:
+        data = self._json(response, label)
         if not isinstance(data, list):
+            raise IntervalsApiError(response.status_code, f"unexpected {label} payload")
+        return data
+
+    def _json_object(self, response: httpx.Response, label: str) -> dict[str, Any]:
+        data = self._json(response, label)
+        if not isinstance(data, dict):
             raise IntervalsApiError(response.status_code, f"unexpected {label} payload")
         return data
 
@@ -147,7 +159,7 @@ class IntervalsClient:
     async def get_activity(self, activity_id: str, intervals: bool = True) -> dict[str, Any]:
         params = {"intervals": str(intervals).lower()}
         response = await self._request("GET", f"/activity/{activity_id}", params=params)
-        return response.json()
+        return self._json_object(response, "activity")
 
     async def get_activity_streams(
         self, activity_id: str, types: Sequence[str]
@@ -155,14 +167,8 @@ class IntervalsClient:
         response = await self._request(
             "GET", f"/activity/{activity_id}/streams", params={"types": ",".join(types)}
         )
-        try:
-            rows = response.json()
-        except ValueError as exc:
-            raise IntervalsApiError(response.status_code, "unexpected streams payload") from exc
-        if not isinstance(rows, list):
-            raise IntervalsApiError(response.status_code, "unexpected streams payload")
         streams: dict[str, list[Any]] = {}
-        for row in rows:
+        for row in self._json_list(response, "streams"):
             if not isinstance(row, dict):
                 continue
             name = row.get("type")
@@ -191,17 +197,17 @@ class IntervalsClient:
 
     async def get_event(self, event_id: str) -> dict[str, Any]:
         response = await self._request("GET", self._athlete_path(f"/events/{event_id}"))
-        return response.json()
+        return self._json_object(response, "event")
 
     async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._request("POST", self._athlete_path("/events"), payload=payload)
-        return response.json()
+        return self._json_object(response, "event")
 
     async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._request(
             "PUT", self._athlete_path(f"/events/{event_id}"), payload=payload
         )
-        return response.json()
+        return self._json_object(response, "event")
 
     async def delete_event(self, event_id: str) -> None:
         await self._request("DELETE", self._athlete_path(f"/events/{event_id}"))

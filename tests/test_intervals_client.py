@@ -255,6 +255,55 @@ def test_rate_limits_from_headers_partial() -> None:
     assert limits.remaining_15m is None
 
 
+async def test_get_activity_rejects_a_non_dict_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json=[1, 2])])
+    with pytest.raises(IntervalsApiError, match="activity"):
+        await client.get_activity("i5")
+    await client.aclose()
+
+
+async def test_object_endpoints_reject_a_non_json_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, text="<html>oops</html>")])
+    with pytest.raises(IntervalsApiError, match="event"):
+        await client.get_event("e5")
+    await client.aclose()
+
+
+async def test_create_event_rejects_a_non_dict_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json="ok")])
+    with pytest.raises(IntervalsApiError, match="event"):
+        await client.create_event({"name": "x"})
+    await client.aclose()
+
+
+async def test_list_activities_rejects_a_non_json_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, text="<html>oops</html>")])
+    with pytest.raises(IntervalsApiError, match="activities"):
+        await client.list_activities("2024-01-01", "2024-02-01")
+    await client.aclose()
+
+
+async def test_update_event_rejects_a_non_dict_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json="ok")])
+    with pytest.raises(IntervalsApiError, match="event"):
+        await client.update_event("e5", {"name": "x"})
+    await client.aclose()
+
+
+async def test_list_wellness_rejects_a_non_list_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"error": "boom"})])
+    with pytest.raises(IntervalsApiError, match="wellness"):
+        await client.list_wellness("2024-01-01", "2024-02-01")
+    await client.aclose()
+
+
+async def test_sport_settings_rejects_a_non_list_body(settings: Settings) -> None:
+    client, _ = make_client(settings, [httpx.Response(200, json={"error": "boom"})])
+    with pytest.raises(IntervalsApiError, match="sport-settings"):
+        await client.get_sport_settings()
+    await client.aclose()
+
+
 async def test_get_athlete_summary_returns_list(settings: Settings) -> None:
     client, _ = make_client(settings, [httpx.Response(200, json=[{"month": "x"}, {"month": "y"}])])
     result = await client.get_athlete_summary()

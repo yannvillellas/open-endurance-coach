@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -6,7 +7,11 @@ import pytest
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
+from open_endurance_coach.extractors.deep import (
+    DeepHistoricalExtractor,
+    _warn_on_split_coverage,
+    detect_deep_query,
+)
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Event, Wellness
@@ -332,6 +337,69 @@ async def test_deep_extraction_keeps_the_detail_when_splits_fail(settings: Setti
 
     assert context.activity_detail is not None
     assert context.activity_splits == []
+
+
+async def test_deep_extraction_warns_when_splits_do_not_cover_the_activity(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    short: dict[str, list[Any]] = {
+        "time": list(range(571)),
+        "distance": [index * 1000 / 300 for index in range(571)],
+    }
+    client = make_intervals_client(
+        streams=short,
+        detail={
+            "start_date_local": "2024-01-20T08:00:00",
+            "type": "Ride",
+            "name": "Short",
+            "distance": 2000.0,
+        },
+    )
+    focus = "how did my heart rate improve on hills in the last 3 months"
+    with caplog.at_level(logging.WARNING):
+        await DeepHistoricalExtractor(settings, client).extract(
+            focus, query=detect_deep_query(focus), today=TODAY
+        )
+
+    assert any("cover" in record.message for record in caplog.records)
+
+    caplog.clear()
+    matching: dict[str, list[Any]] = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+    }
+    client = make_intervals_client(
+        streams=matching,
+        detail={
+            "start_date_local": "2024-01-20T08:00:00",
+            "type": "Ride",
+            "name": "Matching",
+            "distance": 2000.0,
+        },
+    )
+    with caplog.at_level(logging.WARNING):
+        await DeepHistoricalExtractor(settings, client).extract(
+            focus, query=detect_deep_query(focus), today=TODAY
+        )
+
+    assert not any("cover" in record.message for record in caplog.records)
+
+
+def test_split_coverage_warning_thresholds(caplog: pytest.LogCaptureFixture) -> None:
+    splits = [ActivitySplit(label="km 1", distance_m=1000.0, time_s=300)]
+
+    with caplog.at_level(logging.WARNING):
+        _warn_on_split_coverage("a1", None, splits)
+        _warn_on_split_coverage("a1", 0.0, splits)
+        _warn_on_split_coverage("a1", 1000.0, splits)
+        _warn_on_split_coverage("a1", 1020.0, splits)
+    assert not caplog.records
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _warn_on_split_coverage("a1", 1021.0, splits)
+        _warn_on_split_coverage("a1", 1000.0, [])
+    assert len(caplog.records) == 2
 
 
 async def test_standard_extraction_has_no_activity_splits(settings: Settings) -> None:
