@@ -448,6 +448,52 @@ async def test_create_race_adopts_a_category_less_event_with_a_compliant_server(
     assert client.updated[0][1]["category"] == "RACE_A"
 
 
+async def test_create_workout_prefers_the_same_family_match_over_an_earlier_race() -> None:
+    client = FakeCalendarClient(
+        [
+            make_event(90001, "2026-09-22", name="Hill Repeats", category="RACE_A"),
+            make_event(10001, "2026-09-22", name="Hill Repeats", category="WORKOUT"),
+        ]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Hill Repeats", start_date_local=date(2026, 9, 22))
+        )
+    )
+    assert outcomes[0].event_id == 10001
+    assert client.created == []
+
+
+async def test_create_race_prefers_the_same_family_match_over_an_earlier_workout() -> None:
+    client = FakeCalendarClient(
+        [
+            make_event(10001, "2026-09-27", name="Autumn Trail Race", category="WORKOUT"),
+            make_event(90001, "2026-09-27", name="Autumn Trail Race", category="RACE_A"),
+        ]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert outcomes[0].event_id == 90001
+    assert client.created == []
+
+
+async def test_create_workout_refuses_when_only_a_race_matches() -> None:
+    client = FakeCalendarClient(
+        [make_event(90001, "2026-09-22", name="Hill Repeats", category="RACE_A")]
+    )
+    writer = CalendarWriter(client)
+    with pytest.raises(WriterError, match="non-WORKOUT"):
+        await writer.apply_decision(
+            make_decision(
+                CreateWorkout(
+                    action="create", name="Hill Repeats", start_date_local=date(2026, 9, 22)
+                )
+            )
+        )
+    assert client.created == []
+
+
 async def test_create_ignores_a_same_name_event_on_the_next_day() -> None:
     client = FakeCalendarClient(
         [make_event(10001, "2099-01-02", name="Tempo Session", category="WORKOUT")]

@@ -1,4 +1,3 @@
-import json
 from datetime import date
 from typing import Any, Literal, Self
 
@@ -164,32 +163,6 @@ class CoachContext(BaseModel):
 
     def sections(self) -> dict[str, Any]:
         return {key: _section_payload(key, value) for key, value in self._raw_sections().items()}
-
-    @staticmethod
-    def section_fragment(key: str, value: Any) -> str:
-        """One section's own JSON."""
-        return json.dumps(_section_payload(key, value), ensure_ascii=False, indent=2)
-
-    def data_fragments(self) -> dict[str, str]:
-        """Serialized fragments of the data payload (every section except focus)."""
-        return {
-            key: self.section_fragment(key, value)
-            for key, value in self._raw_sections().items()
-            if key != "focus"
-        }
-
-    @staticmethod
-    def payload_chars(fragments: dict[str, str]) -> int:
-        """Exact length of ``json.dumps(payload, indent=2)``."""
-        total = 4
-        for index, (key, fragment) in enumerate(fragments.items()):
-            if index:
-                total += 2
-            total += 2
-            total += len(json.dumps(key, ensure_ascii=False))
-            total += 2
-            total += len(fragment) + 2 * fragment.count("\n")
-        return total
 
     def section_tokens(self) -> dict[str, int]:
         """Per-section token estimates, for diagnostics only.

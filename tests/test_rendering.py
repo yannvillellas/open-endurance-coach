@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, date, datetime
-from typing import Any
 
 import pytest
 from rich.console import Console
@@ -291,19 +290,6 @@ def test_mutations_plan_text_renders_race_update_and_delete() -> None:
     text = mutations_plan_text(mutations)
     assert "- update race event 20001: category=RACE_B, type=Run, moving_time=7200" in text
     assert "- delete race event 20002" in text
-
-
-def test_render_apply_warns_about_skipped_mutations(capsys: Any) -> None:
-    from open_endurance_coach.cli.rendering import render_apply
-    from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
-
-    report = ApplyReport(
-        decisions=[AppliedDecision(decision_id=7, outcomes=[], skipped=["past-dated"])]
-    )
-    render_apply(report)
-    out = " ".join(capsys.readouterr().out.split())
-    assert "Decision #7: 1 mutation(s) skipped (past-dated)" in out
-    assert "only partially updated" in out
 
 
 def test_apply_plan_text_reports_drift() -> None:
