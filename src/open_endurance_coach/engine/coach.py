@@ -1,4 +1,3 @@
-import json
 import logging
 import math
 from collections.abc import Callable, Sequence
@@ -13,6 +12,7 @@ from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
@@ -93,6 +93,10 @@ class PlaceholderMutationError(ValueError):
     """The decision still carries example placeholder values."""
 
 
+class StateDriftError(ValueError):
+    """Some of the decision's mutations are no longer valid."""
+
+
 def _is_stale(mutation: Any, *, today: date) -> bool:
     return (
         isinstance(mutation, (CreateWorkout, CreateRace, UpdateWorkout, UpdateRace))
@@ -147,6 +151,15 @@ def _filter_valid_mutations(report: DecisionReport, *, today: date) -> tuple[lis
         else:
             kept.append(mutation)
     return kept, dropped
+
+
+def _drop_reason(dropped: list[str]) -> str:
+    reasons = set(dropped)
+    if reasons == {"placeholder"}:
+        return "placeholder values"
+    if reasons == {"past-dated"}:
+        return "dates that have passed"
+    return "mutations that no longer match the plan"
 
 
 def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
@@ -280,11 +293,13 @@ class CoachEngine:
             self._fit_history(context, history, system_tokens=system_tokens),
         )
         self._assert_within_ceiling(messages)
-        content = await self._llm_client.complete_json(
-            messages,
-            validator=lambda payload: _validate_report(payload, today=today),
-        )
-        return DecisionReport.model_validate(json.loads(content))
+        validated: list[DecisionReport] = []
+
+        def validate(payload: Any) -> None:
+            validated.append(_validate_report(payload, today=today))
+
+        await self._llm_client.complete_json(messages, validator=validate)
+        return validated[0]
 
     async def build_context(
         self,
@@ -503,14 +518,10 @@ class CoachEngine:
         discarded: list[tuple[int, str]] = []
         today = self.today()
         for decision in self._store.list_unapplied_decisions():
-            kept, dropped = _filter_valid_mutations(decision.report, today=today)
-            if not dropped or kept:
+            _, dropped = _filter_valid_mutations(decision.report, today=today)
+            if not dropped:
                 continue
-            reason = (
-                "placeholder values"
-                if set(dropped) == {"placeholder"}
-                else "dates that have passed"
-            )
+            reason = _drop_reason(dropped)
             self._store.discard_decision(decision.id)
             discarded.append((decision.id, reason))
         return discarded
@@ -522,15 +533,21 @@ class CoachEngine:
         self._assert_current_dates(draft.report)
         return self._store.approve_draft(draft_id)
 
+    def reject_draft(self, draft_id: int) -> None:
+        self._store.reject_draft(draft_id)
+
     async def apply(self, decision_id: int | None = None) -> ApplyReport:
         """Apply approved decisions to the calendar.
 
         If a mutation fails, earlier mutations of the same decision stay applied while
         the decision remains unapplied; re-running is safe because mutations are
         idempotent (create resolves by name+date, update re-applies, delete skips).
+
+        An approval is atomic: a decision with a stale or placeholder mutation is
+        rejected with ``StateDriftError`` and nothing is written.
         """
         if self._writer is None:
-            raise RuntimeError("no calendar writer configured")
+            raise InternalError("no calendar writer configured")
         if decision_id is not None:
             decision = self._store.get_decision(decision_id)
             if decision is None:
@@ -543,25 +560,28 @@ class CoachEngine:
         applied: list[AppliedDecision] = []
         for decision in decisions:
             kept, dropped = _filter_valid_mutations(decision.report, today=self.today())
-            if dropped and not kept:
-                reason = ", ".join(sorted(set(dropped)))
-                if set(dropped) == {"placeholder"}:
-                    raise PlaceholderMutationError(
-                        f"decision {decision.id} only contains placeholder mutations ({reason})"
-                    )
-                raise StaleDecisionError(
-                    f"decision {decision.id} has no mutations left to apply ({reason})"
-                )
             if dropped:
+                reason = _drop_reason(dropped)
+                if not kept:
+                    if set(dropped) == {"placeholder"}:
+                        raise PlaceholderMutationError(
+                            f"decision {decision.id} only contains placeholder mutations ({reason})"
+                        )
+                    raise StaleDecisionError(
+                        f"decision {decision.id} has no mutations left to apply ({reason})"
+                    )
                 logger.warning(
-                    "skipping %d %s mutation(s) of decision %s",
+                    "rejecting decision %s: %d %s mutation(s) dropped (%s); nothing written",
+                    decision.id,
                     len(dropped),
                     "/".join(sorted(set(dropped))),
-                    decision.id,
+                    reason,
+                )
+                raise StateDriftError(
+                    f"decision {decision.id} was rejected: {len(dropped)} mutation(s)"
+                    f" dropped ({reason}); nothing was written, ask for an updated plan"
                 )
             outcomes = await self._writer.apply_decision(decision, mutations=kept)
-            applied.append(
-                AppliedDecision(decision_id=decision.id, outcomes=outcomes, skipped=dropped)
-            )
+            applied.append(AppliedDecision(decision_id=decision.id, outcomes=outcomes))
             self._store.mark_decision_applied(decision.id)
         return ApplyReport(decisions=applied)

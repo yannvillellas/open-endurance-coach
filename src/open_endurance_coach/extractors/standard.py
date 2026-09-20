@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from itertools import pairwise
@@ -157,19 +158,28 @@ class StandardExtractor:
     ) -> CoachContext:
         current = self._today(today)
         newest = (current + timedelta(days=1)).isoformat()
-        activities_raw = await self._client.list_activities(
-            (current - timedelta(days=ACTIVITY_LOOKBACK_DAYS)).isoformat(), newest
+        (
+            activities_raw,
+            wellness_raw,
+            events_raw,
+            goal_races,
+            rollup,
+            settings_raw,
+        ) = await asyncio.gather(
+            self._client.list_activities(
+                (current - timedelta(days=ACTIVITY_LOOKBACK_DAYS)).isoformat(), newest
+            ),
+            self._client.list_wellness(
+                (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
+            ),
+            self._client.list_events(
+                (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
+                (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
+            ),
+            fetch_goal_races(self._client, current),
+            fetch_training_rollup(self._client, current),
+            self._client.get_sport_settings(),
         )
-        wellness_raw = await self._client.list_wellness(
-            (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
-        )
-        events_raw = await self._client.list_events(
-            (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
-            (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
-        )
-        goal_races = await fetch_goal_races(self._client, current)
-        rollup = await fetch_training_rollup(self._client, current)
-        settings_raw = await self._client.get_sport_settings()
         activities = sorted(
             (Activity.model_validate(item) for item in activities_raw),
             key=lambda activity: activity.start_date_local,

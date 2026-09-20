@@ -9,6 +9,7 @@ from open_endurance_coach.schemas.decisions import DecisionReport
 class DraftStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 @dataclass(frozen=True)

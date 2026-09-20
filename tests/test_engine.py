@@ -15,9 +15,12 @@ from open_endurance_coach.engine.coach import (
     CoachEngine,
     PlaceholderMutationError,
     StaleDecisionError,
+    StateDriftError,
     _bad_race_number,
+    _drop_reason,
     _validate_report,
 )
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
 from open_endurance_coach.prompts.prompts import estimate_user_message_tokens, system_prompt
 from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
@@ -199,9 +202,9 @@ async def test_resolve_event_dates_logs_unexpected_lookup_failure(
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
+    provider = FakeLlmProvider([completion("")] * 4)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
     assert store.unseen_activity_ids(["fx-a", "fx-b"]) == {"fx-a", "fx-b"}
@@ -219,9 +222,9 @@ async def test_analyze_retries_on_schema_invalid_response(
 
 async def test_analyze_schema_invalid_exhausts_attempts(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 3)
+    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 4)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
 
@@ -549,7 +552,7 @@ async def test_approve_missing_draft_raises(settings: Settings, tmp_path: Path) 
 
 async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
-    with pytest.raises(RuntimeError, match="writer"):
+    with pytest.raises(InternalError, match="writer"):
         await engine.apply()
 
 
@@ -678,7 +681,7 @@ async def test_analyze_empty_content_raises_without_writes(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
+    provider = FakeLlmProvider([completion("")] * 4)
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="empty content"):
         await engine.analyze("hi", context=CoachContext(focus="f"))
@@ -775,6 +778,7 @@ async def test_past_dated_mutation_is_retried(settings: Settings, tmp_path: Path
 async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider(
         [
+            completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
@@ -950,7 +954,7 @@ def test_validate_report_rejects_a_race_create_without_load() -> None:
         _validate_report(payload, today=date(2024, 2, 1))
 
 
-async def test_apply_skips_past_dated_mutations_and_writes_the_rest(
+async def test_apply_refuses_a_decision_with_a_past_dated_mutation(
     settings: Settings, tmp_path: Path
 ) -> None:
     calendar = FakeCalendarClient()
@@ -979,13 +983,16 @@ async def test_apply_skips_past_dated_mutations_and_writes_the_rest(
     )
     draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
     decision = store.approve_draft(draft_id)
-    applied = await engine.apply(decision.id)
-    assert applied.decisions[0].skipped == ["past-dated"]
-    assert [outcome.target for outcome in applied.decisions[0].outcomes] == ["created"]
-    assert [event["name"] for event in calendar.created] == ["Future Session"]
+    with pytest.raises(StateDriftError, match="nothing was written"):
+        await engine.apply(decision.id)
+    assert calendar.created == []
+    assert [row.id for row in store.list_unapplied_decisions()] == [decision.id]
+    stored = store.get_decision(decision.id)
+    assert stored is not None
+    assert stored.applied_at is None
 
 
-async def test_discard_keeps_a_mixed_decision_with_future_mutations(
+async def test_discard_removes_a_decision_with_any_dropped_mutation(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -1013,8 +1020,8 @@ async def test_discard_keeps_a_mixed_decision_with_future_mutations(
     )
     draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
     store.approve_draft(draft_id)
-    assert engine.discard_stale_decisions() == []
-    assert len(store.list_unapplied_decisions()) == 1
+    assert engine.discard_stale_decisions() == [(1, "dates that have passed")]
+    assert store.list_unapplied_decisions() == []
 
 
 async def test_apply_placeholder_only_decision_raises_placeholder_error(
@@ -1064,6 +1071,14 @@ async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_pa
     draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
     store.approve_draft(draft_id)
     assert engine.discard_stale_decisions() == [(1, "placeholder values")]
+
+
+def test_drop_reason_names_the_single_causes_and_the_mixed_case() -> None:
+    assert _drop_reason(["past-dated"]) == "dates that have passed"
+    assert _drop_reason(["placeholder"]) == "placeholder values"
+    assert _drop_reason(["past-dated", "placeholder"]) == (
+        "mutations that no longer match the plan"
+    )
 
 
 def test_validate_report_rejects_negative_race_values() -> None:

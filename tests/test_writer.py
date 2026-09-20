@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from typing import Any, cast
 
@@ -262,14 +263,15 @@ async def test_create_race_updates_same_name_and_date_across_race_categories() -
     assert outcomes[0].event_id == 10001
 
 
-async def test_create_race_ignores_same_name_workout_event() -> None:
+async def test_create_race_refuses_a_same_name_workout_event_with_a_compliant_server() -> None:
     client = FakeCalendarClient(
         [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="WORKOUT")]
     )
     writer = CalendarWriter(client)
-    outcomes = await writer.apply_decision(make_decision(make_race_create()))
-    assert len(client.created) == 1
-    assert outcomes[0].target == "created"
+    with pytest.raises(WriterError, match="non-RACE"):
+        await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert client.updated == []
 
 
 async def test_update_race_puts_only_changed_fields_including_category() -> None:
@@ -409,6 +411,87 @@ async def test_create_race_updates_a_leaked_category_less_event() -> None:
     outcomes = await writer.apply_decision(make_decision(make_race_create()))
     assert client.created == []
     assert outcomes[0].target == "updated"
+
+
+async def test_create_workout_adopts_a_category_less_event_with_a_compliant_server() -> None:
+    client = FakeCalendarClient(
+        [{"id": 10001, "name": "Tempo Session", "start_date_local": "2026-09-22T00:00:00"}]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Tempo Session", start_date_local=date(2026, 9, 22))
+        )
+    )
+    assert client.created == []
+    assert outcomes[0].target == "updated"
+    assert client.updated == [
+        (
+            "10001",
+            {
+                "category": "WORKOUT",
+                "name": "Tempo Session",
+                "start_date_local": "2026-09-22T00:00:00",
+            },
+        )
+    ]
+
+
+async def test_create_race_adopts_a_category_less_event_with_a_compliant_server() -> None:
+    client = FakeCalendarClient(
+        [{"id": 10001, "name": "Autumn Trail Race", "start_date_local": "2026-09-27T00:00:00"}]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert client.created == []
+    assert outcomes[0].target == "updated"
+    assert client.updated[0][1]["category"] == "RACE_A"
+
+
+async def test_create_workout_prefers_the_same_family_match_over_an_earlier_race() -> None:
+    client = FakeCalendarClient(
+        [
+            make_event(90001, "2026-09-22", name="Hill Repeats", category="RACE_A"),
+            make_event(10001, "2026-09-22", name="Hill Repeats", category="WORKOUT"),
+        ]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(
+        make_decision(
+            CreateWorkout(action="create", name="Hill Repeats", start_date_local=date(2026, 9, 22))
+        )
+    )
+    assert outcomes[0].event_id == 10001
+    assert client.created == []
+
+
+async def test_create_race_prefers_the_same_family_match_over_an_earlier_workout() -> None:
+    client = FakeCalendarClient(
+        [
+            make_event(10001, "2026-09-27", name="Autumn Trail Race", category="WORKOUT"),
+            make_event(90001, "2026-09-27", name="Autumn Trail Race", category="RACE_A"),
+        ]
+    )
+    writer = CalendarWriter(client)
+    outcomes = await writer.apply_decision(make_decision(make_race_create()))
+    assert outcomes[0].event_id == 90001
+    assert client.created == []
+
+
+async def test_create_workout_refuses_when_only_a_race_matches() -> None:
+    client = FakeCalendarClient(
+        [make_event(90001, "2026-09-22", name="Hill Repeats", category="RACE_A")]
+    )
+    writer = CalendarWriter(client)
+    with pytest.raises(WriterError, match="non-WORKOUT"):
+        await writer.apply_decision(
+            make_decision(
+                CreateWorkout(
+                    action="create", name="Hill Repeats", start_date_local=date(2026, 9, 22)
+                )
+            )
+        )
+    assert client.created == []
 
 
 async def test_create_ignores_a_same_name_event_on_the_next_day() -> None:
@@ -798,3 +881,19 @@ async def test_update_does_not_swallow_a_server_error_on_lookup() -> None:
             make_decision(UpdateWorkout(action="update", event_id=10001, name="Renamed"))
         )
     assert client.updated == []
+
+
+async def test_read_back_failure_is_logged_without_a_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _ServerErrorCalendar()
+    writer = CalendarWriter(client)
+    with caplog.at_level(logging.WARNING, logger="open_endurance_coach.writer.calendar"):
+        await writer.apply_decision(
+            make_decision(
+                CreateWorkout(action="create", name="Tempo", start_date_local=date(2026, 9, 22))
+            )
+        )
+    records = [record for record in caplog.records if "read event" in record.getMessage()]
+    assert records
+    assert records[0].exc_info is None

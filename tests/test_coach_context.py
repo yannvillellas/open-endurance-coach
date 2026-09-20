@@ -147,13 +147,14 @@ def test_sections_match_the_prompt_payload() -> None:
     )
     settings = Settings(intervals_api_key="k", deepseek_api_key="k")
     user = build_messages(context, settings)[1].content
-    start = user.index("{")
-    end = user.index("\nCurrent message:")
+    start = user.index("<athlete_data>\n") + len("<athlete_data>\n")
+    end = user.index("\n</athlete_data>")
     payload = json.loads(user[start:end])
     expected = {key: value for key, value in context.sections().items() if key != "focus"}
     assert payload == expected
     assert "Current message:\nstatus check" in user
     assert "Today's date (athlete local): 2024-02-01" in user
+    assert "<athlete_data>" in user and "</athlete_data>" in user
 
 
 def test_estimated_tokens_grow_with_content() -> None:

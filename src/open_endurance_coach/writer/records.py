@@ -14,7 +14,6 @@ class MutationOutcome:
 class AppliedDecision:
     decision_id: int
     outcomes: list[MutationOutcome]
-    skipped: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

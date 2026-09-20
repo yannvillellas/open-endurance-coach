@@ -280,13 +280,3 @@ def render_apply(report: ApplyReport) -> None:
     console.print()
     console.print("[success]Applied:[/success]")
     console.print(apply_plan_text(report))
-    skipped = [
-        (decision.decision_id, len(decision.skipped), sorted(set(decision.skipped)))
-        for decision in report.decisions
-        if decision.skipped
-    ]
-    for decision_id, count, reasons in skipped:
-        console.print(
-            f"[warn]Decision #{decision_id}: {count} mutation(s) skipped"
-            f" ({', '.join(reasons)}) — the calendar was only partially updated.[/warn]"
-        )

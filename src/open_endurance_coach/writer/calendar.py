@@ -19,7 +19,6 @@ from open_endurance_coach.store.records import Decision
 from .records import MutationOutcome
 
 WORKOUT_CATEGORY = "WORKOUT"
-_RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
 logger = logging.getLogger(__name__)
 
 
@@ -210,10 +209,8 @@ class CalendarWriter:
     async def _read_back(self, event_id: int | str) -> dict[str, Any] | None:
         try:
             stored: Any = await self._client.get_event(str(event_id))
-        except (IntervalsApiError, ValueError):
-            logger.warning(
-                "could not read event %s back; drift not checked", event_id, exc_info=True
-            )
+        except (IntervalsApiError, ValueError) as exc:
+            logger.warning("could not read event %s back; drift not checked: %s", event_id, exc)
             return None
         if not isinstance(stored, dict):
             logger.warning(
@@ -276,16 +273,26 @@ class CalendarWriter:
         self._add_detail_fields(payload, mutation)
         return payload
 
-    async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
+    async def _find_by_name_and_date(
+        self, name: str, day: date, *, family: frozenset[str]
+    ) -> dict[str, Any] | None:
         rows = await self._client.list_events(
-            day.isoformat(), (day + timedelta(days=1)).isoformat(), category=WORKOUT_CATEGORY
+            day.isoformat(), (day + timedelta(days=1)).isoformat()
         )
-        for row in rows:
-            if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
-                day.isoformat()
-            ):
+        candidates = [
+            row
+            for row in rows
+            if row.get("name") == name
+            and str(row.get("start_date_local", ""))[:10] == day.isoformat()
+        ]
+        for row in candidates:
+            category = row.get("category")
+            if category is None or category in family:
                 return row
-        return None
+        return candidates[0] if candidates else None
+
+    async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
+        return await self._find_by_name_and_date(name, day, family=frozenset({WORKOUT_CATEGORY}))
 
     async def _apply_create(self, mutation: CreateWorkout) -> MutationOutcome:
         payload = self._create_payload(mutation)
@@ -381,17 +388,7 @@ class CalendarWriter:
         return MutationOutcome(action="delete", target="deleted", event_id=mutation.event_id)
 
     async def _find_race_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
-        rows = await self._client.list_events(
-            day.isoformat(),
-            (day + timedelta(days=1)).isoformat(),
-            category=_RACE_CATEGORY_FILTER,
-        )
-        for row in rows:
-            if row.get("name") == name and str(row.get("start_date_local", ""))[:10] == (
-                day.isoformat()
-            ):
-                return row
-        return None
+        return await self._find_by_name_and_date(name, day, family=frozenset(RACE_CATEGORIES))
 
     async def _apply_create_race(self, mutation: CreateRace) -> MutationOutcome:
         payload = self._race_create_payload(mutation)

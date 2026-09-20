@@ -36,7 +36,9 @@ from open_endurance_coach.engine.coach import (
     FeedbackOutcome,
     PlaceholderMutationError,
     StaleDecisionError,
+    StateDriftError,
 )
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.store.records import Draft
 
@@ -160,16 +162,25 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     return None
 
 
+def _print_still_unapplied(decision_id: int) -> None:
+    console.print(
+        f'[warn]Decision #{decision_id} is still unapplied. Say "retry" to apply it.[/warn]'
+    )
+
+
 async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
     if session.pending_decision_id is None:
         console.print("Nothing to apply.")
         return
     try:
         report = await engine.apply(session.pending_decision_id)
-    except (StaleDecisionError, PlaceholderMutationError) as exc:
+    except (StaleDecisionError, PlaceholderMutationError, StateDriftError) as exc:
         console.print(f"[warn]Decision #{session.pending_decision_id} discarded: {exc}[/warn]")
         engine.discard_decision(session.pending_decision_id)
-        session.pending_decision_id = None
+        remaining = engine.unapplied_decisions()
+        session.pending_decision_id = remaining[0].id if remaining else None
+        if remaining:
+            _print_still_unapplied(remaining[0].id)
         return
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
@@ -182,9 +193,7 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     remaining = engine.unapplied_decisions()
     session.pending_decision_id = remaining[0].id if remaining else None
     if remaining:
-        console.print(
-            f'[warn]Decision #{remaining[0].id} is still unapplied. Say "retry" to apply it.[/warn]'
-        )
+        _print_still_unapplied(remaining[0].id)
 
 
 async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> ChatState | None:
@@ -399,6 +408,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                     state = step
                 case Command(name=name, args=args):
                     state = await _run_command(engine, name, args, session) or state
+        except InternalError:
+            raise
         except Exception as exc:
             print_error(exc)
 

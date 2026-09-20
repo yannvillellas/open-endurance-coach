@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from open_endurance_coach.chat.history import ChatSession
@@ -18,6 +19,7 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.writer.calendar import WriterError
 
 from .fakes import (
     CREATE_MUTATION,
@@ -46,7 +48,11 @@ def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path)
         intervals: FakeIntervalsClient | None = None,
     ) -> tuple[CoachEngine, CoachStore]:
         engine, store = make_engine(
-            settings, tmp_path, provider, calendar=calendar, intervals=intervals
+            settings,
+            tmp_path,
+            provider,
+            calendar=calendar if calendar is not None else FakeCalendarClient(),
+            intervals=intervals,
         )
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
         monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
@@ -334,7 +340,7 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.get_draft(1).status is DraftStatus.REJECTED
 
 
 def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
@@ -406,7 +412,7 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.get_draft(1).status is DraftStatus.REJECTED
 
 
 def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
@@ -830,7 +836,7 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     engine, store = patched(provider, calendar=calendar)
 
     async def broken_apply(decision_id: int | None = None) -> Any:
-        raise RuntimeError("writer exploded")
+        raise WriterError("writer exploded")
 
     import asyncio
 
@@ -859,7 +865,7 @@ def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
     async def flaky_apply(decision_id: int | None = None) -> Any:
         attempts.append(1)
         if len(attempts) == 1:
-            raise RuntimeError("writer exploded")
+            raise WriterError("writer exploded")
         return await original(decision_id)
 
     engine.apply = flaky_apply
@@ -1257,7 +1263,7 @@ def test_chat_startup_offers_an_unapplied_decision_after_restart(patched: Any) -
     original = engine.apply
 
     async def broken_apply(decision_id: int | None = None) -> Any:
-        raise RuntimeError("writer exploded")
+        raise WriterError("writer exploded")
 
     engine.apply = broken_apply
     first = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
@@ -1488,6 +1494,61 @@ def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
     assert calendar.created == []
 
 
+def test_retry_apply_surfaces_the_next_decision_after_discarding_a_stale_one(
+    patched: Any,
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    engine, store = patched(provider, calendar=calendar)
+    today = CLOCK.date()
+    stale_report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Old Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    next_report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Next Session",
+                        "start_date_local": (today + timedelta(days=2)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    stale_id = store.approve_draft(
+        store.save_draft(focus="a", report=stale_report, context=CoachContext(focus="a"))
+    ).id
+    next_id = store.approve_draft(
+        store.save_draft(focus="b", report=next_report, context=CoachContext(focus="b"))
+    ).id
+    session = ChatSession(cap=100)
+    session.pending_decision_id = stale_id
+    engine.today = lambda: today + timedelta(days=2)
+
+    asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
+    assert session.pending_decision_id == next_id
+    assert [row.id for row in store.list_unapplied_decisions()] == [next_id]
+
+    asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
+    assert session.pending_decision_id is None
+    assert store.list_unapplied_decisions() == []
+    assert [event["name"] for event in calendar.created] == ["Next Session"]
+
+
 def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider(
@@ -1600,3 +1661,45 @@ def test_chat_rejects_an_over_long_message_without_calling_the_llm(patched: Any)
     assert result.exit_code == 0
     assert "message too long" in result.output
     assert provider.calls == []
+
+
+def test_run_propagates_typer_exit_without_reporting_an_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def raise_exit(callback: Any, *, provider: Any = None, model: Any = None) -> None:
+        raise typer.Exit(code=2)
+
+    monkeypatch.setattr(cli_main, "_with_engine", raise_exit)
+
+    async def noop(engine: Any) -> None:
+        return None
+
+    with pytest.raises(typer.Exit) as excinfo:
+        cli_main._run(noop)
+    assert excinfo.value.exit_code == 2
+    assert "error:" not in capsys.readouterr().out
+
+
+def test_with_engine_closes_clients_when_the_store_fails(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    created: list[Any] = []
+
+    class RecordingIntervals(cli_main.IntervalsClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    def fail_store(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("cannot create database file")
+
+    monkeypatch.setattr(cli_main, "IntervalsClient", RecordingIntervals)
+    monkeypatch.setattr(cli_main, "CoachStore", fail_store)
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+
+    async def noop(engine: Any) -> None:
+        return None
+
+    with pytest.raises(RuntimeError, match="cannot create database file"):
+        asyncio.run(cli_main._with_engine(noop))
+    assert created and created[0]._client.is_closed

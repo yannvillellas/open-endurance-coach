@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import httpx
@@ -415,4 +416,49 @@ async def test_error_messages_do_not_echo_the_response_body(settings: Settings) 
     assert "403" in message
     assert "denied" in message
     assert "Private Athlete" not in message
+    await client.aclose()
+
+
+async def test_concurrent_throttles_are_spaced(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = settings.model_copy(update={"requests_per_second": 2.0})
+    clock = [0.0]
+    sleep_starts: list[float] = []
+
+    async def advancing_sleep(seconds: float) -> None:
+        sleep_starts.append(clock[0])
+        clock[0] += seconds
+
+    monkeypatch.setattr("open_endurance_coach.clients.intervals.time.monotonic", lambda: clock[0])
+    client = IntervalsClient(settings, sleep=advancing_sleep)
+    client._last_request_at = 0.0
+
+    await asyncio.gather(client._throttle(), client._throttle())
+
+    assert sleep_starts == [0.0, 0.5]
+    await client.aclose()
+
+
+async def test_concurrent_throttles_do_not_hold_the_lock_while_sleeping(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = settings.model_copy(update={"requests_per_second": 2.0})
+    monkeypatch.setattr("open_endurance_coach.clients.intervals.time.monotonic", lambda: 0.0)
+    active = 0
+    max_active = 0
+
+    async def concurrent_sleep(seconds: float) -> None:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+
+    client = IntervalsClient(settings, sleep=concurrent_sleep)
+    client._last_request_at = 0.0
+
+    await asyncio.gather(client._throttle(), client._throttle())
+
+    assert max_active == 2, "the lock must be released before sleeping"
     await client.aclose()

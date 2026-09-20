@@ -82,16 +82,19 @@ class IntervalsClient:
         )
         self._min_interval = 1.0 / settings.requests_per_second
         self._last_request_at = 0.0
+        self._throttle_lock = asyncio.Lock()
         self.rate_limits = RateLimits()
 
     def _athlete_path(self, path: str) -> str:
         return f"/athlete/{self._settings.intervals_athlete_id}{path}"
 
     async def _throttle(self) -> None:
-        elapsed = time.monotonic() - self._last_request_at
-        if elapsed < self._min_interval:
-            await self._sleep(self._min_interval - elapsed)
-        self._last_request_at = time.monotonic()
+        async with self._throttle_lock:
+            now = time.monotonic()
+            wait = max(0.0, self._last_request_at + self._min_interval - now)
+            self._last_request_at = now + wait
+        if wait > 0:
+            await self._sleep(wait)
 
     async def _request(
         self,

@@ -128,3 +128,21 @@ def test_chat_history_max_age_default_and_override(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("CHAT_HISTORY_MAX_AGE_DAYS", "30")
     settings = Settings(intervals_api_key="k", deepseek_api_key="k")
     assert settings.chat_history_max_age_days == 30
+
+
+def test_unknown_provider_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="Unknown LLM provider"):
+        Settings(intervals_api_key="k", llm_provider="bogus", _env_file=None)
+
+
+@pytest.mark.parametrize("value", ["12345/../admin", "a b", "i" * 40, ""])
+def test_athlete_id_rejects_unsafe_values(value: str) -> None:
+    with pytest.raises(ValidationError, match="intervals_athlete_id"):
+        Settings(intervals_api_key="k", intervals_athlete_id=value, _env_file=None)
+
+
+def test_athlete_id_accepts_supported_forms() -> None:
+    explicit = Settings(intervals_api_key="k", intervals_athlete_id="i12345", _env_file=None)
+    assert explicit.intervals_athlete_id == "i12345"
+    padded = Settings(intervals_api_key="k", intervals_athlete_id=" 0 ", _env_file=None)
+    assert padded.intervals_athlete_id == "0"

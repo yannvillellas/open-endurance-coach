@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -222,6 +223,30 @@ def test_approve_twice_raises(tmp_path: Path) -> None:
     store.approve_draft(draft_id)
     with pytest.raises(ValueError, match="pending"):
         store.approve_draft(draft_id)
+    assert len(store.list_decisions()) == 1
+
+
+def test_approve_draft_is_atomic_when_the_decision_insert_fails(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store._connection.execute(
+        "CREATE TRIGGER refuse_decision BEFORE INSERT ON decisions"
+        " BEGIN SELECT RAISE(ABORT, 'disk full'); END;"
+    )
+    store._connection.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        store.approve_draft(draft_id)
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+    store._connection.execute("DROP TRIGGER refuse_decision")
+    store._connection.commit()
+    decision = store.approve_draft(draft_id)
+    assert decision.draft_id == draft_id
+    reopened = store.get_draft(draft_id)
+    assert reopened is not None
+    assert reopened.status is DraftStatus.APPROVED
     assert len(store.list_decisions()) == 1
 
 
@@ -515,3 +540,41 @@ def test_unseen_activity_ids_handles_large_batches(tmp_path: Path) -> None:
     store.mark_activities_seen(seen)
     unseen = store.unseen_activity_ids([*seen, "fx-new-1", "fx-new-2"])
     assert unseen == {"fx-new-1", "fx-new-2"}
+
+
+def test_reject_draft_marks_it_rejected_and_is_terminal(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.reject_draft(draft_id)
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.status is DraftStatus.REJECTED
+    assert store.list_drafts(DraftStatus.PENDING) == []
+    with pytest.raises(ValueError, match="only pending"):
+        store.reject_draft(draft_id)
+
+
+def test_rejected_draft_is_purged_on_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    store = CoachStore(path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store.reject_draft(draft_id)
+    store.close()
+    reopened = CoachStore(path)
+    assert reopened.get_draft(draft_id) is None
+    reopened.close()
+
+
+def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    old_stamp = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+    store._connection.execute(
+        "UPDATE drafts SET created_at = ? WHERE id = ?", (old_stamp, draft_id)
+    )
+    store._connection.commit()
+    traced: list[str] = []
+    store._connection.set_trace_callback(lambda statement: traced.append(statement.upper()))
+    counts = store.prune_before(datetime.now(UTC) - timedelta(days=100))
+    assert counts["drafts"] == 1
+    assert not any(statement.startswith("VACUUM") for statement in traced)
