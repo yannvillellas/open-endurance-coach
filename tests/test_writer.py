@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from typing import Any, cast
 
@@ -834,3 +835,19 @@ async def test_update_does_not_swallow_a_server_error_on_lookup() -> None:
             make_decision(UpdateWorkout(action="update", event_id=10001, name="Renamed"))
         )
     assert client.updated == []
+
+
+async def test_read_back_failure_is_logged_without_a_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _ServerErrorCalendar()
+    writer = CalendarWriter(client)
+    with caplog.at_level(logging.WARNING, logger="open_endurance_coach.writer.calendar"):
+        await writer.apply_decision(
+            make_decision(
+                CreateWorkout(action="create", name="Tempo", start_date_local=date(2026, 9, 22))
+            )
+        )
+    records = [record for record in caplog.records if "read event" in record.getMessage()]
+    assert records
+    assert records[0].exc_info is None

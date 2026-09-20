@@ -63,6 +63,7 @@ async def respond(
             await executor(engine)
             return Done()
         case Declined():
+            engine.reject_draft(snapshot.draft_id)
             console.print("[warn]Nothing changed.[/warn]")
             return Done()
         case Ignored():

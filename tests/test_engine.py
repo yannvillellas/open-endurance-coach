@@ -20,6 +20,7 @@ from open_endurance_coach.engine.coach import (
     _drop_reason,
     _validate_report,
 )
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
 from open_endurance_coach.prompts.prompts import estimate_user_message_tokens, system_prompt
 from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
@@ -551,7 +552,7 @@ async def test_approve_missing_draft_raises(settings: Settings, tmp_path: Path) 
 
 async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
-    with pytest.raises(RuntimeError, match="writer"):
+    with pytest.raises(InternalError, match="writer"):
         await engine.apply()
 
 

@@ -76,12 +76,16 @@ def test_recoverable_exceptions_include_expected_types() -> None:
     import sqlite3
 
     from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS
+    from open_endurance_coach.clients.intervals import IntervalsApiError
     from open_endurance_coach.clients.llm import LlmError
+    from open_endurance_coach.writer.calendar import WriterError
 
     assert LlmError in RECOVERABLE_EXCEPTIONS
+    assert IntervalsApiError in RECOVERABLE_EXCEPTIONS
+    assert WriterError in RECOVERABLE_EXCEPTIONS
     assert ValueError in RECOVERABLE_EXCEPTIONS
-    assert RuntimeError in RECOVERABLE_EXCEPTIONS
     assert sqlite3.Error in RECOVERABLE_EXCEPTIONS
+    assert RuntimeError not in RECOVERABLE_EXCEPTIONS
 
 
 def test_exit_aliases_shared_between_dispatch_and_gate() -> None:

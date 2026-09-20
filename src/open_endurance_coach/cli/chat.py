@@ -38,6 +38,7 @@ from open_endurance_coach.engine.coach import (
     StaleDecisionError,
     StateDriftError,
 )
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.store.records import Draft
 
@@ -407,6 +408,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                     state = step
                 case Command(name=name, args=args):
                     state = await _run_command(engine, name, args, session) or state
+        except InternalError:
+            raise
         except Exception as exc:
             print_error(exc)
 

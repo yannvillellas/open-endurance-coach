@@ -6,6 +6,7 @@ import pytest
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.config import Settings
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import (
     DeepHistoricalExtractor,
@@ -439,7 +440,7 @@ async def test_budget_overrun_trims_oldest_activities_first(settings: Settings) 
 
 async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
-    with pytest.raises(RuntimeError, match="token budget"):
+    with pytest.raises(InternalError, match="token budget"):
         await extractor.extract("status check", today=TODAY, max_tokens=1)
 
 

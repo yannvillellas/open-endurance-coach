@@ -209,10 +209,8 @@ class CalendarWriter:
     async def _read_back(self, event_id: int | str) -> dict[str, Any] | None:
         try:
             stored: Any = await self._client.get_event(str(event_id))
-        except (IntervalsApiError, ValueError):
-            logger.warning(
-                "could not read event %s back; drift not checked", event_id, exc_info=True
-            )
+        except (IntervalsApiError, ValueError) as exc:
+            logger.warning("could not read event %s back; drift not checked: %s", event_id, exc)
             return None
         if not isinstance(stored, dict):
             logger.warning(

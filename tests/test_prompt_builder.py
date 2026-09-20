@@ -329,6 +329,14 @@ def test_system_prompt_stays_small() -> None:
     assert estimate_text_tokens(operator) <= 2816
 
 
+def test_prompt_marks_athlete_data_as_untrusted() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "untrusted" in system
+    user = build_messages(CONTEXT, make_settings())[1].content
+    assert user.startswith("<athlete_data>\n")
+    assert "</athlete_data>\n" in user
+
+
 def test_contract_describes_the_split_labels() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "rows of consecutive kilometres" in system

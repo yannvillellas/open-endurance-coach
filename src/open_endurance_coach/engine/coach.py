@@ -1,4 +1,3 @@
-import json
 import logging
 import math
 from collections.abc import Callable, Sequence
@@ -13,6 +12,7 @@ from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
@@ -297,11 +297,13 @@ class CoachEngine:
             self._fit_history(context, history, system_tokens=system_tokens),
         )
         self._assert_within_ceiling(messages)
-        content = await self._llm_client.complete_json(
-            messages,
-            validator=lambda payload: _validate_report(payload, today=today),
-        )
-        return DecisionReport.model_validate(json.loads(content))
+        validated: list[DecisionReport] = []
+
+        def validate(payload: Any) -> None:
+            validated.append(_validate_report(payload, today=today))
+
+        await self._llm_client.complete_json(messages, validator=validate)
+        return validated[0]
 
     async def build_context(
         self,
@@ -535,6 +537,9 @@ class CoachEngine:
         self._assert_current_dates(draft.report)
         return self._store.approve_draft(draft_id)
 
+    def reject_draft(self, draft_id: int) -> None:
+        self._store.reject_draft(draft_id)
+
     async def apply(self, decision_id: int | None = None) -> ApplyReport:
         """Apply approved decisions to the calendar.
 
@@ -548,7 +553,7 @@ class CoachEngine:
         regenerated.
         """
         if self._writer is None:
-            raise RuntimeError("no calendar writer configured")
+            raise InternalError("no calendar writer configured")
         if decision_id is not None:
             decision = self._store.get_decision(decision_id)
             if decision is None:

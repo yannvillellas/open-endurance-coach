@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from typing import Any
 
+from open_endurance_coach.errors import InternalError
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import (
@@ -131,5 +132,5 @@ def build_within_budget(
             activities.pop(index)
             refresh("recent_activities", activities)
         else:
-            raise RuntimeError(f"cannot fit the context data in token budget: {max_tokens}")
+            raise InternalError(f"cannot fit the context data in token budget: {max_tokens}")
     return CoachContext.model_validate(build_payload())

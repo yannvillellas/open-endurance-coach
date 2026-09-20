@@ -19,6 +19,7 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.writer.calendar import WriterError
 
 from .fakes import (
     CREATE_MUTATION,
@@ -47,7 +48,11 @@ def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path)
         intervals: FakeIntervalsClient | None = None,
     ) -> tuple[CoachEngine, CoachStore]:
         engine, store = make_engine(
-            settings, tmp_path, provider, calendar=calendar, intervals=intervals
+            settings,
+            tmp_path,
+            provider,
+            calendar=calendar if calendar is not None else FakeCalendarClient(),
+            intervals=intervals,
         )
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
         monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
@@ -335,7 +340,7 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
     assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.get_draft(1).status is DraftStatus.REJECTED
 
 
 def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
@@ -407,7 +412,7 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.PENDING
+    assert store.get_draft(1).status is DraftStatus.REJECTED
 
 
 def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
@@ -831,7 +836,7 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     engine, store = patched(provider, calendar=calendar)
 
     async def broken_apply(decision_id: int | None = None) -> Any:
-        raise RuntimeError("writer exploded")
+        raise WriterError("writer exploded")
 
     import asyncio
 
@@ -860,7 +865,7 @@ def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
     async def flaky_apply(decision_id: int | None = None) -> Any:
         attempts.append(1)
         if len(attempts) == 1:
-            raise RuntimeError("writer exploded")
+            raise WriterError("writer exploded")
         return await original(decision_id)
 
     engine.apply = flaky_apply
@@ -1258,7 +1263,7 @@ def test_chat_startup_offers_an_unapplied_decision_after_restart(patched: Any) -
     original = engine.apply
 
     async def broken_apply(decision_id: int | None = None) -> Any:
-        raise RuntimeError("writer exploded")
+        raise WriterError("writer exploded")
 
     engine.apply = broken_apply
     first = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
