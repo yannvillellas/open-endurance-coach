@@ -318,11 +318,14 @@ class CoachStore:
                 "UPDATE drafts SET status = ? WHERE id = ?",
                 (DraftStatus.APPROVED.value, draft_id),
             )
-        cursor = self._connection.execute(
-            "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
-            (draft_id, decided_at.isoformat(), json.dumps(draft.report.model_dump(mode="json"))),
-        )
-        self._connection.commit()
+            cursor = self._connection.execute(
+                "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
+                (
+                    draft_id,
+                    decided_at.isoformat(),
+                    json.dumps(draft.report.model_dump(mode="json")),
+                ),
+            )
         lastrowid = cursor.lastrowid
         assert lastrowid is not None
         return Decision(

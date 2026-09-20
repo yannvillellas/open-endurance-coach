@@ -1488,6 +1488,61 @@ def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
     assert calendar.created == []
 
 
+def test_retry_apply_surfaces_the_next_decision_after_discarding_a_stale_one(
+    patched: Any,
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider()
+    engine, store = patched(provider, calendar=calendar)
+    today = CLOCK.date()
+    stale_report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Old Session",
+                        "start_date_local": (today - timedelta(days=1)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    next_report = DecisionReport.model_validate(
+        json.loads(
+            report_json(
+                mutations=[
+                    {
+                        "action": "create",
+                        "name": "Next Session",
+                        "start_date_local": (today + timedelta(days=2)).isoformat(),
+                        "moving_time": 3600,
+                    }
+                ]
+            )
+        )
+    )
+    stale_id = store.approve_draft(
+        store.save_draft(focus="a", report=stale_report, context=CoachContext(focus="a"))
+    ).id
+    next_id = store.approve_draft(
+        store.save_draft(focus="b", report=next_report, context=CoachContext(focus="b"))
+    ).id
+    session = ChatSession(cap=100)
+    session.pending_decision_id = stale_id
+    engine.today = lambda: today + timedelta(days=2)
+
+    asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
+    assert session.pending_decision_id == next_id
+    assert [row.id for row in store.list_unapplied_decisions()] == [next_id]
+
+    asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
+    assert session.pending_decision_id is None
+    assert store.list_unapplied_decisions() == []
+    assert [event["name"] for event in calendar.created] == ["Next Session"]
+
+
 def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider(

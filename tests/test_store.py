@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -222,6 +223,30 @@ def test_approve_twice_raises(tmp_path: Path) -> None:
     store.approve_draft(draft_id)
     with pytest.raises(ValueError, match="pending"):
         store.approve_draft(draft_id)
+    assert len(store.list_decisions()) == 1
+
+
+def test_approve_draft_is_atomic_when_the_decision_insert_fails(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    store._connection.execute(
+        "CREATE TRIGGER refuse_decision BEFORE INSERT ON decisions"
+        " BEGIN SELECT RAISE(ABORT, 'disk full'); END;"
+    )
+    store._connection.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        store.approve_draft(draft_id)
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.status is DraftStatus.PENDING
+    assert store.list_decisions() == []
+    store._connection.execute("DROP TRIGGER refuse_decision")
+    store._connection.commit()
+    decision = store.approve_draft(draft_id)
+    assert decision.draft_id == draft_id
+    reopened = store.get_draft(draft_id)
+    assert reopened is not None
+    assert reopened.status is DraftStatus.APPROVED
     assert len(store.list_decisions()) == 1
 
 
