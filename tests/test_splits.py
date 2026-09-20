@@ -141,6 +141,45 @@ def test_climbing_and_descending_rows_report_gain_and_grade() -> None:
     assert split.grade_pct == -10.0
 
 
+def test_negative_heart_rate_and_watts_are_treated_as_missing() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [-40, 150] * 300 + [-40]
+    streams["watts"] = [-100, 200] * 300 + [-100]
+    rides = per_km_splits(streams, speed_based=True)
+    assert all(split.average_heartrate == 150 for split in rides)
+    assert all(split.average_watts == 200 for split in rides)
+
+
+def test_all_negative_heart_rate_and_watts_yield_missing_values() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [-50] * len(streams["time"])
+    streams["watts"] = [-50] * len(streams["time"])
+    rows = per_km_splits(streams, speed_based=True)
+    assert all(row.average_heartrate is None and row.max_heartrate is None for row in rows)
+    assert all(row.average_watts is None for row in rows)
+
+
+def test_zero_heart_rate_and_watts_are_real_readings() -> None:
+    streams = steady(2000)
+    streams["heartrate"] = [0] * len(streams["time"])
+    streams["watts"] = [0] * len(streams["time"])
+    rows = per_km_splits(streams, speed_based=True)
+    assert all(row.average_heartrate == 0 and row.max_heartrate == 0 for row in rows)
+    assert all(row.average_watts == 0 for row in rows)
+
+
+def test_negative_altitude_stays_signed() -> None:
+    streams: dict[str, list[Any]] = {
+        "time": [0, 100, 200],
+        "distance": [0.0, 500.0, 1000.0],
+        "altitude": [-50.0, -100.0, -150.0],
+    }
+    split = per_km_splits(streams)[0]
+    assert split.elevation_gain_m == 0.0
+    assert split.elevation_loss_m == 100.0
+    assert split.grade_pct == -10.0
+
+
 def test_hill_heart_rate_and_power_are_averaged_per_row() -> None:
     streams = steady(2000)
     streams["heartrate"] = [150, 170] * 1500 + [150]

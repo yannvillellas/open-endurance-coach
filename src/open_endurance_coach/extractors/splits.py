@@ -43,9 +43,9 @@ def _at(series: Sequence[Any], index: int) -> Any:
     return series[index] if index < len(series) else None
 
 
-def _series(series: Sequence[Any], indexes: Sequence[int]) -> list[float]:
+def _series(series: Sequence[Any], indexes: Sequence[int], *, signed: bool = False) -> list[float]:
     values = (_number(_at(series, index)) for index in indexes)
-    return [value for value in values if value is not None]
+    return [value for value in values if value is not None and (signed or value >= 0)]
 
 
 def _width_m(total: float, rows: int) -> float:
@@ -87,7 +87,7 @@ def _segment(
 
     rates = _series(heart_rates, indexes)
     power = _series(watts, indexes)
-    heights = _series(altitudes, indexes)
+    heights = _series(altitudes, indexes, signed=True)
     gain = sum(max(0.0, later - earlier) for earlier, later in pairwise(heights))
     loss = sum(max(0.0, earlier - later) for earlier, later in pairwise(heights))
     grade = (heights[-1] - heights[0]) / meters * 100 if len(heights) >= 2 else None
