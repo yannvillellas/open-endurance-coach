@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS
 from open_endurance_coach.cli.rendering import console, print_error
 from open_endurance_coach.clients.intervals import IntervalsClient
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmProvider
 from open_endurance_coach.clients.providers import build_registry
 from open_endurance_coach.config import get_settings
 from open_endurance_coach.engine.coach import CoachEngine
@@ -47,19 +47,24 @@ async def _with_engine(
         console.print(f"[meta]{exc}[/meta]")
         raise typer.Exit(code=1) from None
     settings = settings.with_llm_override(provider=provider, model=model)
-    intervals = IntervalsClient(settings)
-    providers = build_registry(settings)
-    llm = LlmClient(settings, providers)
-    store = CoachStore(settings.database_path)
-    writer = CalendarWriter(intervals)
-    engine = CoachEngine(settings, store, intervals, llm, writer=writer)
+    intervals: IntervalsClient | None = None
+    providers: dict[str, LlmProvider] = {}
+    store: CoachStore | None = None
     try:
+        intervals = IntervalsClient(settings)
+        providers = build_registry(settings)
+        llm = LlmClient(settings, providers)
+        store = CoachStore(settings.database_path)
+        writer = CalendarWriter(intervals)
+        engine = CoachEngine(settings, store, intervals, llm, writer=writer)
         await callback(engine)
     finally:
-        await intervals.aclose()
+        if intervals is not None:
+            await intervals.aclose()
         for llm_provider in providers.values():
             await llm_provider.aclose()
-        store.close()
+        if store is not None:
+            store.close()
 
 
 def _run(
@@ -70,6 +75,8 @@ def _run(
 ) -> None:
     try:
         asyncio.run(_with_engine(callback, provider=provider, model=model))
+    except typer.Exit:
+        raise
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         raise typer.Exit(code=1) from exc

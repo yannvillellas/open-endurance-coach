@@ -201,9 +201,9 @@ async def test_resolve_event_dates_logs_unexpected_lookup_failure(
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
+    provider = FakeLlmProvider([completion("")] * 4)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
     assert store.unseen_activity_ids(["fx-a", "fx-b"]) == {"fx-a", "fx-b"}
@@ -221,9 +221,9 @@ async def test_analyze_retries_on_schema_invalid_response(
 
 async def test_analyze_schema_invalid_exhausts_attempts(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 3)
+    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 4)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
 
@@ -680,7 +680,7 @@ async def test_analyze_empty_content_raises_without_writes(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
+    provider = FakeLlmProvider([completion("")] * 4)
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="empty content"):
         await engine.analyze("hi", context=CoachContext(focus="f"))
@@ -777,6 +777,7 @@ async def test_past_dated_mutation_is_retried(settings: Settings, tmp_path: Path
 async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider(
         [
+            completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),

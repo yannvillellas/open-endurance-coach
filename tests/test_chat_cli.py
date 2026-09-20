@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from open_endurance_coach.chat.history import ChatSession
@@ -1655,3 +1656,45 @@ def test_chat_rejects_an_over_long_message_without_calling_the_llm(patched: Any)
     assert result.exit_code == 0
     assert "message too long" in result.output
     assert provider.calls == []
+
+
+def test_run_propagates_typer_exit_without_reporting_an_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def raise_exit(callback: Any, *, provider: Any = None, model: Any = None) -> None:
+        raise typer.Exit(code=2)
+
+    monkeypatch.setattr(cli_main, "_with_engine", raise_exit)
+
+    async def noop(engine: Any) -> None:
+        return None
+
+    with pytest.raises(typer.Exit) as excinfo:
+        cli_main._run(noop)
+    assert excinfo.value.exit_code == 2
+    assert "error:" not in capsys.readouterr().out
+
+
+def test_with_engine_closes_clients_when_the_store_fails(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    created: list[Any] = []
+
+    class RecordingIntervals(cli_main.IntervalsClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    def fail_store(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("cannot create database file")
+
+    monkeypatch.setattr(cli_main, "IntervalsClient", RecordingIntervals)
+    monkeypatch.setattr(cli_main, "CoachStore", fail_store)
+    monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
+
+    async def noop(engine: Any) -> None:
+        return None
+
+    with pytest.raises(RuntimeError, match="cannot create database file"):
+        asyncio.run(cli_main._with_engine(noop))
+    assert created and created[0]._client.is_closed

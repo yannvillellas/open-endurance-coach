@@ -163,7 +163,7 @@ class LlmClient:
         max_attempts: int | None = None,
         validator: Callable[[Any], Any] | None = None,
     ) -> str:
-        attempts = self._settings.max_retries if max_attempts is None else max_attempts
+        attempts = self._settings.max_retries + 1 if max_attempts is None else max_attempts
         attempts = max(1, attempts)
         last_error: LlmError | None = None
         for attempt in range(attempts):
@@ -188,5 +188,6 @@ class LlmClient:
                 last_error = LlmError(_empty_content_error(completion))
             if completion.finish_reason == "length":
                 raise LlmError(_output_budget_error(completion))
-            await self._sleep(2**attempt)
+            if attempt < attempts - 1:
+                await self._sleep(2**attempt)
         raise LlmError(f"JSON completion failed after {attempts} attempts: {last_error}")

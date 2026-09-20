@@ -78,11 +78,13 @@ async def test_complete_json_retries_on_invalid_json(settings: Settings) -> None
 
 async def test_complete_json_exhausts_attempts(settings: Settings) -> None:
     settings = settings.model_copy(update={"llm_provider": "fake", "max_retries": 3})
-    provider = FakeLlmProvider([completion(""), completion(""), completion("")])
-    client = make_client(settings, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    sleep = RecordingSleep()
+    provider = FakeLlmProvider([completion("")] * 4)
+    client = make_client(settings, provider, sleep=sleep)
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await client.complete_json([LlmMessage(role="user", content="json please")])
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
+    assert sleep.calls == [1.0, 2.0, 4.0]
 
 
 async def test_complete_json_max_attempts_zero_still_attempts_once(settings: Settings) -> None:
@@ -129,13 +131,13 @@ async def test_complete_json_exhausts_attempts_when_validator_always_fails(
     settings: Settings,
 ) -> None:
     settings = settings.model_copy(update={"llm_provider": "fake", "max_retries": 3})
-    provider = FakeLlmProvider([completion('{"bad": 1}')] * 3)
+    provider = FakeLlmProvider([completion('{"bad": 1}')] * 4)
     client = make_client(settings, provider)
-    with pytest.raises(LlmError, match="failed after 3 attempts"):
+    with pytest.raises(LlmError, match="failed after 4 attempts"):
         await client.complete_json(
             [LlmMessage(role="user", content="json please")], validator=require_summary
         )
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
 
 
 async def test_complete_json_validator_receives_parsed_payload(settings: Settings) -> None:
