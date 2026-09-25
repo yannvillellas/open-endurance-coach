@@ -202,9 +202,9 @@ async def test_resolve_event_dates_logs_unexpected_lookup_failure(
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("")] * 4)
+    provider = FakeLlmProvider([completion("")] * 6)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 4 attempts"):
+    with pytest.raises(LlmError, match="failed after 2 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
     assert store.unseen_activity_ids(["fx-a", "fx-b"]) == {"fx-a", "fx-b"}
@@ -222,11 +222,39 @@ async def test_analyze_retries_on_schema_invalid_response(
 
 async def test_analyze_schema_invalid_exhausts_attempts(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 4)
+    provider = FakeLlmProvider([completion('{"hallucinated": true}')] * 6)
     engine = make_engine(settings, store, provider)
-    with pytest.raises(LlmError, match="failed after 4 attempts"):
+    with pytest.raises(LlmError, match="failed after 2 attempts"):
         await engine.analyze("status check", today=TODAY)
     assert store.list_drafts() == []
+
+
+async def test_analyze_falls_back_to_chat_when_the_mutation_is_invalid(
+    settings: Settings, tmp_path: Path
+) -> None:
+    bad = completion(
+        report_json(
+            mutations=[
+                {
+                    "action": "create",
+                    "name": "Race note",
+                    "start_date_local": (TODAY + timedelta(days=1)).isoformat(),
+                    "category": "NOTE",
+                }
+            ]
+        )
+    )
+    chat = completion(report_json("Use the race description for the note."))
+    provider = FakeLlmProvider([bad, bad, bad, bad, chat])
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, provider)
+
+    draft = await engine.analyze("write a note on my race", today=TODAY)
+
+    assert draft.report.mutations == []
+    assert draft.report.summary == "Use the race description for the note."
+    assert len(provider.calls) == 5
+    assert "empty mutations list" in provider.calls[-1]["messages"][-1].content
 
 
 async def test_analyze_uses_deep_extractor_for_deep_focus(
@@ -681,7 +709,7 @@ async def test_analyze_empty_content_raises_without_writes(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
-    provider = FakeLlmProvider([completion("")] * 4)
+    provider = FakeLlmProvider([completion("")] * 6)
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="empty content"):
         await engine.analyze("hi", context=CoachContext(focus="f"))
@@ -778,6 +806,8 @@ async def test_past_dated_mutation_is_retried(settings: Settings, tmp_path: Path
 async def test_past_dated_mutation_exhausts_retries(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider(
         [
+            completion(report_json(mutations=[PAST_MUTATION])),
+            completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),
             completion(report_json(mutations=[PAST_MUTATION])),

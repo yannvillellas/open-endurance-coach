@@ -135,6 +135,13 @@ PROPOSAL_POLICY = (
 # workouts (9973) and absolute pace (115846). Only the Warmup/Cooldown label lines, the
 # MaxEffort keyword and the bare-ramp warning are not in the official docs - they were
 # confirmed by real API write/read-back tests on 2026-08-22.
+CHAT_ONLY_FALLBACK = (
+    "The previous reply could not be parsed as a calendar mutation. Answer the "
+    'athlete as a chat message: set intent to "chat", keep the advice in summary '
+    "and findings, and return an empty mutations list. Do not encode any calendar "
+    "change.\n"
+)
+
 WORKOUT_TEXT_FORMAT = (
     "Workout descriptions must use the native Intervals.icu workout text format.\n"
     "One step per line starting with '- '.\n"
