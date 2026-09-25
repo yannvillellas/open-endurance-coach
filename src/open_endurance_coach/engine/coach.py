@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from pydantic import ValidationError
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
-from open_endurance_coach.clients.llm import LlmClient, LlmMessage
+from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.errors import InternalError
@@ -17,6 +17,7 @@ from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
 from open_endurance_coach.prompts.prompts import (
+    CHAT_ONLY_FALLBACK,
     build_messages,
     estimate_user_message_tokens,
     system_prompt,
@@ -298,7 +299,26 @@ class CoachEngine:
         def validate(payload: Any) -> None:
             validated.append(_validate_report(payload, today=today))
 
-        await self._llm_client.complete_json(messages, validator=validate)
+        try:
+            await self._llm_client.complete_json(messages, validator=validate)
+        except LlmError:
+            return await self._chat_only_fallback(messages, today=today)
+        return validated[0]
+
+    async def _chat_only_fallback(
+        self, messages: list[LlmMessage], *, today: date
+    ) -> DecisionReport:
+        fallback = [*messages, LlmMessage(role="user", content=CHAT_ONLY_FALLBACK)]
+        self._assert_within_ceiling(fallback)
+        validated: list[DecisionReport] = []
+
+        def validate(payload: Any) -> None:
+            report = _validate_report(payload, today=today)
+            if report.mutations:
+                raise ValueError("the fallback answer must not contain mutations")
+            validated.append(report)
+
+        await self._llm_client.complete_json(fallback, max_attempts=2, validator=validate)
         return validated[0]
 
     async def build_context(

@@ -21,6 +21,8 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
+SYSTEM_PROMPT_TOKEN_BUDGET = 2944
+
 CONTEXT = CoachContext.model_validate(
     {
         "focus": "Analyze last week's execution",
@@ -323,10 +325,10 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
 
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert estimate_text_tokens(system) <= 2816
+    assert estimate_text_tokens(system) <= SYSTEM_PROMPT_TOKEN_BUDGET
     defaults = Settings(intervals_api_key="test-key", deepseek_api_key="test-llm-key")
     operator = build_messages(CONTEXT, defaults)[0].content
-    assert estimate_text_tokens(operator) <= 2816
+    assert estimate_text_tokens(operator) <= SYSTEM_PROMPT_TOKEN_BUDGET
 
 
 def test_prompt_marks_athlete_data_as_untrusted() -> None:
@@ -335,6 +337,12 @@ def test_prompt_marks_athlete_data_as_untrusted() -> None:
     user = build_messages(CONTEXT, make_settings())[1].content
     assert user.startswith("<athlete_data>\n")
     assert "</athlete_data>\n" in user
+
+
+def test_contract_attaches_notes_to_event_descriptions() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "no note event" in system
+    assert "category is invalid on workout mutations" in system
 
 
 def test_contract_describes_the_split_labels() -> None:

@@ -1641,6 +1641,36 @@ def test_chat_race_update_is_gated_and_written(patched: Any) -> None:
     assert calendar.created == []
 
 
+def test_chat_race_note_is_written_into_the_race_description(patched: Any) -> None:
+    calendar = FakeCalendarClient(
+        [make_event(136701474, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
+    )
+    note = "06:30 breakfast | 09:05 warmup | 09:10 gel | km 6 aid station optional"
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    mutations=[
+                        {
+                            "action": "update_race",
+                            "event_id": 136701474,
+                            "description": note,
+                        }
+                    ]
+                )
+            )
+        ]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(
+        cli_main.app, [], input="write this plan as a note on my race\nyes\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert [event_id for event_id, _ in calendar.updated] == ["136701474"]
+    assert calendar.updated[0][1]["description"] == note
+    assert calendar.created == []
+
+
 def test_chat_race_delete_is_gated_and_written(patched: Any) -> None:
     calendar = FakeCalendarClient(
         [make_event(136701474, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
