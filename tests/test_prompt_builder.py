@@ -326,9 +326,18 @@ def test_contract_teaches_backwards_planning_and_asking() -> None:
 def test_system_prompt_stays_small() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert estimate_text_tokens(system) <= SYSTEM_PROMPT_TOKEN_BUDGET
-    defaults = Settings(intervals_api_key="test-key", deepseek_api_key="test-llm-key")
-    operator = build_messages(CONTEXT, defaults)[0].content
-    assert estimate_text_tokens(operator) <= SYSTEM_PROMPT_TOKEN_BUDGET
+    operator = make_settings(athlete_profile="A" * 256)
+    assert (
+        estimate_text_tokens(build_messages(CONTEXT, operator)[0].content)
+        <= SYSTEM_PROMPT_TOKEN_BUDGET
+    )
+
+
+def test_contract_pins_duration_units_and_step_total() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "always write the m on an hour+minute duration" in system
+    assert "the step durations must sum to moving_time" in system
+    assert "Swim distance is priced at swim pace" in system
 
 
 def test_prompt_marks_athlete_data_as_untrusted() -> None:
