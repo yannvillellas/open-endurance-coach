@@ -1,7 +1,10 @@
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
 from rich.prompt import Prompt
 
 from open_endurance_coach.chat.dispatch import (
@@ -160,6 +163,18 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     else:
         console.print("[meta]Answer my questions here if you like.[/meta]")
     return None
+
+
+_INPUT_SESSION: PromptSession[str] | None = None
+
+
+async def _read_input() -> str:
+    global _INPUT_SESSION
+    if not sys.stdin.isatty():
+        return Prompt.ask("[athlete.label]you[/athlete.label]")
+    if _INPUT_SESSION is None:
+        _INPUT_SESSION = PromptSession()
+    return await _INPUT_SESSION.prompt_async(HTML("<ansigreen><b>you</b></ansigreen>: "))
 
 
 def _print_still_unapplied(decision_id: int) -> None:
@@ -368,7 +383,7 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     while True:
         console.print()
         try:
-            line = Prompt.ask("[athlete.label]you[/athlete.label]")
+            line = await _read_input()
         except EOFError:
             if state.plan is not None:
                 console.print("[warn]Cancelled. Nothing changed.[/warn]")

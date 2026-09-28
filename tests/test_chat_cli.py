@@ -1733,3 +1733,29 @@ def test_with_engine_closes_clients_when_the_store_fails(
     with pytest.raises(RuntimeError, match="cannot create database file"):
         asyncio.run(cli_main._with_engine(noop))
     assert created and created[0]._client.is_closed
+
+
+class _FakeStdin:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+async def test_read_input_uses_rich_without_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_chat.sys, "stdin", _FakeStdin(tty=False))
+    monkeypatch.setattr(cli_chat.Prompt, "ask", lambda *args, **kwargs: "typed")
+    assert await cli_chat._read_input() == "typed"
+
+
+async def test_read_input_uses_the_prompt_session_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Session:
+        async def prompt_async(self, *args: Any, **kwargs: Any) -> str:
+            return "pasted\nblock"
+
+    monkeypatch.setattr(cli_chat.sys, "stdin", _FakeStdin(tty=True))
+    monkeypatch.setattr(cli_chat, "_INPUT_SESSION", _Session())
+    assert await cli_chat._read_input() == "pasted\nblock"
