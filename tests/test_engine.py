@@ -1608,6 +1608,7 @@ async def test_prune_conversation_keeps_proposals_and_dedup(
     assert removed == 2
     assert store.list_messages() == []
     assert store.get_proposal(proposal.id) is not None
+    assert store.unseen_activity_ids(["fx-a"]) == set()
 
 
 async def test_wipe_local_state_clears_everything(settings: Settings, tmp_path: Path) -> None:
@@ -1620,5 +1621,7 @@ async def test_wipe_local_state_clears_everything(settings: Settings, tmp_path: 
 
     assert counts["messages"] == 2
     assert counts["proposals"] == 1
+    assert counts["seen_activities"] >= 1
     assert store.list_messages() == []
     assert store.list_proposals() == []
+    assert store.unseen_activity_ids(["fx-a"]) == {"fx-a"}

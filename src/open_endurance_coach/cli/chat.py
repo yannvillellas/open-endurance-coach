@@ -66,7 +66,7 @@ HELP_TEXT = (
 
 _REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
 _BARE_COMMAND_RE = re.compile(
-    r"^\s*(help|exit|quit|forget(?:\s+\d+)?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
+    r"^\s*(help|exit|quit|forget(?:\s+(?:\d+|all))?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
     re.IGNORECASE,
 )
 _ASSUME_RE = re.compile(
@@ -423,6 +423,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         except EOFError:
             if state.plan is not None:
                 console.print("[warn]Cancelled. Nothing changed.[/warn]")
+            elif state.wipe_pending:
+                console.print("[hint]Wipe cancelled.[/hint]")
             console.print("bye")
             return
         except KeyboardInterrupt:
@@ -430,11 +432,20 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 console.print("[warn]Cancelled. Nothing changed.[/warn]")
                 state = ChatState()
                 continue
+            if state.wipe_pending:
+                console.print("[hint]Wipe cancelled.[/hint]")
+                state = ChatState()
+                continue
             console.print("bye")
             return
         if state.wipe_pending:
             if line.strip().casefold() == "yes":
-                counts = engine.wipe_local_state()
+                try:
+                    counts = engine.wipe_local_state()
+                except KeyboardInterrupt:
+                    console.print("[warn]Wipe interrupted; nothing changed.[/warn]")
+                    state = ChatState()
+                    continue
                 session.history = []
                 session.context = None
                 session.notified.clear()

@@ -1869,7 +1869,7 @@ def test_chat_forget_all_wipes_local_state_on_yes(patched: Any) -> None:
 
     result = runner.invoke(cli_main.app, [], input="/forget all\nyes\n/exit\n")
     assert result.exit_code == 0
-    assert "Deleted" in result.output
+    assert "Deleted 1 messages, 1 proposals and 1 seen activities." in result.output
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.is_activity_seen("fx-1") is False
@@ -1905,3 +1905,32 @@ def test_chat_forget_all_is_refused_during_a_proposal(patched: Any) -> None:
     assert "unavailable while a proposal is open" in result.output
     assert len(provider.calls) == 1
     assert store.list_messages() != []
+
+
+def test_chat_forget_all_without_slash_gets_the_hint(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, _ = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="forget all\n/exit\n")
+    assert result.exit_code == 0
+    assert "type it with a slash" in result.output
+    assert provider.calls == []
+
+
+def test_chat_forget_all_cancels_on_eof(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    store.add_message(MessageRole.USER, "hello")
+    result = runner.invoke(cli_main.app, [], input="/forget all\n")
+    assert result.exit_code == 0
+    assert "Wipe cancelled." in result.output
+    assert [row.content for row in store.list_messages()] == ["hello"]
+
+
+def test_chat_forget_all_rejects_extra_args(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    store.add_message(MessageRole.USER, "hello")
+    result = runner.invoke(cli_main.app, [], input="/forget all extra\n/exit\n")
+    assert result.exit_code == 0
+    assert "Usage: /forget" in result.output
+    assert [row.content for row in store.list_messages()] == ["hello"]

@@ -492,3 +492,13 @@ def test_delete_all_local_wipes_messages_proposals_and_seen(tmp_path: Path) -> N
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.is_activity_seen("fx-1") is False
+
+
+def test_vacuum_best_effort_swallows_errors() -> None:
+    from open_endurance_coach.store import db as store_db
+
+    class Boom:
+        def execute(self, *args: object, **kwargs: object) -> None:
+            raise sqlite3.Error("disk full")
+
+    store_db._vacuum_best_effort(Boom())  # type: ignore[arg-type]

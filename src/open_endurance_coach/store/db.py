@@ -41,6 +41,13 @@ _SQL_VARIABLE_BATCH = 900
 _VACUUM_MIN_ROWS = 100
 
 
+def _vacuum_best_effort(connection: sqlite3.Connection) -> None:
+    try:
+        connection.execute("VACUUM")
+    except (sqlite3.Error, KeyboardInterrupt):
+        logger.warning("VACUUM skipped")
+
+
 class CoachStore:
     def __init__(self, path: str | Path, *, clock: Callable[[], datetime] | None = None) -> None:
         self._path = Path(path)
@@ -97,23 +104,28 @@ class CoachStore:
             for name, statement in statements.items():
                 counts[name] = self._connection.execute(statement).rowcount
             self._connection.commit()
-        except sqlite3.Error:
+        except BaseException:
             self._connection.rollback()
             raise
-        self._connection.execute("VACUUM")
+        if sum(counts.values()) >= _VACUUM_MIN_ROWS:
+            _vacuum_best_effort(self._connection)
         return counts
 
     def prune_messages(self, cutoff: datetime | None) -> int:
-        if cutoff is None:
-            cursor = self._connection.execute("DELETE FROM messages")
-        else:
-            cursor = self._connection.execute(
-                "DELETE FROM messages WHERE created_at < ?", (cutoff.isoformat(),)
-            )
-        self._connection.commit()
+        try:
+            if cutoff is None:
+                cursor = self._connection.execute("DELETE FROM messages")
+            else:
+                cursor = self._connection.execute(
+                    "DELETE FROM messages WHERE created_at < ?", (cutoff.isoformat(),)
+                )
+            self._connection.commit()
+        except BaseException:
+            self._connection.rollback()
+            raise
         removed = cursor.rowcount
         if removed >= _VACUUM_MIN_ROWS:
-            self._connection.execute("VACUUM")
+            _vacuum_best_effort(self._connection)
         return removed
 
     def close(self) -> None:
