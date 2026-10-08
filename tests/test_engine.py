@@ -1608,3 +1608,17 @@ async def test_prune_conversation_keeps_proposals_and_dedup(
     assert removed == 2
     assert store.list_messages() == []
     assert store.get_proposal(proposal.id) is not None
+
+
+async def test_wipe_local_state_clears_everything(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    await engine.analyze("status check")
+
+    counts = engine.wipe_local_state()
+
+    assert counts["messages"] == 2
+    assert counts["proposals"] == 1
+    assert store.list_messages() == []
+    assert store.list_proposals() == []

@@ -478,3 +478,17 @@ def test_prune_messages_deletes_messages_only(tmp_path: Path) -> None:
     assert store.get_proposal(proposal_id) is not None
     assert store.is_activity_seen("fx-old")
     assert store.is_activity_seen("fx-recent")
+
+
+def test_delete_all_local_wipes_messages_proposals_and_seen(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.save_proposal(focus="old", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "hello")
+    store.mark_activities_seen(["fx-1"])
+
+    counts = store.delete_all_local()
+
+    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
+    assert store.list_messages() == []
+    assert store.list_proposals() == []
+    assert store.is_activity_seen("fx-1") is False

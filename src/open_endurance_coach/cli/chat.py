@@ -59,6 +59,7 @@ HELP_TEXT = (
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
     "/forget [days]         forget the conversation (all, or older than N days)\n"
+    "/forget all            delete all local state (conversation, proposals, dedup)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
@@ -344,11 +345,19 @@ async def _run_command(
         console.print(HELP_TEXT, markup=False)
         return None
     if name == "forget":
+        if len(args) == 1 and args[0].casefold() == "all":
+            console.print(
+                "[warn]This deletes the conversation, the pending or unapplied proposals and the"
+                " seen-activity markers. The plan already applied and your races stay in"
+                " Intervals.icu. Reply exactly yes to confirm.[/warn]"
+            )
+            return ChatState(wipe_pending=True)
         days: int | None = None
         if args:
-            if not args[0].isdigit() or int(args[0]) <= 0:
+            if len(args) != 1 or not args[0].isdigit() or int(args[0]) <= 0:
                 console.print(
-                    r"[error]Usage: /forget \[days>0] (omit days to forget everything)[/error]"
+                    r"[error]Usage: /forget \[days>0|all]"
+                    " (omit days to forget the conversation)[/error]"
                 )
                 return None
             days = int(args[0])
@@ -423,6 +432,21 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 continue
             console.print("bye")
             return
+        if state.wipe_pending:
+            if line.strip().casefold() == "yes":
+                counts = engine.wipe_local_state()
+                session.history = []
+                session.context = None
+                session.notified.clear()
+                session.pending_proposal_id = None
+                console.print(
+                    f"Deleted {counts['messages']} messages, {counts['proposals']} proposals"
+                    f" and {counts['seen_activities']} seen activities."
+                )
+                state = ChatState()
+                continue
+            state = ChatState()
+            console.print("[hint]Wipe cancelled.[/hint]")
         bare = _BARE_COMMAND_RE.match(line)
         if bare is not None:
             console.print(

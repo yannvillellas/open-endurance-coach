@@ -486,6 +486,9 @@ class CoachEngine:
             cutoff = cutoff - timedelta(days=days)
         return self._store.prune_before(cutoff)
 
+    def wipe_local_state(self) -> dict[str, int]:
+        return self._store.delete_all_local()
+
     def prune_conversation(self, days: int | None = None, *, now: datetime | None = None) -> int:
         cutoff = None
         if days is not None:

@@ -1664,7 +1664,7 @@ def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
     _, store = patched(provider)
     result = runner.invoke(cli_main.app, [], input="/forget 0\n/forget abc\n/exit\n")
     assert result.exit_code == 0
-    assert result.output.count("Usage: /forget [days>0]") == 2
+    assert result.output.count("Usage: /forget [days>0|all]") == 2
     assert "Forgot" not in result.output
     assert store.list_proposals() == []
 
@@ -1854,3 +1854,54 @@ async def test_read_input_uses_the_prompt_session_on_a_tty(
     monkeypatch.setattr(cli_chat.sys, "stdin", _FakeStdin(tty=True))
     monkeypatch.setattr(cli_chat, "_INPUT_SESSION", _Session())
     assert await cli_chat._read_input() == "pasted\nblock"
+
+
+def test_chat_forget_all_wipes_local_state_on_yes(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    store.save_proposal(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=CoachContext(focus="f"),
+    )
+    store.add_message(MessageRole.USER, "hello")
+    store.mark_activities_seen(["fx-1"])
+
+    result = runner.invoke(cli_main.app, [], input="/forget all\nyes\n/exit\n")
+    assert result.exit_code == 0
+    assert "Deleted" in result.output
+    assert store.list_messages() == []
+    assert store.list_proposals() == []
+    assert store.is_activity_seen("fx-1") is False
+
+
+def test_chat_forget_all_clears_the_session_history(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
+    _, _ = patched(provider)
+    result = runner.invoke(
+        cli_main.app, [], input="how was my week?\n/forget all\nyes\nand today?\n/exit\n"
+    )
+    assert result.exit_code == 0
+    assert "Recent conversation:" not in provider.calls[1]["messages"][1].content
+
+
+def test_chat_forget_all_cancels_on_anything_else(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    store.add_message(MessageRole.USER, "hello")
+
+    result = runner.invoke(cli_main.app, [], input="/forget all\n/exit\n")
+
+    assert result.exit_code == 0
+    assert "Wipe cancelled." in result.output
+    assert [row.content for row in store.list_messages()] == ["hello"]
+
+
+def test_chat_forget_all_is_refused_during_a_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    _, store = patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\n/forget all\nno\n")
+    assert result.exit_code == 0
+    assert "unavailable while a proposal is open" in result.output
+    assert len(provider.calls) == 1
+    assert store.list_messages() != []

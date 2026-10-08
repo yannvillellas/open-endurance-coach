@@ -86,6 +86,23 @@ class CoachStore:
             self._connection.execute("VACUUM")
         return counts
 
+    def delete_all_local(self) -> dict[str, int]:
+        statements = {
+            "messages": "DELETE FROM messages",
+            "proposals": "DELETE FROM proposals",
+            "seen_activities": "DELETE FROM seen_activities",
+        }
+        counts: dict[str, int] = {}
+        try:
+            for name, statement in statements.items():
+                counts[name] = self._connection.execute(statement).rowcount
+            self._connection.commit()
+        except sqlite3.Error:
+            self._connection.rollback()
+            raise
+        self._connection.execute("VACUUM")
+        return counts
+
     def prune_messages(self, cutoff: datetime | None) -> int:
         if cutoff is None:
             cursor = self._connection.execute("DELETE FROM messages")
