@@ -6,41 +6,33 @@ from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 
 
-class DraftStatus(StrEnum):
+class ProposalStatus(StrEnum):
     PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    UNAPPLIED = "unapplied"
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
 
 
 @dataclass(frozen=True)
-class Draft:
+class Proposal:
     id: int
     created_at: datetime
-    status: DraftStatus
+    status: ProposalStatus
     focus: str
     user_feedback: str | None
     context: CoachContext
     report: DecisionReport
+    approved_report: DecisionReport | None = None
+    decided_at: datetime | None = None
 
 
 @dataclass(frozen=True)
-class Feedback:
+class Message:
     id: int
-    draft_id: int
     created_at: datetime
+    role: MessageRole
     content: str
-
-
-@dataclass(frozen=True)
-class FeedbackWithReport:
-    feedback: Feedback
-    report: DecisionReport
-
-
-@dataclass(frozen=True)
-class Decision:
-    id: int
-    draft_id: int
-    decided_at: datetime
-    applied_at: datetime | None
-    report: DecisionReport
+    report: DecisionReport | None = None

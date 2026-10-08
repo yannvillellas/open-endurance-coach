@@ -27,7 +27,7 @@ class PlanItem:
 @dataclass(frozen=True)
 class PlanSnapshot:
     plan_text: str
-    draft_id: int
+    proposal_id: int
     items: tuple[PlanItem, ...] = ()
 
 

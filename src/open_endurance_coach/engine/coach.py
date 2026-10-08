@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
-from open_endurance_coach.chat.history import count_exchanges
+from open_endurance_coach.chat.history import assistant_turn, count_exchanges
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
@@ -35,14 +35,14 @@ from open_endurance_coach.schemas.decisions import (
 from open_endurance_coach.schemas.intervals import Event
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
-    Decision,
-    Draft,
-    DraftStatus,
-    FeedbackWithReport,
+    Message,
+    MessageRole,
+    Proposal,
+    ProposalStatus,
 )
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
-from open_endurance_coach.writer.records import AppliedDecision, ApplyReport
+from open_endurance_coach.writer.records import AppliedProposal, ApplyReport
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +51,12 @@ logger = logging.getLogger(__name__)
 class FeedbackOutcome:
     """Result of a feedback turn.
 
-    ``draft`` is the persisted revision when the model returned a plan, or the
-    unchanged pending draft when the turn was conversational or still blocked on
+    ``proposal`` is the persisted revision when the model returned a plan, or the
+    unchanged pending proposal when the turn was conversational or still blocked on
     material questions; ``report`` always carries the turn's report for display.
     """
 
-    draft: Draft
+    proposal: Proposal
     report: DecisionReport
 
 
@@ -83,16 +83,16 @@ MAX_PLANNING_DAYS = 400
 PROMPT_OVERHEAD_TOKENS = 256
 
 
-class StaleDecisionError(ValueError):
-    """The decision's dated mutations are in the past."""
+class StaleProposalError(ValueError):
+    """The proposal's dated mutations are in the past."""
 
 
 class PlaceholderMutationError(ValueError):
-    """The decision still carries example placeholder values."""
+    """The proposal still carries example placeholder values."""
 
 
 class StateDriftError(ValueError):
-    """Some of the decision's mutations are no longer valid."""
+    """Some of the proposal's mutations are no longer valid."""
 
 
 def _is_stale(mutation: Any, *, today: date) -> bool:
@@ -162,7 +162,7 @@ def _drop_reason(dropped: list[str]) -> str:
 
 def _reject_past_dates(report: DecisionReport, *, today: date) -> None:
     if any(_is_stale(mutation, today=today) for mutation in report.mutations):
-        raise StaleDecisionError(
+        raise StaleProposalError(
             "mutations must be dated between today and "
             f"{MAX_PLANNING_DAYS} days ahead; example dates are placeholders"
         )
@@ -390,24 +390,28 @@ class CoachEngine:
         today: date | None = None,
         context: CoachContext | None = None,
         history: list[LlmMessage] | None = None,
-    ) -> Draft:
+    ) -> Proposal:
         self.check_focus(focus)
         if context is None:
             context = await self.build_context(focus, user_feedback=user_feedback, today=today)
         report = await self._run_llm(context, history=history)
-        draft_id = self._store.save_draft(
+        proposal_id = self._store.save_proposal(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
         self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
-        draft = self._store.get_draft(draft_id)
-        assert draft is not None
-        return draft
+        self._store.add_message(MessageRole.USER, focus)
+        self._store.add_message(
+            MessageRole.ASSISTANT, assistant_turn(report).content, report=report
+        )
+        proposal = self._store.get_proposal(proposal_id)
+        assert proposal is not None
+        return proposal
 
-    def review(self, draft_id: int) -> Draft:
-        draft = self._store.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        return draft
+    def review(self, proposal_id: int) -> Proposal:
+        proposal = self._store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        return proposal
 
     def today(self) -> date:
         return self._clock().date()
@@ -460,8 +464,8 @@ class CoachEngine:
                 f" (roughly {limit * CHARS_PER_TOKEN} characters)"
             )
 
-    def unapplied_decisions(self) -> list[Decision]:
-        return self._store.list_unapplied_decisions()
+    def unapplied_proposals(self) -> list[Proposal]:
+        return self._store.list_unapplied_proposals()
 
     def llm_selection(self) -> tuple[str, str]:
         return (self._llm_client.provider_name, self._llm_client.model_name)
@@ -482,10 +486,8 @@ class CoachEngine:
             cutoff = cutoff - timedelta(days=days)
         return self._store.prune_before(cutoff)
 
-    def recent_history(
-        self, limit: int, *, max_age_days: int | None = None
-    ) -> list[FeedbackWithReport]:
-        return self._store.recent_feedback(limit, max_age_days=max_age_days)
+    def recent_history(self, limit: int, *, max_age_days: int | None = None) -> list[Message]:
+        return self._store.recent_messages(limit, max_age_days=max_age_days)
 
     def _context_around(
         self,
@@ -519,7 +521,7 @@ class CoachEngine:
         """Reuse cached athlete data for a new message within the context budget.
 
         A raw copy would let a long message push the estimate over ``max_tokens``
-        and break the draft on reload, so the data is trimmed to fit.
+        and break the proposal on reload, so the data is trimmed to fit.
         """
         return self._context_around(
             base,
@@ -531,69 +533,74 @@ class CoachEngine:
 
     async def submit_feedback(
         self,
-        draft_id: int,
+        proposal_id: int,
         feedback: str,
         *,
         focus: str | None = None,
         assume: bool = False,
         history: list[LlmMessage] | None = None,
     ) -> FeedbackOutcome:
-        draft = self._store.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
+        proposal = self._store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        if proposal.status != ProposalStatus.PENDING:
             raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts accept feedback"
+                f"proposal {proposal_id} is {proposal.status.value};"
+                " only pending proposals accept feedback"
             )
         self.check_focus(focus if focus is not None else feedback)
         context = self._context_around(
-            draft.context,
-            focus=focus or draft.context.focus,
-            proposal=draft.report,
+            proposal.context,
+            focus=focus or proposal.context.focus,
+            proposal=proposal.report,
             # The message is the focus when the caller passes it, so do not also
             # charge it as user_feedback: that section counts against the data
             # budget and would evict real athlete data for long messages.
             user_feedback=None if focus is not None else feedback,
             today=self.today(),
         )
-        feedback_id = self._store.add_feedback(draft_id, feedback)
+        message_id = self._store.add_message(MessageRole.USER, feedback)
         report = await self._run_llm(context, history=history)
-        self._store.set_feedback_report(feedback_id, report)
+        self._store.set_message_report(message_id, report)
+        self._store.add_message(
+            MessageRole.ASSISTANT, assistant_turn(report).content, report=report
+        )
         if report.intent != "plan" or (report.needs_input and not assume):
             # Conversational turn or a plan still blocked on material questions:
             # keep the pending proposal and only carry the report for display.
-            return FeedbackOutcome(draft=draft, report=report)
-        self._store.update_draft_report(
-            draft_id, report=report, user_feedback=feedback, context=context
+            return FeedbackOutcome(proposal=proposal, report=report)
+        self._store.update_proposal_report(
+            proposal_id, report=report, user_feedback=feedback, context=context
         )
-        updated = self._store.get_draft(draft_id)
+        updated = self._store.get_proposal(proposal_id)
         assert updated is not None
-        return FeedbackOutcome(draft=updated, report=report)
+        return FeedbackOutcome(proposal=updated, report=report)
 
     def _assert_current_dates(self, report: DecisionReport) -> None:
         _assert_valid_mutations(report, today=self.today())
 
-    def discard_decision(self, decision_id: int) -> None:
-        self._store.discard_decision(decision_id)
+    def delete_proposal(self, proposal_id: int) -> None:
+        self._store.delete_proposal(proposal_id)
 
-    def discard_stale_decisions(self) -> list[tuple[int, str]]:
+    def discard_stale_proposals(self) -> list[tuple[int, str]]:
         discarded: list[tuple[int, str]] = []
         today = self.today()
-        for decision in self._store.list_unapplied_decisions():
-            _, dropped = _filter_valid_mutations(decision.report, today=today)
+        for proposal in self._store.list_unapplied_proposals():
+            approved = proposal.approved_report or proposal.report
+            _, dropped = _filter_valid_mutations(approved, today=today)
             if not dropped:
                 continue
             reason = _drop_reason(dropped)
-            self._store.discard_decision(decision.id)
-            discarded.append((decision.id, reason))
+            self._store.delete_proposal(proposal.id)
+            discarded.append((proposal.id, reason))
         return discarded
 
-    def approve(self, draft_id: int, *, keep: Sequence[int] | None = None) -> Decision:
-        """Approve a pending draft; ``keep`` limits the decision to those mutation indices."""
-        draft = self._store.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        report = draft.report
+    def approve(self, proposal_id: int, *, keep: Sequence[int] | None = None) -> Proposal:
+        """Approve a pending proposal; ``keep`` limits the proposal to those mutation indices."""
+        proposal = self._store.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        report = proposal.report
         if keep is not None:
             report = report.model_copy(
                 update={
@@ -603,57 +610,57 @@ class CoachEngine:
                 }
             )
         self._assert_current_dates(report)
-        return self._store.approve_draft(draft_id, report=report)
+        return self._store.approve_proposal(proposal_id, report=report)
 
-    def reject_draft(self, draft_id: int) -> None:
-        self._store.reject_draft(draft_id)
+    def reject_proposal(self, proposal_id: int) -> None:
+        self._store.reject_proposal(proposal_id)
 
-    async def apply(self, decision_id: int | None = None) -> ApplyReport:
-        """Apply approved decisions to the calendar.
+    async def apply(self, proposal_id: int | None = None) -> ApplyReport:
+        """Apply approved proposals to the calendar.
 
-        If a mutation fails, earlier mutations of the same decision stay applied while
-        the decision remains unapplied; re-running is safe because mutations are
+        If a mutation fails, earlier mutations of the same proposal stay applied while
+        the proposal remains unapplied; re-running is safe because mutations are
         idempotent (create resolves by name+date, update re-applies, delete skips).
 
-        An approval is atomic: a decision with a stale or placeholder mutation is
+        An approval is atomic: a proposal with a stale or placeholder mutation is
         rejected with ``StateDriftError`` and nothing is written.
         """
         if self._writer is None:
             raise InternalError("no calendar writer configured")
-        if decision_id is not None:
-            decision = self._store.get_decision(decision_id)
-            if decision is None:
-                raise ValueError(f"decision not found: {decision_id}")
-            if decision.applied_at is not None:
-                raise ValueError(f"decision {decision_id} is already applied")
-            decisions = [decision]
+        if proposal_id is not None:
+            proposal = self._store.get_proposal(proposal_id)
+            if proposal is None:
+                raise ValueError(f"proposal not found: {proposal_id}")
+            proposals = [proposal]
         else:
-            decisions = self._store.list_unapplied_decisions()
-        applied: list[AppliedDecision] = []
-        for decision in decisions:
-            kept, dropped = _filter_valid_mutations(decision.report, today=self.today())
+            proposals = self._store.list_unapplied_proposals()
+        applied: list[AppliedProposal] = []
+        for proposal in proposals:
+            approved = proposal.approved_report or proposal.report
+            kept, dropped = _filter_valid_mutations(approved, today=self.today())
             if dropped:
                 reason = _drop_reason(dropped)
                 if not kept:
                     if set(dropped) == {"placeholder"}:
                         raise PlaceholderMutationError(
-                            f"decision {decision.id} only contains placeholder mutations ({reason})"
+                            f"proposal {proposal.id} only contains placeholder mutations ({reason})"
                         )
-                    raise StaleDecisionError(
-                        f"decision {decision.id} has no mutations left to apply ({reason})"
+                    raise StaleProposalError(
+                        f"proposal {proposal.id} has no mutations left to apply ({reason})"
                     )
                 logger.warning(
-                    "rejecting decision %s: %d %s mutation(s) dropped (%s); nothing written",
-                    decision.id,
+                    "rejecting proposal %s: %d %s mutation(s) dropped (%s); nothing written",
+                    proposal.id,
                     len(dropped),
                     "/".join(sorted(set(dropped))),
                     reason,
                 )
                 raise StateDriftError(
-                    f"decision {decision.id} was rejected: {len(dropped)} mutation(s)"
+                    f"proposal {proposal.id} was rejected: {len(dropped)} mutation(s)"
                     f" dropped ({reason}); nothing was written, ask for an updated plan"
                 )
-            outcomes = await self._writer.apply_decision(decision, mutations=kept)
-            applied.append(AppliedDecision(decision_id=decision.id, outcomes=outcomes))
-            self._store.mark_decision_applied(decision.id)
-        return ApplyReport(decisions=applied)
+            outcomes = await self._writer.apply_proposal(proposal, mutations=kept)
+            applied.append(AppliedProposal(proposal_id=proposal.id, outcomes=outcomes))
+            if all(not outcome.drift for outcome in outcomes):
+                self._store.delete_proposal(proposal.id)
+        return ApplyReport(proposals=applied)

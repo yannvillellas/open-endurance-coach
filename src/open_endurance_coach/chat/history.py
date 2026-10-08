@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
-from open_endurance_coach.store.records import FeedbackWithReport
+from open_endurance_coach.store.records import Message
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 
 
@@ -18,21 +18,12 @@ def assistant_turn(report: DecisionReport) -> LlmMessage:
     return LlmMessage(role="assistant", content=content)
 
 
-def seed_turns(entries: list[FeedbackWithReport]) -> list[LlmMessage]:
-    turns: list[LlmMessage] = []
-    count = len(entries)
-    for position, entry in enumerate(reversed(entries)):
-        turns.append(LlmMessage(role="user", content=entry.feedback.content))
-        next_draft = (
-            entries[count - 2 - position].feedback.draft_id if position + 1 < count else None
-        )
-        if next_draft != entry.feedback.draft_id:
-            turns.append(assistant_turn(entry.report))
-    return turns
+def seed_turns(entries: list[Message]) -> list[LlmMessage]:
+    return [LlmMessage(role=entry.role.value, content=entry.content) for entry in reversed(entries)]
 
 
 def count_exchanges(turns: list[LlmMessage]) -> int:
-    """One exchange is one coach reply; multi-round drafts can add user turns without one."""
+    """One exchange is one coach reply; multi-round proposals can add user turns without one."""
     return sum(1 for turn in turns if turn.role == "assistant")
 
 
@@ -72,10 +63,10 @@ class ChatSession:
     history: list[LlmMessage] = field(default_factory=list)
     context: CoachContext | None = None
     cap: int | None = None
-    pending_decision_id: int | None = None
+    pending_proposal_id: int | None = None
     notified: set[float] = field(default_factory=set)
 
-    def seed(self, entries: list[FeedbackWithReport], *, max_tokens: int) -> None:
+    def seed(self, entries: list[Message], *, max_tokens: int) -> None:
         self.history = trim_history(seed_turns(entries), max_tokens)
 
     def append(self, user_text: str, assistant_text: str) -> None:

@@ -11,11 +11,11 @@ class MutationOutcome:
 
 
 @dataclass(frozen=True)
-class AppliedDecision:
-    decision_id: int
+class AppliedProposal:
+    proposal_id: int
     outcomes: list[MutationOutcome]
 
 
 @dataclass(frozen=True)
 class ApplyReport:
-    decisions: list[AppliedDecision] = field(default_factory=list)
+    proposals: list[AppliedProposal] = field(default_factory=list)

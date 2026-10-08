@@ -12,7 +12,7 @@ from open_endurance_coach.schemas.decisions import (
     UpdateWorkout,
 )
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.store.records import MessageRole, ProposalStatus
 
 NOW = datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -42,8 +42,8 @@ def make_store(tmp_path: Path) -> CoachStore:
 
 def test_new_store_is_empty(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.list_drafts() == []
-    assert store.list_decisions() == []
+    assert store.list_proposals() == []
+    assert store.list_unapplied_proposals() == []
     assert store.unseen_activity_ids(["a", "b"]) == {"a", "b"}
 
 
@@ -92,177 +92,175 @@ def test_unseen_activity_ids_handles_empty_input(tmp_path: Path) -> None:
     assert store.unseen_activity_ids([]) == set()
 
 
-def test_save_and_get_draft_round_trips(tmp_path: Path) -> None:
+def test_save_and_get_proposal_round_trips(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="Analyze this week",
         report=make_report(),
         context=make_context(),
         user_feedback="Felt tired",
     )
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.id == draft_id
-    assert draft.created_at == NOW
-    assert draft.status is DraftStatus.PENDING
-    assert draft.focus == "Analyze this week"
-    assert draft.user_feedback == "Felt tired"
-    assert draft.context.focus == "status check"
-    assert draft.report == make_report()
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.id == proposal_id
+    assert proposal.created_at == NOW
+    assert proposal.status is ProposalStatus.PENDING
+    assert proposal.focus == "Analyze this week"
+    assert proposal.user_feedback == "Felt tired"
+    assert proposal.context.focus == "status check"
+    assert proposal.report == make_report()
 
 
-def test_get_draft_missing_returns_none(tmp_path: Path) -> None:
+def test_get_proposal_missing_returns_none(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.get_draft(404) is None
+    assert store.get_proposal(404) is None
 
 
-def test_list_drafts_orders_newest_first(tmp_path: Path) -> None:
+def test_list_proposals_orders_newest_first(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    first = store.save_draft(focus="first", report=make_report(), context=make_context("a"))
-    second = store.save_draft(focus="second", report=make_report(), context=make_context("b"))
-    drafts = store.list_drafts()
-    assert [draft.id for draft in drafts] == [second, first]
+    first = store.save_proposal(focus="first", report=make_report(), context=make_context("a"))
+    second = store.save_proposal(focus="second", report=make_report(), context=make_context("b"))
+    proposals = store.list_proposals()
+    assert [proposal.id for proposal in proposals] == [second, first]
 
 
-def test_list_drafts_filters_by_status(tmp_path: Path) -> None:
+def test_list_proposals_filters_by_status(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    pending_id = store.save_draft(focus="pending", report=make_report(), context=make_context())
-    approved_id = store.save_draft(focus="approved", report=make_report(), context=make_context())
-    store.approve_draft(approved_id)
-    pending = store.list_drafts(DraftStatus.PENDING)
-    approved = store.list_drafts(DraftStatus.APPROVED)
-    assert [draft.id for draft in pending] == [pending_id]
-    assert [draft.id for draft in approved] == [approved_id]
+    pending_id = store.save_proposal(focus="pending", report=make_report(), context=make_context())
+    approved_id = store.save_proposal(
+        focus="approved", report=make_report(), context=make_context()
+    )
+    store.approve_proposal(approved_id)
+    pending = store.list_proposals(ProposalStatus.PENDING)
+    approved = store.list_proposals(ProposalStatus.UNAPPLIED)
+    assert [proposal.id for proposal in pending] == [pending_id]
+    assert [proposal.id for proposal in approved] == [approved_id]
 
 
-def test_update_draft_report_replaces_report_and_feedback(tmp_path: Path) -> None:
+def test_update_proposal_report_replaces_report_and_feedback(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
     replacement = DecisionReport(summary="Revised.", questions=["Any soreness?"])
-    store.update_draft_report(draft_id, report=replacement, user_feedback="Legs were heavy")
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.report == replacement
-    assert draft.user_feedback == "Legs were heavy"
-    assert draft.status is DraftStatus.PENDING
+    store.update_proposal_report(proposal_id, report=replacement, user_feedback="Legs were heavy")
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.report == replacement
+    assert proposal.user_feedback == "Legs were heavy"
+    assert proposal.status is ProposalStatus.PENDING
 
 
-def test_update_draft_report_with_context_persists_context(tmp_path: Path) -> None:
+def test_update_proposal_report_with_context_persists_context(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
     replacement = DecisionReport(summary="Revised.")
     updated_context = make_context("status check with feedback")
     updated_context = CoachContext(
         focus=updated_context.focus, user_feedback="RPE 8", max_tokens=updated_context.max_tokens
     )
-    store.update_draft_report(
-        draft_id, report=replacement, user_feedback="RPE 8", context=updated_context
+    store.update_proposal_report(
+        proposal_id, report=replacement, user_feedback="RPE 8", context=updated_context
     )
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.context.user_feedback == "RPE 8"
-    assert draft.context.focus == "status check with feedback"
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.context.user_feedback == "RPE 8"
+    assert proposal.context.focus == "status check with feedback"
 
 
-def test_update_draft_report_missing_draft_raises(tmp_path: Path) -> None:
+def test_update_proposal_report_missing_proposal_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(ValueError, match="not found"):
-        store.update_draft_report(404, report=make_report(), user_feedback=None)
+        store.update_proposal_report(404, report=make_report(), user_feedback=None)
 
 
-def test_update_draft_report_non_pending_draft_raises(tmp_path: Path) -> None:
+def test_update_proposal_report_non_pending_proposal_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    store.approve_proposal(proposal_id)
     with pytest.raises(ValueError, match="pending"):
-        store.update_draft_report(draft_id, report=make_report(), user_feedback=None)
+        store.update_proposal_report(proposal_id, report=make_report(), user_feedback=None)
 
 
-def test_add_feedback_records_rows(tmp_path: Path) -> None:
+def test_add_message_records_rows(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    first = store.add_feedback(draft_id, "RPE was 7")
-    second = store.add_feedback(draft_id, "Slept poorly")
-    feedback = store.list_feedback(draft_id)
-    assert [item.id for item in feedback] == [first, second]
-    assert [item.content for item in feedback] == ["RPE was 7", "Slept poorly"]
-    assert all(item.draft_id == draft_id for item in feedback)
-    assert all(item.created_at == NOW for item in feedback)
+    first = store.add_message(MessageRole.USER, "RPE was 7")
+    second = store.add_message(MessageRole.ASSISTANT, "Noted.", report=make_report())
+    messages = store.list_messages()
+    assert [item.id for item in messages] == [first, second]
+    assert [item.content for item in messages] == ["RPE was 7", "Noted."]
+    assert [item.role for item in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert messages[0].report is None
+    assert messages[1].report == make_report()
+    assert all(item.created_at == NOW for item in messages)
 
 
-def test_add_feedback_missing_draft_raises(tmp_path: Path) -> None:
+def test_approve_proposal_creates_proposal_and_flips_status(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.add_feedback(404, "RPE was 7")
-
-
-def test_approve_draft_creates_decision_and_flips_status(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    decision = store.approve_draft(draft_id)
-    assert decision.draft_id == draft_id
-    assert decision.decided_at == NOW
-    assert decision.report == make_report()
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.APPROVED
-    decisions = store.list_decisions()
-    assert len(decisions) == 1
-    assert decisions[0].id == decision.id
-
-
-def test_approve_draft_records_the_approved_report(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    subset = make_report().model_copy(update={"mutations": make_report().mutations[2:]})
-    decision = store.approve_draft(draft_id, report=subset)
-    assert decision.report == subset
-    stored = store.get_decision(decision.id)
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    proposal = store.approve_proposal(proposal_id)
+    assert proposal.id == proposal_id
+    assert proposal.decided_at == NOW
+    assert proposal.approved_report == make_report()
+    stored = store.get_proposal(proposal_id)
     assert stored is not None
-    assert stored.report == subset
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.APPROVED
-    assert draft.report == make_report()
+    assert stored.status is ProposalStatus.UNAPPLIED
+    proposals = store.list_unapplied_proposals()
+    assert len(proposals) == 1
+    assert proposals[0].id == stored.id
 
 
-def test_approve_missing_draft_raises(tmp_path: Path) -> None:
+def test_approve_proposal_records_the_approved_report(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    subset = make_report().model_copy(update={"mutations": make_report().mutations[2:]})
+    proposal = store.approve_proposal(proposal_id, report=subset)
+    assert proposal.approved_report == subset
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.approved_report == subset
+    stored = store.get_proposal(proposal_id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.UNAPPLIED
+    assert stored.report == make_report()
+
+
+def test_approve_missing_proposal_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(ValueError, match="not found"):
-        store.approve_draft(404)
+        store.approve_proposal(404)
 
 
 def test_approve_twice_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    store.approve_proposal(proposal_id)
     with pytest.raises(ValueError, match="pending"):
-        store.approve_draft(draft_id)
-    assert len(store.list_decisions()) == 1
+        store.approve_proposal(proposal_id)
+    assert len(store.list_unapplied_proposals()) == 1
 
 
-def test_approve_draft_is_atomic_when_the_decision_insert_fails(tmp_path: Path) -> None:
+def test_approve_proposal_is_atomic_when_the_update_fails(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
     store._connection.execute(
-        "CREATE TRIGGER refuse_decision BEFORE INSERT ON decisions"
+        "CREATE TRIGGER refuse_proposal BEFORE UPDATE ON proposals"
         " BEGIN SELECT RAISE(ABORT, 'disk full'); END;"
     )
     store._connection.commit()
     with pytest.raises(sqlite3.IntegrityError):
-        store.approve_draft(draft_id)
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.PENDING
-    assert store.list_decisions() == []
-    store._connection.execute("DROP TRIGGER refuse_decision")
+        store.approve_proposal(proposal_id)
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.status is ProposalStatus.PENDING
+    assert proposal.approved_report is None
+    assert store.list_unapplied_proposals() == []
+    store._connection.execute("DROP TRIGGER refuse_proposal")
     store._connection.commit()
-    decision = store.approve_draft(draft_id)
-    assert decision.draft_id == draft_id
-    reopened = store.get_draft(draft_id)
+    proposal = store.approve_proposal(proposal_id)
+    assert proposal.id == proposal_id
+    reopened = store.get_proposal(proposal_id)
     assert reopened is not None
-    assert reopened.status is DraftStatus.APPROVED
-    assert len(store.list_decisions()) == 1
+    assert reopened.status is ProposalStatus.UNAPPLIED
+    assert len(store.list_unapplied_proposals()) == 1
 
 
 def test_store_persists_across_reopen(tmp_path: Path) -> None:
@@ -270,16 +268,16 @@ def test_store_persists_across_reopen(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 
     store = CoachStore(path, clock=FakeClock(NOW))
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="first", report=make_report(), context=make_context(), user_feedback="tired"
     )
     store.mark_activities_seen(["act-1"])
     store.close()
     reopened = CoachStore(path, clock=FakeClock(NOW))
-    draft = reopened.get_draft(draft_id)
-    assert draft is not None
-    assert draft.report == make_report()
-    assert draft.user_feedback == "tired"
+    proposal = reopened.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.report == make_report()
+    assert proposal.user_feedback == "tired"
     assert reopened.is_activity_seen("act-1") is True
 
 
@@ -290,199 +288,90 @@ def test_store_creates_parent_directories(tmp_path: Path) -> None:
     store.close()
 
 
-def approve_decision(store: CoachStore) -> int:
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    return store.approve_draft(draft_id).id
+def approve_proposal(store: CoachStore) -> int:
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    return store.approve_proposal(proposal_id).id
 
 
-def test_decisions_have_no_applied_at_initially(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    decision_id = approve_decision(store)
-    decision = store.list_decisions()[0]
-    assert decision.id == decision_id
-    assert decision.applied_at is None
+def test_store_creates_the_fresh_proposals_schema(tmp_path: Path) -> None:
+    import sqlite3
 
-
-def test_mark_decision_applied_sets_timestamp(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    decision_id = approve_decision(store)
-    store.mark_decision_applied(decision_id)
-    decision = store.list_decisions()[0]
-    assert decision.applied_at == NOW
-    assert store.list_unapplied_decisions() == []
-
-
-def test_mark_decision_applied_twice_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    decision_id = approve_decision(store)
-    store.mark_decision_applied(decision_id)
-    with pytest.raises(ValueError, match="already applied"):
-        store.mark_decision_applied(decision_id)
-
-
-def test_mark_decision_applied_missing_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.mark_decision_applied(404)
-
-
-def test_list_unapplied_decisions_only_unapplied(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    first = approve_decision(store)
-    second = approve_decision(store)
-    store.mark_decision_applied(first)
-    unapplied = store.list_unapplied_decisions()
-    assert [decision.id for decision in unapplied] == [second]
-
-
-def test_applied_at_persists_across_reopen(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     store = CoachStore(path)
-    decision_id = approve_decision(store)
-    store.mark_decision_applied(decision_id)
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.approved_report is None
     store.close()
-    reopened = CoachStore(path)
-    decision = reopened.list_decisions()[0]
-    assert decision.applied_at is not None
-    assert reopened.list_unapplied_decisions() == []
-
-
-def test_store_migrates_old_schema_without_applied_at(tmp_path: Path) -> None:
-    import sqlite3
-
-    path = tmp_path / "coach.db"
     connection = sqlite3.connect(path)
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS decisions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            draft_id INTEGER NOT NULL,
-            decided_at TEXT NOT NULL,
-            report_json TEXT NOT NULL
-        );
-        """
-    )
-    connection.execute(
-        "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
-        (7, "2024-02-01T12:00:00+00:00", '{"summary": "ok"}'),
-    )
-    connection.commit()
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(proposals)").fetchall()}
     connection.close()
-    store = CoachStore(path)
-    decisions = store.list_decisions()
-    assert len(decisions) == 1
-    assert decisions[0].draft_id == 7
-    assert decisions[0].applied_at is None
-    store.mark_decision_applied(decisions[0].id)
-    assert store.list_unapplied_decisions() == []
+    assert {"approved_json", "decided_at"} <= columns
 
 
-def test_store_migrates_old_feedback_without_report_column(tmp_path: Path) -> None:
-    import sqlite3
-
-    path = tmp_path / "coach.db"
-    connection = sqlite3.connect(path)
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS drafts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            status TEXT NOT NULL,
-            focus TEXT NOT NULL,
-            user_feedback TEXT,
-            context_json TEXT NOT NULL,
-            report_json TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS feedback (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            draft_id INTEGER NOT NULL REFERENCES drafts(id),
-            created_at TEXT NOT NULL,
-            content TEXT NOT NULL
-        );
-        """
-    )
-    connection.commit()
-    connection.close()
-    store = CoachStore(path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "old row")
-    old = store.recent_feedback(1)[0]
-    assert old.feedback.content == "old row"
-    assert old.report.summary == "Load stable."
-    store.add_feedback(draft_id, "new row", report=DecisionReport(summary="Answer."))
-    new = store.recent_feedback(1)[0]
+def test_recent_messages_respects_rows_without_a_report(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.add_message(MessageRole.USER, "old row")
+    old = store.recent_messages(1)[0]
+    assert old.content == "old row"
+    assert old.report is None
+    store.add_message(MessageRole.ASSISTANT, "new row", report=DecisionReport(summary="Answer."))
+    new = store.recent_messages(1)[0]
+    assert new.report is not None
     assert new.report.summary == "Answer."
 
 
-def test_recent_feedback_empty_store(tmp_path: Path) -> None:
+def test_recent_messages_empty_store(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.recent_feedback(10) == []
+    assert store.recent_messages(10) == []
 
 
-def test_recent_feedback_zero_or_negative_limit_returns_empty(tmp_path: Path) -> None:
+def test_recent_messages_zero_or_negative_limit_returns_empty(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "RPE was 7")
-    assert store.recent_feedback(0) == []
-    assert store.recent_feedback(-3) == []
+    store.add_message(MessageRole.USER, "RPE was 7")
+    assert store.recent_messages(0) == []
+    assert store.recent_messages(-3) == []
 
 
-def test_recent_feedback_pairs_rows_with_draft_report(tmp_path: Path) -> None:
+def test_recent_messages_carry_their_own_report(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "RPE was 7")
-    rows = store.recent_feedback(10)
+    store.add_message(MessageRole.ASSISTANT, "RPE was 7", report=make_report())
+    rows = store.recent_messages(10)
     assert len(rows) == 1
-    assert rows[0].feedback.content == "RPE was 7"
-    assert rows[0].feedback.draft_id == draft_id
+    assert rows[0].content == "RPE was 7"
     assert rows[0].report == make_report()
 
 
-def test_recent_feedback_orders_newest_first_across_drafts(tmp_path: Path) -> None:
+def test_recent_messages_orders_newest_first(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    first_draft = store.save_draft(focus="first", report=make_report(), context=make_context())
-    second_draft = store.save_draft(focus="second", report=make_report(), context=make_context())
-    store.add_feedback(first_draft, "one")
-    store.add_feedback(second_draft, "two")
-    store.add_feedback(first_draft, "three")
-    rows = store.recent_feedback(10)
-    assert [row.feedback.content for row in rows] == ["three", "two", "one"]
+    store.add_message(MessageRole.USER, "one")
+    store.add_message(MessageRole.USER, "two")
+    store.add_message(MessageRole.USER, "three")
+    rows = store.recent_messages(10)
+    assert [row.content for row in rows] == ["three", "two", "one"]
 
 
-def test_recent_feedback_limit_caps_the_window(tmp_path: Path) -> None:
+def test_recent_messages_limit_caps_the_window(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
     for index in range(5):
-        store.add_feedback(draft_id, f"note {index}")
-    rows = store.recent_feedback(2)
-    assert [row.feedback.content for row in rows] == ["note 4", "note 3"]
+        store.add_message(MessageRole.USER, f"note {index}")
+    rows = store.recent_messages(2)
+    assert [row.content for row in rows] == ["note 4", "note 3"]
 
 
-def test_recent_feedback_falls_back_to_the_drafts_current_report(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "first answer")
-    replacement = DecisionReport(summary="Revised.")
-    store.update_draft_report(draft_id, report=replacement, user_feedback="first answer")
-    rows = store.recent_feedback(10)
-    assert len(rows) == 1
-    assert rows[0].report.summary == "Revised."
-
-
-def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
+def test_recent_messages_cutoff_filters_old_rows(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 
     clock = FakeClock(NOW)
     store = CoachStore(tmp_path / "coach.db", clock=clock)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "old row")
+    store.add_message(MessageRole.USER, "old row")
     clock.now = NOW + timedelta(days=10)
-    store.add_feedback(draft_id, "recent row")
-    recent = store.recent_feedback(10, max_age_days=5)
-    assert [row.feedback.content for row in recent] == ["recent row"]
-    assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
-    unfiltered = store.recent_feedback(10)
-    assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]
+    store.add_message(MessageRole.USER, "recent row")
+    recent = store.recent_messages(10, max_age_days=5)
+    assert [row.content for row in recent] == ["recent row"]
+    assert all(row.created_at == NOW + timedelta(days=10) for row in recent)
+    unfiltered = store.recent_messages(10)
+    assert [row.content for row in unfiltered] == ["recent row", "old row"]
 
 
 def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
@@ -490,57 +379,42 @@ def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
 
     clock = FakeClock(NOW)
     store = CoachStore(tmp_path / "coach.db", clock=clock)
-    old_draft = store.save_draft(focus="old", report=make_report(), context=make_context())
-    store.add_feedback(old_draft, "old feedback")
+    old_proposal = store.save_proposal(focus="old", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "old feedback")
     store.mark_activities_seen(["fx-old"])
-    store.approve_draft(old_draft)
+    store.approve_proposal(old_proposal)
 
     clock.now = NOW + timedelta(days=200)
-    recent_draft = store.save_draft(focus="recent", report=make_report(), context=make_context())
-    store.add_feedback(recent_draft, "recent feedback")
+    store.save_proposal(focus="recent", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "recent feedback")
     store.mark_activities_seen(["fx-recent"])
 
     counts = store.prune_before(NOW + timedelta(days=100))
 
-    assert counts == {"feedback": 1, "decisions": 1, "drafts": 1, "seen_activities": 1}
-    assert [draft.focus for draft in store.list_drafts()] == ["recent"]
-    assert [row.feedback.content for row in store.recent_feedback(10)] == ["recent feedback"]
-    assert store.list_decisions() == []
+    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
+    assert [proposal.focus for proposal in store.list_proposals()] == ["recent"]
+    assert [row.content for row in store.recent_messages(10)] == ["recent feedback"]
+    assert store.list_unapplied_proposals() == []
     assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
 
 
-def test_prune_before_deletes_dependents_created_after_the_cutoff(tmp_path: Path) -> None:
+def test_prune_before_keeps_messages_newer_than_the_cutoff(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 
     clock = FakeClock(NOW)
     store = CoachStore(tmp_path / "coach.db", clock=clock)
-    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
 
     clock.now = NOW + timedelta(days=200)
-    store.add_feedback(draft_id, "late feedback")
-    store.approve_draft(draft_id)
+    store.add_message(MessageRole.USER, "late feedback")
+    store.approve_proposal(proposal_id)
 
     counts = store.prune_before(NOW + timedelta(days=100))
 
-    assert counts == {"feedback": 1, "decisions": 1, "drafts": 1, "seen_activities": 0}
-    assert store.list_drafts() == []
-    assert store.list_feedback(draft_id) == []
-    assert store.list_decisions() == []
-
-
-def test_rejected_legacy_drafts_are_dropped_on_open(tmp_path: Path) -> None:
-    path = tmp_path / "coach.db"
-    store = CoachStore(path)
-    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
-    store.add_feedback(draft_id, "rejected feedback")
-    store._connection.execute("UPDATE drafts SET status = 'rejected' WHERE id = ?", (draft_id,))
-    store._connection.commit()
-    store.close()
-
-    reopened = CoachStore(path)
-    assert reopened.list_drafts() == []
-    assert reopened.list_feedback(draft_id) == []
-    reopened.close()
+    assert counts == {"messages": 0, "proposals": 1, "seen_activities": 0}
+    assert [row.content for row in store.list_messages()] == ["late feedback"]
+    assert store.list_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_database_file_is_owner_only(tmp_path: Path) -> None:
@@ -557,39 +431,28 @@ def test_unseen_activity_ids_handles_large_batches(tmp_path: Path) -> None:
     assert unseen == {"fx-new-1", "fx-new-2"}
 
 
-def test_reject_draft_marks_it_rejected_and_is_terminal(tmp_path: Path) -> None:
+def test_reject_proposal_deletes_it_and_keeps_messages(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.reject_draft(draft_id)
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.status is DraftStatus.REJECTED
-    assert store.list_drafts(DraftStatus.PENDING) == []
-    with pytest.raises(ValueError, match="only pending"):
-        store.reject_draft(draft_id)
-
-
-def test_rejected_draft_is_purged_on_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "coach.db"
-    store = CoachStore(path)
-    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
-    store.reject_draft(draft_id)
-    store.close()
-    reopened = CoachStore(path)
-    assert reopened.get_draft(draft_id) is None
-    reopened.close()
+    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "legs heavy")
+    store.reject_proposal(proposal_id)
+    assert store.get_proposal(proposal_id) is None
+    assert store.list_proposals() == []
+    assert [row.content for row in store.list_messages()] == ["legs heavy"]
+    with pytest.raises(ValueError, match="not found"):
+        store.reject_proposal(proposal_id)
 
 
 def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    draft_id = store.save_draft(focus="old", report=make_report(), context=make_context())
+    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
     old_stamp = (datetime.now(UTC) - timedelta(days=400)).isoformat()
     store._connection.execute(
-        "UPDATE drafts SET created_at = ? WHERE id = ?", (old_stamp, draft_id)
+        "UPDATE proposals SET created_at = ? WHERE id = ?", (old_stamp, proposal_id)
     )
     store._connection.commit()
     traced: list[str] = []
     store._connection.set_trace_callback(lambda statement: traced.append(statement.upper()))
     counts = store.prune_before(datetime.now(UTC) - timedelta(days=100))
-    assert counts["drafts"] == 1
+    assert counts["proposals"] == 1
     assert not any(statement.startswith("VACUUM") for statement in traced)

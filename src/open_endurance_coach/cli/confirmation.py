@@ -23,7 +23,7 @@ from open_endurance_coach.cli.rendering import (
 )
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.engine.coach import CoachEngine, FeedbackOutcome
-from open_endurance_coach.store.records import Draft
+from open_endurance_coach.store.records import Proposal
 
 Executor = Callable[[CoachEngine, tuple[int, ...] | None], Awaitable[None]]
 
@@ -60,7 +60,7 @@ async def respond(
     line: str,
     *,
     executor: Executor,
-    restate: Callable[[Draft], Awaitable[tuple[str, tuple[PlanItem, ...]]]],
+    restate: Callable[[Proposal], Awaitable[tuple[str, tuple[PlanItem, ...]]]],
     on_feedback: Callable[[str, FeedbackOutcome], Awaitable[bool | None]] | None = None,
     assume_answers: bool = False,
     history: list[LlmMessage] | None = None,
@@ -76,7 +76,7 @@ async def respond(
             console.print(f"[warn]{escape(reason)} Nothing changed.[/warn]")
             return snapshot
         case Declined():
-            engine.reject_draft(snapshot.draft_id)
+            engine.reject_proposal(snapshot.proposal_id)
             console.print("[warn]Nothing changed.[/warn]")
             return Done()
         case Ignored():
@@ -84,7 +84,7 @@ async def respond(
         case Feedback(feedback):
             async with thinking():
                 outcome = await engine.submit_feedback(
-                    snapshot.draft_id,
+                    snapshot.proposal_id,
                     feedback,
                     focus=feedback,
                     assume=assume_answers,
@@ -93,5 +93,5 @@ async def respond(
             render_report(outcome.report)
             if on_feedback is not None and await on_feedback(feedback, outcome):
                 return Done()
-            plan_text, items = await restate(outcome.draft)
+            plan_text, items = await restate(outcome.proposal)
             return replace(snapshot, plan_text=plan_text, items=items)

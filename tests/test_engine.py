@@ -14,7 +14,7 @@ from open_endurance_coach.engine.coach import (
     PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
-    StaleDecisionError,
+    StaleProposalError,
     StateDriftError,
     _bad_race_number,
     _drop_reason,
@@ -37,7 +37,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.store.records import MessageRole, ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 
@@ -59,6 +59,10 @@ from .fakes import (
 )
 
 CLOCK = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+
+
+def user_messages(store: CoachStore) -> list[str]:
+    return [item.content for item in store.list_messages() if item.role is MessageRole.USER]
 
 
 def make_engine(
@@ -89,15 +93,17 @@ def make_activity_model(activity_id: str, day: int, **overrides: Any) -> Activit
     return Activity.model_validate(payload)
 
 
-async def test_analyze_standard_produces_pending_draft(settings: Settings, tmp_path: Path) -> None:
+async def test_analyze_standard_produces_pending_proposal(
+    settings: Settings, tmp_path: Path
+) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("Analyze this week", today=TODAY)
-    assert draft.status is DraftStatus.PENDING
-    assert draft.report.summary == "Load stable."
-    assert draft.user_feedback is None
-    assert "New activities since last review" in draft.focus
+    proposal = await engine.analyze("Analyze this week", today=TODAY)
+    assert proposal.status is ProposalStatus.PENDING
+    assert proposal.report.summary == "Load stable."
+    assert proposal.user_feedback is None
+    assert "New activities since last review" in proposal.focus
     for activity_id in ("fx-a", "fx-b", "fx-c", "fx-d", "fx-e"):
         assert store.is_activity_seen(activity_id) is True
 
@@ -113,9 +119,9 @@ async def test_analyze_surfaces_only_unseen_activities(settings: Settings, tmp_p
     )
     second_provider = FakeLlmProvider([completion(report_json("Week reviewed."))])
     second_engine = make_engine(settings, store, second_provider, client=second_client)
-    second_draft = await second_engine.analyze("Analyze this week", today=TODAY)
-    assert "New activities since last review: Evening Ride (2024-01-21)" in second_draft.focus
-    listing = second_draft.focus.split("New activities since last review")[1]
+    second_proposal = await second_engine.analyze("Analyze this week", today=TODAY)
+    assert "New activities since last review: Evening Ride (2024-01-21)" in second_proposal.focus
+    listing = second_proposal.focus.split("New activities since last review")[1]
     assert "Synthetic Workout" not in listing
     assert store.is_activity_seen("fx-z") is True
 
@@ -211,7 +217,7 @@ async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_pat
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="failed after 2 attempts"):
         await engine.analyze("status check", today=TODAY)
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
     assert store.unseen_activity_ids(["fx-a", "fx-b"]) == {"fx-a", "fx-b"}
 
 
@@ -220,8 +226,8 @@ async def test_analyze_retries_on_schema_invalid_response(
 ) -> None:
     provider = FakeLlmProvider([completion('{"hallucinated": true}'), completion(report_json())])
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    assert draft.report.summary == "Load stable."
+    proposal = await engine.analyze("status check", today=TODAY)
+    assert proposal.report.summary == "Load stable."
     assert len(provider.calls) == 2
 
 
@@ -231,7 +237,7 @@ async def test_analyze_schema_invalid_exhausts_attempts(settings: Settings, tmp_
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="failed after 2 attempts"):
         await engine.analyze("status check", today=TODAY)
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
 
 
 async def test_analyze_falls_back_to_chat_when_the_mutation_is_invalid(
@@ -254,10 +260,10 @@ async def test_analyze_falls_back_to_chat_when_the_mutation_is_invalid(
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, provider)
 
-    draft = await engine.analyze("write a note on my race", today=TODAY)
+    proposal = await engine.analyze("write a note on my race", today=TODAY)
 
-    assert draft.report.mutations == []
-    assert draft.report.summary == "Use the race description for the note."
+    assert proposal.report.mutations == []
+    assert proposal.report.summary == "Use the race description for the note."
     assert len(provider.calls) == 5
     assert "empty mutations list" in provider.calls[-1]["messages"][-1].content
 
@@ -268,31 +274,31 @@ async def test_analyze_uses_deep_extractor_for_deep_focus(
     client = make_intervals_client()
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
-    draft = await engine.analyze(
+    proposal = await engine.analyze(
         "how did my heart rate improve on hills in the last 3 months", today=TODAY
     )
     assert ("detail", "fx-a") in client.calls
     assert ("activities", "2023-11-03", "2024-02-02") in client.calls
-    assert "New activities since last review" in draft.focus
-    assert draft.context.activity_detail is not None
-    assert draft.context.activity_detail.id == "fx-a"
+    assert "New activities since last review" in proposal.focus
+    assert proposal.context.activity_detail is not None
+    assert proposal.context.activity_detail.id == "fx-a"
 
 
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
-    draft = await engine.analyze("status check", user_feedback="Legs heavy", today=TODAY)
-    assert draft.user_feedback == "Legs heavy"
+    proposal = await engine.analyze("status check", user_feedback="Legs heavy", today=TODAY)
+    assert proposal.user_feedback == "Legs heavy"
     assert "Legs heavy" in provider.calls[0]["messages"][1].content
 
 
-async def test_review_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_review_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
         engine.review(404)
 
 
-async def test_submit_feedback_updates_draft_and_injects_feedback(
+async def test_submit_feedback_updates_proposal_and_injects_feedback(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -300,15 +306,18 @@ async def test_submit_feedback_updates_draft_and_injects_feedback(
         [completion(report_json()), completion(report_json("Revised after feedback."))]
     )
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    outcome = await engine.submit_feedback(draft.id, "Legs heavy, RPE 8")
-    assert outcome.draft.id == draft.id
+    proposal = await engine.analyze("status check", today=TODAY)
+    outcome = await engine.submit_feedback(proposal.id, "Legs heavy, RPE 8")
+    assert outcome.proposal.id == proposal.id
     assert outcome.report.summary == "Revised after feedback."
-    assert outcome.draft.report.summary == "Revised after feedback."
-    assert outcome.draft.user_feedback == "Legs heavy, RPE 8"
-    assert outcome.draft.status is DraftStatus.PENDING
+    assert outcome.proposal.report.summary == "Revised after feedback."
+    assert outcome.proposal.user_feedback == "Legs heavy, RPE 8"
+    assert outcome.proposal.status is ProposalStatus.PENDING
     assert "Legs heavy, RPE 8" in provider.calls[1]["messages"][1].content
-    assert [item.content for item in store.list_feedback(draft.id)] == ["Legs heavy, RPE 8"]
+    assert user_messages(store) == [
+        "status check",
+        "Legs heavy, RPE 8",
+    ]
 
 
 async def test_submit_feedback_answer_does_not_replace_the_pending_plan(
@@ -319,12 +328,15 @@ async def test_submit_feedback_answer_does_not_replace_the_pending_plan(
         [completion(report_json()), completion(report_json("Answer.", intent="analysis"))]
     )
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    outcome = await engine.submit_feedback(draft.id, "what about the hike?")
+    proposal = await engine.analyze("status check", today=TODAY)
+    outcome = await engine.submit_feedback(proposal.id, "what about the hike?")
     assert outcome.report.summary == "Answer."
-    assert outcome.draft.report.summary == "Load stable."
-    assert [row.content for row in store.list_feedback(draft.id)] == ["what about the hike?"]
-    stored = store.get_draft(draft.id)
+    assert outcome.proposal.report.summary == "Load stable."
+    assert user_messages(store) == [
+        "status check",
+        "what about the hike?",
+    ]
+    stored = store.get_proposal(proposal.id)
     assert stored is not None
     assert stored.report.summary == "Load stable."
 
@@ -337,10 +349,11 @@ async def test_recent_feedback_keeps_the_answer_report_for_transient_turns(
         [completion(report_json()), completion(report_json("Answer.", intent="analysis"))]
     )
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    await engine.submit_feedback(draft.id, "what about the hike?")
-    recent = store.recent_feedback(1)
-    assert recent[0].feedback.content == "what about the hike?"
+    proposal = await engine.analyze("status check", today=TODAY)
+    await engine.submit_feedback(proposal.id, "what about the hike?")
+    recent = store.recent_messages(1)
+    assert recent[0].role is MessageRole.ASSISTANT
+    assert recent[0].report is not None
     assert recent[0].report.summary == "Answer."
 
 
@@ -510,15 +523,18 @@ async def test_submit_feedback_records_the_message_when_the_llm_fails(
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
+    proposal = await engine.analyze("status check", today=TODAY)
 
     async def boom(*args: Any, **kwargs: Any) -> Any:
         raise LlmError("provider down")
 
     monkeypatch.setattr(engine, "_run_llm", boom)
     with pytest.raises(LlmError):
-        await engine.submit_feedback(draft.id, "legs heavy")
-    assert [row.content for row in store.list_feedback(draft.id)] == ["legs heavy"]
+        await engine.submit_feedback(proposal.id, "legs heavy")
+    assert user_messages(store) == [
+        "status check",
+        "legs heavy",
+    ]
 
 
 async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
@@ -536,7 +552,7 @@ async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
             for index in range(6)
         ],
     )
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport(summary="ok"),
         context=base.model_copy(update={"max_tokens": base.data_tokens() + 100}),
@@ -544,9 +560,9 @@ async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
     provider = FakeLlmProvider([completion(report_json("Revised."))])
     engine = make_engine(settings, store, provider)
     long_message = "change the hike block please " * 500
-    outcome = await engine.submit_feedback(draft_id, long_message, focus=long_message)
-    assert outcome.draft.context.user_feedback is None
-    assert len(outcome.draft.context.training_rollup) == len(base.training_rollup)
+    outcome = await engine.submit_feedback(proposal_id, long_message, focus=long_message)
+    assert outcome.proposal.context.user_feedback is None
+    assert len(outcome.proposal.context.training_rollup) == len(base.training_rollup)
     assert long_message in provider.calls[0]["messages"][1].content
 
 
@@ -569,9 +585,9 @@ async def test_submit_feedback_persists_feedback_context(
         [completion(report_json()), completion(report_json("Revised after feedback."))]
     )
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    await engine.submit_feedback(draft.id, "Legs heavy, RPE 8")
-    stored = store.get_draft(draft.id)
+    proposal = await engine.analyze("status check", today=TODAY)
+    await engine.submit_feedback(proposal.id, "Legs heavy, RPE 8")
+    stored = store.get_proposal(proposal.id)
     assert stored is not None
     assert stored.context.user_feedback == "Legs heavy, RPE 8"
 
@@ -591,17 +607,17 @@ async def test_submit_feedback_trims_an_over_budget_context(
             "recent_activities": [],
         }
     )
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="status check", report=DecisionReport(summary="ok"), context=context
     )
     provider = FakeLlmProvider([completion(report_json("Revised."))])
     engine = make_engine(settings, store, provider)
-    updated = await engine.submit_feedback(draft_id, feedback)
+    updated = await engine.submit_feedback(proposal_id, feedback)
     assert updated.report.summary == "Revised."
     assert len(provider.calls) == 1
     prompt = provider.calls[0]["messages"][1].content
     assert feedback in prompt
-    assert updated.draft.context.data_tokens() <= updated.draft.context.max_tokens
+    assert updated.proposal.context.data_tokens() <= updated.proposal.context.max_tokens
 
 
 async def test_submit_feedback_falls_back_without_current_proposal_on_budget_overflow(
@@ -609,15 +625,15 @@ async def test_submit_feedback_falls_back_without_current_proposal_on_budget_ove
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     big_report = DecisionReport(summary="x" * 400)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
     )
     provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
-    updated = await engine.submit_feedback(draft_id, "make it easier")
-    assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
-    assert updated.draft.context.current_proposal is None
-    assert updated.draft.context.user_feedback == "make it easier"
+    updated = await engine.submit_feedback(proposal_id, "make it easier")
+    assert user_messages(store) == ["make it easier"]
+    assert updated.proposal.context.current_proposal is None
+    assert updated.proposal.context.user_feedback == "make it easier"
     assert updated.report.summary == "Revised."
 
 
@@ -637,31 +653,31 @@ async def test_submit_feedback_non_pending_raises(settings: Settings, tmp_path: 
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check")
-    engine.approve(draft.id)
+    proposal = await engine.analyze("status check")
+    engine.approve(proposal.id)
     with pytest.raises(ValueError, match="pending"):
-        await engine.submit_feedback(draft.id, "too late")
+        await engine.submit_feedback(proposal.id, "too late")
 
 
-async def test_submit_feedback_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_submit_feedback_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
         await engine.submit_feedback(404, "feedback")
 
 
-async def test_approve_records_decision(settings: Settings, tmp_path: Path) -> None:
+async def test_approve_records_proposal(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check")
-    decision = engine.approve(draft.id)
-    mutation = decision.report.mutations[0]
+    proposal = await engine.analyze("status check")
+    proposal = engine.approve(proposal.id)
+    mutation = proposal.report.mutations[0]
     assert isinstance(mutation, CreateWorkout)
     assert mutation.name == "Tempo Session"
-    approved = store.get_draft(draft.id)
+    approved = store.get_proposal(proposal.id)
     assert approved is not None
-    assert approved.status is DraftStatus.APPROVED
-    assert store.list_decisions() == [decision]
+    assert approved.status is ProposalStatus.UNAPPLIED
+    assert store.list_unapplied_proposals() == [proposal]
 
 
 async def test_approve_keeps_only_the_selected_mutations(
@@ -671,19 +687,21 @@ async def test_approve_keeps_only_the_selected_mutations(
     second = {**CREATE_MUTATION, "name": "Easy Spin"}
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION, second]))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check")
-    decision = engine.approve(draft.id, keep=(1,))
-    assert [m.name for m in decision.report.mutations if isinstance(m, CreateWorkout)] == [
+    proposal = await engine.analyze("status check")
+    proposal = engine.approve(proposal.id, keep=(1,))
+    approved_report = proposal.approved_report
+    assert approved_report is not None
+    assert [m.name for m in approved_report.mutations if isinstance(m, CreateWorkout)] == [
         "Easy Spin"
     ]
-    assert store.list_decisions() == [decision]
-    approved = store.get_draft(draft.id)
-    assert approved is not None
-    assert approved.status is DraftStatus.APPROVED
-    assert len(approved.report.mutations) == 2
+    assert store.list_unapplied_proposals() == [proposal]
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.UNAPPLIED
+    assert len(stored.report.mutations) == 2
 
 
-async def test_approve_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_approve_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
         engine.approve(404)
@@ -695,33 +713,27 @@ async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -
         await engine.apply()
 
 
-def applied_decision(store: CoachStore, decision_id: int) -> Any:
-    decision = store.get_decision(decision_id)
-    assert decision is not None
-    return decision
-
-
-async def test_apply_applies_unapplied_decisions_and_marks_applied(
+async def test_apply_applies_approved_proposals_and_deletes_them(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check")
-    engine.approve(draft.id)
+    proposal = await engine.analyze("status check")
+    engine.approve(proposal.id)
     calendar = FakeCalendarClient()
     writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
     report = await writer_engine.apply()
-    assert len(report.decisions) == 1
-    assert report.decisions[0].decision_id == 1
-    assert report.decisions[0].outcomes[0].target == "created"
+    assert len(report.proposals) == 1
+    assert report.proposals[0].proposal_id == 1
+    assert report.proposals[0].outcomes[0].target == "created"
     assert len(calendar.created) == 1
-    assert store.get_decision(1) is not None
-    assert applied_decision(store, 1).applied_at is not None
-    assert store.list_unapplied_decisions() == []
+    assert store.get_proposal(1) is None
+    assert store.list_unapplied_proposals() == []
+    assert store.list_messages() != []
 
 
-async def test_apply_specific_decision_only(settings: Settings, tmp_path: Path) -> None:
+async def test_apply_specific_proposal_only(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     engine = make_engine(settings, store, provider)
@@ -731,38 +743,40 @@ async def test_apply_specific_decision_only(settings: Settings, tmp_path: Path) 
     engine.approve(second.id)
     calendar = FakeCalendarClient()
     writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
-    report = await writer_engine.apply(decision_id=second.id)
-    assert [item.decision_id for item in report.decisions] == [second.id]
-    assert applied_decision(store, first.id).applied_at is None
-    assert applied_decision(store, second.id).applied_at is not None
+    report = await writer_engine.apply(proposal_id=second.id)
+    assert [item.proposal_id for item in report.proposals] == [second.id]
+    assert store.get_proposal(second.id) is None
+    kept = store.get_proposal(first.id)
+    assert kept is not None
+    assert kept.status is ProposalStatus.UNAPPLIED
 
 
-async def test_apply_already_applied_decision_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_apply_a_deleted_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    engine.approve(draft.id)
+    proposal = await engine.analyze("status check", today=TODAY)
+    engine.approve(proposal.id)
     writer_engine = make_engine(
         settings, store, provider, writer=CalendarWriter(FakeCalendarClient())
     )
     await writer_engine.apply()
-    with pytest.raises(ValueError, match="already applied"):
-        await writer_engine.apply(decision_id=1)
+    with pytest.raises(ValueError, match="not found"):
+        await writer_engine.apply(proposal_id=1)
 
 
-async def test_apply_marks_empty_decision_applied(settings: Settings, tmp_path: Path) -> None:
+async def test_apply_deletes_an_empty_proposal(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("status check", today=TODAY)
-    engine.approve(draft.id)
+    proposal = await engine.analyze("status check", today=TODAY)
+    engine.approve(proposal.id)
     calendar = FakeCalendarClient()
     writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
     report = await writer_engine.apply()
-    assert report.decisions[0].outcomes == []
+    assert report.proposals[0].outcomes == []
     assert calendar.created == []
-    assert applied_decision(store, 1).applied_at is not None
+    assert store.get_proposal(1) is None
 
 
 async def test_analyze_reuses_a_provided_context_without_extraction(
@@ -775,9 +789,9 @@ async def test_analyze_reuses_a_provided_context_without_extraction(
     context = CoachContext(focus="how was my week", today=TODAY).model_copy(
         update={"focus": "what do you think?"}
     )
-    draft = await engine.analyze("what do you think?", context=context, today=TODAY)
+    proposal = await engine.analyze("what do you think?", context=context, today=TODAY)
     assert client.calls == []
-    assert draft.context.focus == "what do you think?"
+    assert proposal.context.focus == "what do you think?"
     recorded = provider.calls[0]
     assert recorded["json_mode"] is True
     assert [message.role for message in recorded["messages"]] == ["system", "user"]
@@ -824,19 +838,17 @@ async def test_analyze_empty_content_raises_without_writes(
     engine = make_engine(settings, store, provider)
     with pytest.raises(LlmError, match="empty content"):
         await engine.analyze("hi", context=CoachContext(focus="f"))
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
 
 
-async def test_recent_history_reads_feedback_from_store(settings: Settings, tmp_path: Path) -> None:
+async def test_recent_history_reads_messages_from_store(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    draft_id = store.save_draft(
-        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
-    )
-    store.add_feedback(draft_id, "legs heavy")
+    store.add_message(MessageRole.USER, "legs heavy", report=DecisionReport(summary="ok"))
     rows = engine.recent_history(10)
     assert len(rows) == 1
-    assert rows[0].feedback.content == "legs heavy"
+    assert rows[0].content == "legs heavy"
+    assert rows[0].report is not None
     assert rows[0].report.summary == "ok"
     assert engine.recent_history(0) == []
 
@@ -845,14 +857,11 @@ def test_recent_history_applies_max_age_cutoff(settings: Settings, tmp_path: Pat
     clock = FakeClock(datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC))
     store = CoachStore(tmp_path / "coach.db", clock=clock)
     engine = make_engine(settings, store, FakeLlmProvider())
-    draft_id = store.save_draft(
-        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
-    )
-    store.add_feedback(draft_id, "old")
+    store.add_message(MessageRole.USER, "old")
     clock.now = clock.now + timedelta(days=10)
-    store.add_feedback(draft_id, "new")
+    store.add_message(MessageRole.USER, "new")
     rows = engine.recent_history(10, max_age_days=5)
-    assert [row.feedback.content for row in rows] == ["new"]
+    assert [row.content for row in rows] == ["new"]
 
 
 async def test_build_context_surfaces_unseen_without_marking(
@@ -863,7 +872,7 @@ async def test_build_context_surfaces_unseen_without_marking(
     context = await engine.build_context("how was my week?", today=TODAY)
     assert "New activities since last review" in context.focus
     assert store.is_activity_seen("fx-a") is False
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
 
 
 def test_engine_llm_selection_and_switch(settings: Settings, tmp_path: Path) -> None:
@@ -908,10 +917,10 @@ async def test_past_dated_mutation_is_retried(settings: Settings, tmp_path: Path
         ]
     )
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
-    draft = await engine.analyze("plan my week", today=TODAY)
+    proposal = await engine.analyze("plan my week", today=TODAY)
     assert len(provider.calls) == 2
     created = [
-        mutation for mutation in draft.report.mutations if isinstance(mutation, CreateWorkout)
+        mutation for mutation in proposal.report.mutations if isinstance(mutation, CreateWorkout)
     ]
     assert [mutation.name for mutation in created] == ["Planned Session"]
 
@@ -944,9 +953,9 @@ async def test_approve_rejects_a_mutation_that_is_now_in_the_past(
             report_json(mutations=[{**CREATE_MUTATION, "start_date_local": yesterday.isoformat()}])
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
     with pytest.raises(ValueError, match="between today and"):
-        engine.approve(draft_id)
+        engine.approve(proposal_id)
 
 
 async def test_validate_report_rejects_a_past_dated_update(settings: Settings) -> None:
@@ -981,12 +990,12 @@ async def test_approve_rejects_a_race_mutation_that_is_now_in_the_past(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
     with pytest.raises(ValueError, match="between today and"):
-        engine.approve(draft_id)
+        engine.approve(proposal_id)
 
 
-async def test_apply_refuses_a_decision_that_became_past_dated(
+async def test_apply_refuses_a_proposal_that_became_past_dated(
     settings: Settings, tmp_path: Path
 ) -> None:
     calendar = FakeCalendarClient()
@@ -1007,14 +1016,14 @@ async def test_apply_refuses_a_decision_that_became_past_dated(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    decision = store.approve_draft(draft_id)
-    with pytest.raises(StaleDecisionError, match="no mutations left to apply"):
-        await engine.apply(decision.id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal = store.approve_proposal(proposal_id)
+    with pytest.raises(StaleProposalError, match="no mutations left to apply"):
+        await engine.apply(proposal.id)
     assert calendar.created == []
 
 
-async def test_discard_stale_decisions_removes_now_past_approvals(
+async def test_discard_stale_proposals_removes_now_past_approvals(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -1034,10 +1043,10 @@ async def test_discard_stale_decisions_removes_now_past_approvals(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    store.approve_draft(draft_id)
-    assert engine.discard_stale_decisions() == [(1, "dates that have passed")]
-    assert store.list_unapplied_decisions() == []
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_proposal(proposal_id)
+    assert engine.discard_stale_proposals() == [(1, "dates that have passed")]
+    assert store.list_unapplied_proposals() == []
 
 
 def test_validate_report_rejects_placeholder_race_values() -> None:
@@ -1097,7 +1106,7 @@ def test_validate_report_rejects_a_race_create_without_load() -> None:
         _validate_report(payload, today=date(2024, 2, 1))
 
 
-async def test_apply_refuses_a_decision_with_a_past_dated_mutation(
+async def test_apply_refuses_a_proposal_with_a_past_dated_mutation(
     settings: Settings, tmp_path: Path
 ) -> None:
     calendar = FakeCalendarClient()
@@ -1124,18 +1133,17 @@ async def test_apply_refuses_a_decision_with_a_past_dated_mutation(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    decision = store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal = store.approve_proposal(proposal_id)
     with pytest.raises(StateDriftError, match="nothing was written"):
-        await engine.apply(decision.id)
+        await engine.apply(proposal.id)
     assert calendar.created == []
-    assert [row.id for row in store.list_unapplied_decisions()] == [decision.id]
-    stored = store.get_decision(decision.id)
+    assert [row.id for row in store.list_unapplied_proposals()] == [proposal.id]
+    stored = store.get_proposal(proposal.id)
     assert stored is not None
-    assert stored.applied_at is None
 
 
-async def test_discard_removes_a_decision_with_any_dropped_mutation(
+async def test_discard_removes_a_proposal_with_any_dropped_mutation(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -1161,13 +1169,13 @@ async def test_discard_removes_a_decision_with_any_dropped_mutation(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    store.approve_draft(draft_id)
-    assert engine.discard_stale_decisions() == [(1, "dates that have passed")]
-    assert store.list_unapplied_decisions() == []
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_proposal(proposal_id)
+    assert engine.discard_stale_proposals() == [(1, "dates that have passed")]
+    assert store.list_unapplied_proposals() == []
 
 
-async def test_apply_placeholder_only_decision_raises_placeholder_error(
+async def test_apply_placeholder_only_proposal_raises_placeholder_error(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -1188,10 +1196,10 @@ async def test_apply_placeholder_only_decision_raises_placeholder_error(
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    decision = store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal = store.approve_proposal(proposal_id)
     with pytest.raises(PlaceholderMutationError, match="only contains placeholder mutations"):
-        await engine.apply(decision.id)
+        await engine.apply(proposal.id)
 
 
 async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_path: Path) -> None:
@@ -1211,9 +1219,9 @@ async def test_discard_reports_the_placeholder_reason(settings: Settings, tmp_pa
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    store.approve_draft(draft_id)
-    assert engine.discard_stale_decisions() == [(1, "placeholder values")]
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_proposal(proposal_id)
+    assert engine.discard_stale_proposals() == [(1, "placeholder values")]
 
 
 def test_drop_reason_names_the_single_causes_and_the_mixed_case() -> None:
@@ -1273,12 +1281,12 @@ async def test_submit_feedback_includes_the_conversation_history(
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json("ok")), completion(report_json("revised"))])
     engine = make_engine(settings, store, provider)
-    draft = await engine.analyze("plan my week")
+    proposal = await engine.analyze("plan my week")
     history = [
         LlmMessage(role="user", content="I can train 4 days and prefer mornings"),
         LlmMessage(role="assistant", content="noted"),
     ]
-    await engine.submit_feedback(draft.id, "make it easier", history=history)
+    await engine.submit_feedback(proposal.id, "make it easier", history=history)
     prompt = provider.calls[1]["messages"][1].content
     assert "Recent conversation:" in prompt
     assert "I can train 4 days and prefer mornings" in prompt
@@ -1464,7 +1472,7 @@ def test_validate_report_rejects_dates_beyond_the_planning_horizon() -> None:
             )
         )
         if should_raise:
-            with pytest.raises(StaleDecisionError, match="between today and"):
+            with pytest.raises(StaleProposalError, match="between today and"):
                 _validate_report(payload, today=today)
         else:
             _validate_report(payload, today=today)
@@ -1528,21 +1536,21 @@ async def test_partial_apply_retry_is_idempotent(settings: Settings, tmp_path: P
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    decision = store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal = store.approve_proposal(proposal_id)
 
     with pytest.raises(IntervalsApiError):
-        await engine.apply(decision.id)
+        await engine.apply(proposal.id)
     assert [event["name"] for event in calendar.created] == ["First Session"]
-    assert [row.id for row in store.list_unapplied_decisions()] == [decision.id]
+    assert [row.id for row in store.list_unapplied_proposals()] == [proposal.id]
 
-    await engine.apply(decision.id)
+    await engine.apply(proposal.id)
     assert sorted(event["name"] for event in calendar.created) == [
         "First Session",
         "Second Session",
     ]
     assert len(calendar.created) == 2
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_validate_report_rejects_an_unsafe_event_id() -> None:
@@ -1563,3 +1571,27 @@ def test_validate_report_accepts_string_event_ids() -> None:
     mutation = report.mutations[0]
     assert isinstance(mutation, UpdateWorkout)
     assert mutation.event_id == "e20001"
+
+
+async def test_apply_keeps_the_proposal_when_the_read_back_differs(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    engine.approve(proposal.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+
+    async def failing_read_back(event_id: str) -> dict[str, Any]:
+        raise IntervalsApiError(500, "read-back down")
+
+    monkeypatch.setattr(calendar, "get_event", failing_read_back)
+    report = await writer_engine.apply()
+    assert report.proposals[0].outcomes[0].drift == [
+        "read-back failed; planned values were not verified"
+    ]
+    kept = store.get_proposal(proposal.id)
+    assert kept is not None
+    assert kept.status is ProposalStatus.UNAPPLIED
