@@ -173,6 +173,36 @@ def test_mutations_plan_text_nests_multiline_description() -> None:
     assert lines[day + 5] == "      - 3m hard"
 
 
+def test_numbered_plan_text_matches_the_plan_items() -> None:
+    from open_endurance_coach.chat.gate import PlanItem
+    from open_endurance_coach.cli.rendering import plan_items
+
+    mutations: list[Mutation] = [
+        CreateWorkout(action="create", name="Thursday Tempo", start_date_local=date(2026, 10, 8)),
+        DeleteWorkout(action="delete", event_id=10002),
+        CreateWorkout(action="create", name="Tuesday Easy", start_date_local=date(2026, 10, 6)),
+        UpdateWorkout(action="update", event_id=10001, moving_time=4200),
+    ]
+    dates = {"10001": date(2026, 10, 8)}
+    lines = mutations_plan_text(mutations, event_dates=dates, numbered=True).splitlines()
+    assert lines == [
+        "Proposed changes:",
+        "  2026-10-06",
+        "   1 - create Tuesday Easy",
+        "  2026-10-08",
+        "   2 - create Thursday Tempo",
+        "   3 - update event 10001: moving_time=4200",
+        "  (no date)",
+        "   4 - delete event 10002",
+    ]
+    assert plan_items(mutations, event_dates=dates) == (
+        PlanItem(index=2, day=date(2026, 10, 6)),
+        PlanItem(index=0, day=date(2026, 10, 8)),
+        PlanItem(index=3, day=date(2026, 10, 8)),
+        PlanItem(index=1, day=None),
+    )
+
+
 def test_mutations_plan_text_empty_mutations() -> None:
     text = mutations_plan_text([])
     assert "(no calendar changes)" in text

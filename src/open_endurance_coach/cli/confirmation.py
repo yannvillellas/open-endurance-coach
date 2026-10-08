@@ -7,12 +7,16 @@ from open_endurance_coach.chat.gate import (
     Declined,
     Feedback,
     Ignored,
+    InvalidSelection,
+    PlanItem,
     PlanSnapshot,
     Proceed,
+    ProceedSubset,
     handle,
 )
 from open_endurance_coach.cli.rendering import (
     console,
+    escape,
     render_report,
     thinking,
     wrap_plan_text,
@@ -21,7 +25,7 @@ from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.engine.coach import CoachEngine, FeedbackOutcome
 from open_endurance_coach.store.records import Draft
 
-Executor = Callable[[CoachEngine], Awaitable[None]]
+Executor = Callable[[CoachEngine, tuple[int, ...] | None], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,9 @@ def prompt_plan(snapshot: PlanSnapshot) -> None:
     console.print(
         "[plan.title]Confirm? Reply exactly yes to apply, no to discard.\n"
         "Or describe a change to revise the plan.[/plan.title]"
+    )
+    console.print(
+        "[hint]Approve only some items with yes 1 3, yes except 2, or yes except thursday.[/hint]"
     )
     console.print(
         Panel(
@@ -53,15 +60,21 @@ async def respond(
     line: str,
     *,
     executor: Executor,
-    restate: Callable[[Draft], Awaitable[str]],
+    restate: Callable[[Draft], Awaitable[tuple[str, tuple[PlanItem, ...]]]],
     on_feedback: Callable[[str, FeedbackOutcome], Awaitable[bool | None]] | None = None,
     assume_answers: bool = False,
     history: list[LlmMessage] | None = None,
 ) -> Done | PlanSnapshot:
     match handle(line, snapshot):
         case Proceed():
-            await executor(engine)
+            await executor(engine, None)
             return Done()
+        case ProceedSubset(indices):
+            await executor(engine, indices)
+            return Done()
+        case InvalidSelection(reason):
+            console.print(f"[warn]{escape(reason)} Nothing changed.[/warn]")
+            return snapshot
         case Declined():
             engine.reject_draft(snapshot.draft_id)
             console.print("[warn]Nothing changed.[/warn]")
@@ -80,4 +93,5 @@ async def respond(
             render_report(outcome.report)
             if on_feedback is not None and await on_feedback(feedback, outcome):
                 return Done()
-            return replace(snapshot, plan_text=await restate(outcome.draft))
+            plan_text, items = await restate(outcome.draft)
+            return replace(snapshot, plan_text=plan_text, items=items)

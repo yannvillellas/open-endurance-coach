@@ -211,6 +211,21 @@ def test_approve_draft_creates_decision_and_flips_status(tmp_path: Path) -> None
     assert decisions[0].id == decision.id
 
 
+def test_approve_draft_records_the_approved_report(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    draft_id = store.save_draft(focus="first", report=make_report(), context=make_context())
+    subset = make_report().model_copy(update={"mutations": make_report().mutations[2:]})
+    decision = store.approve_draft(draft_id, report=subset)
+    assert decision.report == subset
+    stored = store.get_decision(decision.id)
+    assert stored is not None
+    assert stored.report == subset
+    draft = store.get_draft(draft_id)
+    assert draft is not None
+    assert draft.status is DraftStatus.APPROVED
+    assert draft.report == make_report()
+
+
 def test_approve_missing_draft_raises(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(ValueError, match="not found"):

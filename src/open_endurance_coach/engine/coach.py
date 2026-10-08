@@ -588,12 +588,22 @@ class CoachEngine:
             discarded.append((decision.id, reason))
         return discarded
 
-    def approve(self, draft_id: int) -> Decision:
+    def approve(self, draft_id: int, *, keep: Sequence[int] | None = None) -> Decision:
+        """Approve a pending draft; ``keep`` limits the decision to those mutation indices."""
         draft = self._store.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
-        self._assert_current_dates(draft.report)
-        return self._store.approve_draft(draft_id)
+        report = draft.report
+        if keep is not None:
+            report = report.model_copy(
+                update={
+                    "mutations": [
+                        mutation for index, mutation in enumerate(report.mutations) if index in keep
+                    ]
+                }
+            )
+        self._assert_current_dates(report)
+        return self._store.approve_draft(draft_id, report=report)
 
     def reject_draft(self, draft_id: int) -> None:
         self._store.reject_draft(draft_id)

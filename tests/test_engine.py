@@ -664,6 +664,25 @@ async def test_approve_records_decision(settings: Settings, tmp_path: Path) -> N
     assert store.list_decisions() == [decision]
 
 
+async def test_approve_keeps_only_the_selected_mutations(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    second = {**CREATE_MUTATION, "name": "Easy Spin"}
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION, second]))])
+    engine = make_engine(settings, store, provider)
+    draft = await engine.analyze("status check")
+    decision = engine.approve(draft.id, keep=(1,))
+    assert [m.name for m in decision.report.mutations if isinstance(m, CreateWorkout)] == [
+        "Easy Spin"
+    ]
+    assert store.list_decisions() == [decision]
+    approved = store.get_draft(draft.id)
+    assert approved is not None
+    assert approved.status is DraftStatus.APPROVED
+    assert len(approved.report.mutations) == 2
+
+
 async def test_approve_missing_draft_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):

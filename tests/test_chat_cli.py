@@ -84,9 +84,9 @@ def _spy_writes(engine: CoachEngine) -> dict[str, int]:
     original_approve = engine.approve
     original_apply = engine.apply
 
-    def approve(draft_id: int) -> Any:
+    def approve(draft_id: int, **kwargs: Any) -> Any:
         calls["approve"] += 1
-        return original_approve(draft_id)
+        return original_approve(draft_id, **kwargs)
 
     async def apply(decision_id: int | None = None) -> Any:
         calls["apply_write"] += 1
@@ -1431,6 +1431,100 @@ def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
     assert calendar.created[0]["category"] == "RACE_A"
     assert calendar.created[0]["moving_time"] == 4200
     assert store.list_unapplied_decisions() == []
+
+
+EASY_MUTATION = {
+    "action": "create",
+    "name": "Easy Spin",
+    "start_date_local": near_future(29),
+    "moving_time": 2700,
+}
+
+
+def test_chat_proposal_numbers_each_item(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION, EASY_MUTATION]))]
+    )
+    patched(provider)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nno\n")
+    assert result.exit_code == 0
+    assert "1 - create Easy Spin" in result.output
+    assert "2 - create Tempo Session" in result.output
+    assert "yes except" in result.output
+
+
+def test_chat_yes_except_writes_only_the_approved_items(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION, EASY_MUTATION]))]
+    )
+    engine, store = patched(provider, calendar=calendar)
+    calls = _spy_writes(engine)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes except 1\n")
+    assert result.exit_code == 0
+    assert calls == {"approve": 1, "apply_write": 1}
+    assert [event["name"] for event in calendar.created] == ["Tempo Session"]
+    assert "Skipped 1 change you did not approve." in result.output
+    decision = decision_of(store, 1)
+    assert decision.applied_at is not None
+    assert [mutation.name for mutation in decision.report.mutations] == ["Tempo Session"]
+    assert len(provider.calls) == 1
+
+
+def test_chat_yes_with_numbers_approves_a_race_and_skips_a_workout(patched: Any) -> None:
+    race = {
+        "action": "create_race",
+        "name": "Autumn Trail Race",
+        "start_date_local": near_future(),
+        "category": "RACE_A",
+        "type": "Run",
+        "moving_time": 4200,
+        "icu_training_load": 90,
+    }
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[EASY_MUTATION, race]))])
+    _, store = patched(provider, calendar=calendar)
+    result = runner.invoke(cli_main.app, [], input="plan my race\nyes 2\n")
+    assert result.exit_code == 0
+    assert [event["name"] for event in calendar.created] == ["Autumn Trail Race"]
+    assert calendar.created[0]["category"] == "RACE_A"
+    assert store.list_unapplied_decisions() == []
+
+
+def test_chat_yes_with_an_unknown_item_writes_nothing_and_keeps_the_gate(
+    patched: Any,
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider(
+        [completion(report_json(mutations=[CREATE_MUTATION, EASY_MUTATION]))]
+    )
+    engine, store = patched(provider, calendar=calendar)
+    calls = _spy_writes(engine)
+    result = runner.invoke(cli_main.app, [], input="analyze my week\nyes 3\nno\n")
+    assert result.exit_code == 0
+    assert calls == {"approve": 0, "apply_write": 0}
+    assert calendar.created == []
+    assert "No proposed item matches 3." in result.output
+    assert result.output.count("Apply this to Intervals.icu") == 2
+    assert len(provider.calls) == 1
+    assert store.list_feedback(1) == []
+    assert store.get_draft(1).status is DraftStatus.REJECTED
+
+
+def test_chat_yes_except_after_a_revision_uses_the_revised_items(patched: Any) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(mutations=[CREATE_MUTATION])),
+            completion(report_json("Added a spin.", mutations=[CREATE_MUTATION, EASY_MUTATION])),
+        ]
+    )
+    patched(provider, calendar=calendar)
+    result = runner.invoke(
+        cli_main.app, [], input="analyze my week\nadd an easy spin\nyes except 2\n"
+    )
+    assert result.exit_code == 0
+    assert [event["name"] for event in calendar.created] == ["Easy Spin"]
 
 
 def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:

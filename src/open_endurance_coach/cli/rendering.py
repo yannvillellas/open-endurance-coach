@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.theme import Theme
 
+from open_endurance_coach.chat.gate import PlanItem
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
@@ -228,29 +229,35 @@ def _mutation_lines(mutation: Mutation) -> list[str]:
     return [f"    - {mutation.action} event {escape(str(mutation.event_id))}"]
 
 
-def mutations_plan_text(
+def plan_items(
     mutations: Sequence[Mutation], *, event_dates: Mapping[str, date] | None = None
+) -> tuple[PlanItem, ...]:
+    """The proposal items in display order (by day, undated last), numbered from 1."""
+    items = [
+        PlanItem(index=index, day=_mutation_date(mutation, event_dates))
+        for index, mutation in enumerate(mutations)
+    ]
+    return tuple(sorted(items, key=lambda item: (item.day is None, item.day or date.min)))
+
+
+def mutations_plan_text(
+    mutations: Sequence[Mutation],
+    *,
+    event_dates: Mapping[str, date] | None = None,
+    numbered: bool = False,
 ) -> str:
     lines = ["Proposed changes:"]
     if not mutations:
         lines.append("  (no calendar changes)")
         return "\n".join(lines)
-    grouped: dict[date, list[Mutation]] = {}
-    undated: list[Mutation] = []
-    for mutation in mutations:
-        day = _mutation_date(mutation, event_dates)
-        if day is None:
-            undated.append(mutation)
-        else:
-            grouped.setdefault(day, []).append(mutation)
-    for day in sorted(grouped):
-        lines.append(f"  {day.isoformat()}")
-        for mutation in grouped[day]:
-            lines.extend(_mutation_lines(mutation))
-    if undated:
-        lines.append("  (no date)")
-        for mutation in undated:
-            lines.extend(_mutation_lines(mutation))
+    day: date | None = None
+    for number, item in enumerate(plan_items(mutations, event_dates=event_dates), start=1):
+        if number == 1 or item.day != day:
+            lines.append(f"  {item.day.isoformat()}" if item.day is not None else "  (no date)")
+            day = item.day
+        first, *rest = _mutation_lines(mutations[item.index])
+        lines.append(f"  {number:>2} {first.lstrip()}" if numbered else first)
+        lines.extend(rest)
     return "\n".join(lines)
 
 

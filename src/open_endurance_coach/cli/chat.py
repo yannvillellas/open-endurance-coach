@@ -18,6 +18,7 @@ from open_endurance_coach.chat.dispatch import (
 )
 from open_endurance_coach.chat.gate import (
     RECOVERABLE_EXCEPTIONS,
+    PlanItem,
     PlanSnapshot,
     is_exit_command,
 )
@@ -29,6 +30,7 @@ from open_endurance_coach.cli.rendering import (
     console,
     escape,
     mutations_plan_text,
+    plan_items,
     print_error,
     render_apply,
     render_report,
@@ -52,6 +54,7 @@ HELP_TEXT = (
     "Just talk to the coach: ask about your training, discuss it, or ask for a plan.\n"
     "When he proposes calendar changes, answer with exactly yes or no, or describe\n"
     "the changes you want (only a literal yes writes to the calendar).\n"
+    "yes 1 3, yes except 2  approve only some items (by number, weekday or date)\n"
     "retry                  apply again if a calendar write failed\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
@@ -108,14 +111,17 @@ def _handle_llm_command(
         print_error(exc)
 
 
-async def _open_proposal(engine: CoachEngine, draft: Draft) -> ChatState:
+async def _proposal(engine: CoachEngine, draft: Draft) -> tuple[str, tuple[PlanItem, ...]]:
     event_dates = await engine.resolve_event_dates(draft.context, draft.report.mutations)
-    snapshot = PlanSnapshot(
-        plan_text="Apply this to Intervals.icu:\n"
-        + mutations_plan_text(draft.report.mutations, event_dates=event_dates),
-        draft_id=draft.id,
+    plan_text = "Apply this to Intervals.icu:\n" + mutations_plan_text(
+        draft.report.mutations, event_dates=event_dates, numbered=True
     )
-    return _enter_confirmation(snapshot)
+    return plan_text, plan_items(draft.report.mutations, event_dates=event_dates)
+
+
+async def _open_proposal(engine: CoachEngine, draft: Draft) -> ChatState:
+    plan_text, items = await _proposal(engine, draft)
+    return _enter_confirmation(PlanSnapshot(plan_text=plan_text, draft_id=draft.id, items=items))
 
 
 def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
@@ -226,13 +232,22 @@ async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> 
         return None
 
 
-async def _apply_proposal(engine: CoachEngine, session: ChatSession, draft_id: int) -> None:
+async def _apply_proposal(
+    engine: CoachEngine,
+    session: ChatSession,
+    draft_id: int,
+    keep: tuple[int, ...] | None = None,
+) -> None:
     try:
-        decision = engine.approve(draft_id)
+        decision = engine.approve(draft_id, keep=keep)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         session.pending_decision_id = None
         return
+    if keep is not None:
+        skipped = len(engine.review(draft_id).report.mutations) - len(decision.report.mutations)
+        noun = "change" if skipped == 1 else "changes"
+        console.print(f"[meta]Skipped {skipped} {noun} you did not approve.[/meta]")
     try:
         report = await engine.apply(decision.id)
     except RECOVERABLE_EXCEPTIONS as exc:
@@ -277,8 +292,8 @@ async def _handle_proposal(
         prompt_plan(snapshot)
         return state
 
-    async def execute(current: CoachEngine) -> None:
-        await _apply_proposal(current, session, draft_id)
+    async def execute(current: CoachEngine, keep: tuple[int, ...] | None) -> None:
+        await _apply_proposal(current, session, draft_id, keep)
 
     async def feedback(line: str, outcome: FeedbackOutcome) -> bool | None:
         report = outcome.report
@@ -297,11 +312,8 @@ async def _handle_proposal(
         )
         return None
 
-    async def restate(draft: Draft) -> str:
-        event_dates = await engine.resolve_event_dates(draft.context, draft.report.mutations)
-        return "Apply this to Intervals.icu:\n" + mutations_plan_text(
-            draft.report.mutations, event_dates=event_dates
-        )
+    async def restate(draft: Draft) -> tuple[str, tuple[PlanItem, ...]]:
+        return await _proposal(engine, draft)
 
     try:
         step = await respond(

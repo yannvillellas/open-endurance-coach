@@ -1,15 +1,32 @@
+from datetime import date
+
 import pytest
 
 from open_endurance_coach.chat.gate import (
     Declined,
     Feedback,
     Ignored,
+    InvalidSelection,
+    PlanItem,
     PlanSnapshot,
     Proceed,
+    ProceedSubset,
     handle,
 )
 
 APPROVE = PlanSnapshot(plan_text="Draft #3 - approve these mutations: ...", draft_id=3)
+
+# Displayed as 1: Tue (mutation 2), 2: Thu (mutation 0), 3: Thu (mutation 3), 4: undated (1).
+ITEMS = PlanSnapshot(
+    plan_text="Apply this to Intervals.icu: ...",
+    draft_id=3,
+    items=(
+        PlanItem(index=2, day=date(2026, 10, 6)),
+        PlanItem(index=0, day=date(2026, 10, 8)),
+        PlanItem(index=3, day=date(2026, 10, 8)),
+        PlanItem(index=1, day=None),
+    ),
+)
 
 
 @pytest.mark.parametrize("line", ["yes", "YES", " Yes ", "\tyes\n"])
@@ -35,6 +52,88 @@ def test_blank_lines_are_ignored(line: str) -> None:
 @pytest.mark.parametrize("line", ["y", "n", "yes, but wait", "yes please", "yes.", "no thanks"])
 def test_fuzzy_yes_no_never_resolve_the_gate(line: str) -> None:
     assert handle(line, APPROVE) == Feedback(line.strip())
+
+
+@pytest.mark.parametrize("line", ["yes please", "yes, but wait", "YES SIR", "yes except", "yes."])
+def test_fuzzy_yes_with_items_is_still_feedback(line: str) -> None:
+    assert handle(line, ITEMS) == Feedback(line.strip())
+
+
+@pytest.mark.parametrize(
+    ("line", "indices"),
+    [
+        ("yes 1", (2,)),
+        ("yes 2 4", (0, 1)),
+        ("YES 4, 1", (1, 2)),
+        ("yes 1 and 3", (2, 3)),
+        ("yes thursday", (0, 3)),
+        ("yes tue", (2,)),
+        ("yes 2026-10-06", (2,)),
+        ("yes except 1", (0, 1, 3)),
+        ("yes except Thursday", (1, 2)),
+        ("Yes except thu, 4", (2,)),
+        ("yes except 2026-10-08", (1, 2)),
+        ("yes 1,,3", (2, 3)),
+        ("yes 1,", (2,)),
+        ("yes ,1", (2,)),
+        ("yes 1 1", (2,)),
+        ("yes except 1,", (0, 1, 3)),
+    ],
+)
+def test_yes_with_a_selection_approves_a_subset(line: str, indices: tuple[int, ...]) -> None:
+    assert handle(line, ITEMS) == ProceedSubset(indices)
+
+
+@pytest.mark.parametrize("line", ["yes 1 2 3 4", "yes 1 thursday 4"])
+def test_a_selection_covering_every_item_is_a_full_yes(line: str) -> None:
+    assert handle(line, ITEMS) == Proceed()
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["yes 5", "yes 0", "yes friday", "yes 2026-10-09", "yes except friday", "yes 1 5"],
+)
+def test_a_selection_matching_nothing_never_proceeds(line: str) -> None:
+    assert isinstance(handle(line, ITEMS), InvalidSelection)
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["yes ²", "yes ①", "yes ٣", "yes 1 ²", "yes \uff11", "yes 1\uff12"],
+)
+def test_a_non_ascii_digit_never_proceeds(line: str) -> None:
+    assert isinstance(handle(line, ITEMS), InvalidSelection)
+
+
+def test_an_over_long_numeric_token_never_proceeds() -> None:
+    assert isinstance(handle("yes " + "9" * 4301, ITEMS), InvalidSelection)
+
+
+def test_excluding_every_item_never_proceeds() -> None:
+    result = handle("yes except 1 thursday 4", ITEMS)
+    assert isinstance(result, InvalidSelection)
+
+
+def test_a_selection_without_items_never_proceeds() -> None:
+    assert isinstance(handle("yes except 1", APPROVE), InvalidSelection)
+
+
+@pytest.mark.parametrize("line", ["yes ,", "yes ,,", "yes except ,", "yes except ,,"])
+def test_a_selection_with_only_empty_tokens_never_proceeds(line: str) -> None:
+    assert isinstance(handle(line, ITEMS), InvalidSelection)
+
+
+@pytest.mark.parametrize("line", ["yes 1 bogus", "yes bogus 1"])
+def test_mixed_valid_and_invalid_tokens_fall_back_to_feedback(line: str) -> None:
+    assert handle(line, ITEMS) == Feedback(line.strip())
+
+
+def test_a_selector_without_items_never_proceeds() -> None:
+    assert isinstance(handle("yes 1", APPROVE), InvalidSelection)
+
+
+def test_plain_yes_with_items_still_approves_everything() -> None:
+    assert handle("yes", ITEMS) == Proceed()
 
 
 def test_any_other_input_on_approve_falls_back_to_feedback() -> None:

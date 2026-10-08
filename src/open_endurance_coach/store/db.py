@@ -305,7 +305,7 @@ class CoachStore:
             for row in rows
         ]
 
-    def approve_draft(self, draft_id: int) -> Decision:
+    def approve_draft(self, draft_id: int, *, report: DecisionReport | None = None) -> Decision:
         draft = self.get_draft(draft_id)
         if draft is None:
             raise ValueError(f"draft not found: {draft_id}")
@@ -313,6 +313,7 @@ class CoachStore:
             raise ValueError(
                 f"draft {draft_id} is {draft.status.value}; only pending drafts can be approved"
             )
+        approved = report if report is not None else draft.report
         decided_at = self._clock()
         with self._connection:
             self._connection.execute(
@@ -324,7 +325,7 @@ class CoachStore:
                 (
                     draft_id,
                     decided_at.isoformat(),
-                    json.dumps(draft.report.model_dump(mode="json")),
+                    json.dumps(approved.model_dump(mode="json")),
                 ),
             )
         lastrowid = cursor.lastrowid
@@ -334,7 +335,7 @@ class CoachStore:
             draft_id=draft_id,
             decided_at=decided_at,
             applied_at=None,
-            report=draft.report,
+            report=approved,
         )
 
     def reject_draft(self, draft_id: int) -> None:
