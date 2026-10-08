@@ -808,7 +808,7 @@ async def test_analyze_includes_history_in_the_prompt(settings: Settings, tmp_pa
     ]
     await engine.analyze("follow up", context=CoachContext(focus="f"), history=history)
     prompt = provider.calls[0]["messages"][1].content
-    assert "Recent conversation:" in prompt
+    assert "<conversation>" in prompt
     assert "user: past question" in prompt
     assert "assistant: past answer" in prompt
 
@@ -825,9 +825,9 @@ async def test_analyze_keeps_a_stable_prompt_prefix_between_turns(
     await engine.analyze("second", context=moved, today=TODAY)
     first_prompt = provider.calls[0]["messages"][1].content
     second_prompt = provider.calls[1]["messages"][1].content
-    assert first_prompt.split("Current message:")[0] == second_prompt.split("Current message:")[0]
+    assert first_prompt.split("<athlete_message>")[0] == second_prompt.split("<athlete_message>")[0]
     assert '"focus"' not in first_prompt
-    assert "Current message:\nsecond" in second_prompt
+    assert "<athlete_message>\nsecond\n</athlete_message>" in second_prompt
 
 
 async def test_analyze_empty_content_raises_without_writes(
@@ -1288,7 +1288,7 @@ async def test_submit_feedback_includes_the_conversation_history(
     ]
     await engine.submit_feedback(proposal.id, "make it easier", history=history)
     prompt = provider.calls[1]["messages"][1].content
-    assert "Recent conversation:" in prompt
+    assert "<conversation>" in prompt
     assert "I can train 4 days and prefer mornings" in prompt
     assert "make it easier" in prompt
 

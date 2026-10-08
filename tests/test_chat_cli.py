@@ -461,7 +461,7 @@ def test_chat_seeds_history_from_messages(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     prompt = provider.calls[1]["messages"][1].content
-    assert "Recent conversation:" in prompt
+    assert "<conversation>" in prompt
     assert "legs heavy" in prompt
     assert "Reconsidered." in prompt
 
@@ -497,7 +497,7 @@ def test_chat_session_memory_appends_turns(patched: Any) -> None:
     )
     assert result.exit_code == 0
     prompt = provider.calls[2]["messages"][1].content
-    assert "Recent conversation:" in prompt
+    assert "<conversation>" in prompt
     assert "user: how was my week?" in prompt
     assert "user: first question" in prompt
     assert "second question" in prompt
@@ -519,7 +519,7 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
     )
     assert result.exit_code == 0
     prompt = provider.calls[2]["messages"][1].content
-    assert "Recent conversation:" in prompt
+    assert "<conversation>" in prompt
     assert "make it easier" in prompt
     assert "Reconsidered." in prompt
 
@@ -607,7 +607,7 @@ def test_chat_forget_clears_the_conversation_only(patched: Any) -> None:
     )
     assert result.exit_code == 0
     assert "Forgot" in result.output
-    assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
+    assert "<conversation>" not in provider.calls[2]["messages"][1].content
     proposals = store.list_proposals()
     assert len(proposals) == 3
     assert proposals[0].focus.startswith("third")
@@ -1238,7 +1238,7 @@ def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) 
     assert result.exit_code == 0
     assert len(provider.calls) == 2
     prompt = provider.calls[1]["messages"][1].content
-    assert "Current message:\nhow about 45 minutes instead?" in prompt
+    assert "<athlete_message>\nhow about 45 minutes instead?\n</athlete_message>" in prompt
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
 
 
@@ -1656,7 +1656,7 @@ def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None
     assert 'reply exactly "yes"' in result.output
     assert calendar.created == []
     assert len(provider.calls) == 2
-    assert "Recent conversation:" in provider.calls[1]["messages"][1].content
+    assert "<conversation>" in provider.calls[1]["messages"][1].content
 
 
 def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
@@ -1882,7 +1882,7 @@ def test_chat_forget_all_clears_the_session_history(patched: Any) -> None:
         cli_main.app, [], input="how was my week?\n/forget all\nyes\nand today?\n/exit\n"
     )
     assert result.exit_code == 0
-    assert "Recent conversation:" not in provider.calls[1]["messages"][1].content
+    assert "<conversation>" not in provider.calls[1]["messages"][1].content
 
 
 def test_chat_forget_all_cancels_on_anything_else(patched: Any) -> None:
