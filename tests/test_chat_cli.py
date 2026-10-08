@@ -599,7 +599,7 @@ def test_chat_warns_when_memory_is_filling(
     assert "conversation memory" in result.output
 
 
-def test_chat_forget_wipes_stored_history_and_memory(patched: Any) -> None:
+def test_chat_forget_clears_the_conversation_only(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()) for _ in range(3)])
     _, store = patched(provider)
     result = runner.invoke(
@@ -609,7 +609,7 @@ def test_chat_forget_wipes_stored_history_and_memory(patched: Any) -> None:
     assert "Forgot" in result.output
     assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
     proposals = store.list_proposals()
-    assert len(proposals) == 1
+    assert len(proposals) == 3
     assert proposals[0].focus.startswith("third")
 
 
@@ -1144,7 +1144,7 @@ def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
     store.add_message(MessageRole.USER, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="/forget 30\nhow was my week?\n")
     assert result.exit_code == 0
-    assert "history older than 30 days" in result.output
+    assert "older than 30 days" in result.output
     assert "legs heavy" in provider.calls[0]["messages"][1].content
 
 
@@ -1368,7 +1368,7 @@ def test_chat_retry_applies_each_unapplied_proposal_in_order(patched: Any) -> No
     assert store.list_unapplied_proposals() == []
 
 
-def test_chat_forget_clears_the_retry_pointer(patched: Any) -> None:
+def test_chat_forget_keeps_the_retry_pointer(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     _, store = patched(provider, calendar=calendar)
@@ -1382,9 +1382,8 @@ def test_chat_forget_clears_the_retry_pointer(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="/forget\nretry\n/exit\n")
     assert result.exit_code == 0
     assert "Forgot" in result.output
-    assert "Nothing to apply." in result.output
-    assert "proposal not found" not in result.output
-    assert calendar.created == []
+    assert "Nothing to apply." not in result.output
+    assert len(calendar.created) == 1
 
 
 def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:

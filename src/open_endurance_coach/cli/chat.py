@@ -58,7 +58,7 @@ HELP_TEXT = (
     "retry                  apply again if a calendar write failed\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
-    "/forget [days]         forget stored history (all, or older than N days)\n"
+    "/forget [days]         forget the conversation (all, or older than N days)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
@@ -352,14 +352,15 @@ async def _run_command(
                 )
                 return None
             days = int(args[0])
-        removed = engine.prune_history(days)
-        session.pending_proposal_id = None
+        removed = engine.prune_conversation(days)
+        remaining = engine.unapplied_proposals()
+        session.pending_proposal_id = remaining[0].id if remaining else None
         if days is None:
             session.history = []
             session.context = None
             session.notified.clear()
-        scope = "all history" if days is None else f"history older than {days} days"
-        console.print(f"Forgot {sum(removed.values())} records ({scope}).")
+        scope = "all history" if days is None else f"older than {days} days"
+        console.print(f"Forgot {removed} messages ({scope}).")
         return None
     if name in {"provider", "model"}:
         _handle_llm_command(engine, name, args, session)

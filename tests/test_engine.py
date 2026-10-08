@@ -1595,3 +1595,16 @@ async def test_apply_keeps_the_proposal_when_the_read_back_differs(
     kept = store.get_proposal(proposal.id)
     assert kept is not None
     assert kept.status is ProposalStatus.UNAPPLIED
+
+
+async def test_prune_conversation_keeps_proposals_and_dedup(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    removed = engine.prune_conversation()
+    assert removed == 2
+    assert store.list_messages() == []
+    assert store.get_proposal(proposal.id) is not None

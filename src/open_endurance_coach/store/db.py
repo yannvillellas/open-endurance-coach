@@ -86,6 +86,19 @@ class CoachStore:
             self._connection.execute("VACUUM")
         return counts
 
+    def prune_messages(self, cutoff: datetime | None) -> int:
+        if cutoff is None:
+            cursor = self._connection.execute("DELETE FROM messages")
+        else:
+            cursor = self._connection.execute(
+                "DELETE FROM messages WHERE created_at < ?", (cutoff.isoformat(),)
+            )
+        self._connection.commit()
+        removed = cursor.rowcount
+        if removed >= _VACUUM_MIN_ROWS:
+            self._connection.execute("VACUUM")
+        return removed
+
     def close(self) -> None:
         self._connection.close()
 

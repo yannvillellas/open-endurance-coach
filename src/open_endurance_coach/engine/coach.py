@@ -486,6 +486,12 @@ class CoachEngine:
             cutoff = cutoff - timedelta(days=days)
         return self._store.prune_before(cutoff)
 
+    def prune_conversation(self, days: int | None = None, *, now: datetime | None = None) -> int:
+        cutoff = None
+        if days is not None:
+            cutoff = (now or datetime.now(UTC)) - timedelta(days=days)
+        return self._store.prune_messages(cutoff)
+
     def recent_history(self, limit: int, *, max_age_days: int | None = None) -> list[Message]:
         return self._store.recent_messages(limit, max_age_days=max_age_days)
 
