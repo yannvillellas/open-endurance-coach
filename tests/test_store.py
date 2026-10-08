@@ -456,3 +456,49 @@ def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
     counts = store.prune_before(datetime.now(UTC) - timedelta(days=100))
     assert counts["proposals"] == 1
     assert not any(statement.startswith("VACUUM") for statement in traced)
+
+
+def test_prune_messages_deletes_messages_only(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "old message")
+    store.mark_activities_seen(["fx-old"])
+
+    clock.now = NOW + timedelta(days=200)
+    store.add_message(MessageRole.USER, "recent message")
+    store.mark_activities_seen(["fx-recent"])
+
+    removed = store.prune_messages(NOW + timedelta(days=100))
+
+    assert removed == 1
+    assert [row.content for row in store.list_messages()] == ["recent message"]
+    assert store.get_proposal(proposal_id) is not None
+    assert store.is_activity_seen("fx-old")
+    assert store.is_activity_seen("fx-recent")
+
+
+def test_delete_all_local_wipes_messages_proposals_and_seen(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.save_proposal(focus="old", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "hello")
+    store.mark_activities_seen(["fx-1"])
+
+    counts = store.delete_all_local()
+
+    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
+    assert store.list_messages() == []
+    assert store.list_proposals() == []
+    assert store.is_activity_seen("fx-1") is False
+
+
+def test_vacuum_best_effort_swallows_errors() -> None:
+    from open_endurance_coach.store import db as store_db
+
+    class Boom:
+        def execute(self, *args: object, **kwargs: object) -> None:
+            raise sqlite3.Error("disk full")
+
+    store_db._vacuum_best_effort(Boom())  # type: ignore[arg-type]

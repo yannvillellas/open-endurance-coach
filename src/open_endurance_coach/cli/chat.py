@@ -58,14 +58,15 @@ HELP_TEXT = (
     "retry                  apply again if a calendar write failed\n"
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
-    "/forget [days]         forget stored history (all, or older than N days)\n"
+    "/forget [days]         forget the conversation (all, or older than N days)\n"
+    "/forget all            delete all local state (conversation, proposals, dedup)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
 
 _REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
 _BARE_COMMAND_RE = re.compile(
-    r"^\s*(help|exit|quit|forget(?:\s+\d+)?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
+    r"^\s*(help|exit|quit|forget(?:\s+(?:\d+|all))?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
     re.IGNORECASE,
 )
 _ASSUME_RE = re.compile(
@@ -344,22 +345,31 @@ async def _run_command(
         console.print(HELP_TEXT, markup=False)
         return None
     if name == "forget":
+        if len(args) == 1 and args[0].casefold() == "all":
+            console.print(
+                "[warn]This deletes the conversation, the pending or unapplied proposals and the"
+                " seen-activity markers. The plan already applied and your races stay in"
+                " Intervals.icu. Reply exactly yes to confirm.[/warn]"
+            )
+            return ChatState(wipe_pending=True)
         days: int | None = None
         if args:
-            if not args[0].isdigit() or int(args[0]) <= 0:
+            if len(args) != 1 or not args[0].isdigit() or int(args[0]) <= 0:
                 console.print(
-                    r"[error]Usage: /forget \[days>0] (omit days to forget everything)[/error]"
+                    r"[error]Usage: /forget \[days>0|all]"
+                    " (omit days to forget the conversation)[/error]"
                 )
                 return None
             days = int(args[0])
-        removed = engine.prune_history(days)
-        session.pending_proposal_id = None
+        removed = engine.prune_conversation(days)
+        remaining = engine.unapplied_proposals()
+        session.pending_proposal_id = remaining[0].id if remaining else None
         if days is None:
             session.history = []
             session.context = None
             session.notified.clear()
-        scope = "all history" if days is None else f"history older than {days} days"
-        console.print(f"Forgot {sum(removed.values())} records ({scope}).")
+        scope = "all history" if days is None else f"older than {days} days"
+        console.print(f"Forgot {removed} messages ({scope}).")
         return None
     if name in {"provider", "model"}:
         _handle_llm_command(engine, name, args, session)
@@ -413,6 +423,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         except EOFError:
             if state.plan is not None:
                 console.print("[warn]Cancelled. Nothing changed.[/warn]")
+            elif state.wipe_pending:
+                console.print("[hint]Wipe cancelled.[/hint]")
             console.print("bye")
             return
         except KeyboardInterrupt:
@@ -420,8 +432,32 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 console.print("[warn]Cancelled. Nothing changed.[/warn]")
                 state = ChatState()
                 continue
+            if state.wipe_pending:
+                console.print("[hint]Wipe cancelled.[/hint]")
+                state = ChatState()
+                continue
             console.print("bye")
             return
+        if state.wipe_pending:
+            if line.strip().casefold() == "yes":
+                try:
+                    counts = engine.wipe_local_state()
+                except KeyboardInterrupt:
+                    console.print("[warn]Wipe interrupted; nothing changed.[/warn]")
+                    state = ChatState()
+                    continue
+                session.history = []
+                session.context = None
+                session.notified.clear()
+                session.pending_proposal_id = None
+                console.print(
+                    f"Deleted {counts['messages']} messages, {counts['proposals']} proposals"
+                    f" and {counts['seen_activities']} seen activities."
+                )
+                state = ChatState()
+                continue
+            state = ChatState()
+            console.print("[hint]Wipe cancelled.[/hint]")
         bare = _BARE_COMMAND_RE.match(line)
         if bare is not None:
             console.print(

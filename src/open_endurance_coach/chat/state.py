@@ -12,6 +12,7 @@ class ChatMode(StrEnum):
 @dataclass(frozen=True)
 class ChatState:
     plan: PlanSnapshot | None = None
+    wipe_pending: bool = False
 
     @property
     def mode(self) -> ChatMode:
