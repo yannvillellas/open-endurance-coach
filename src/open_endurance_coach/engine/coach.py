@@ -579,8 +579,8 @@ class CoachEngine:
     def _assert_current_dates(self, report: DecisionReport) -> None:
         _assert_valid_mutations(report, today=self.today())
 
-    def discard_proposal(self, proposal_id: int) -> None:
-        self._store.discard_proposal(proposal_id)
+    def delete_proposal(self, proposal_id: int) -> None:
+        self._store.delete_proposal(proposal_id)
 
     def discard_stale_proposals(self) -> list[tuple[int, str]]:
         discarded: list[tuple[int, str]] = []
@@ -591,7 +591,7 @@ class CoachEngine:
             if not dropped:
                 continue
             reason = _drop_reason(dropped)
-            self._store.discard_proposal(proposal.id)
+            self._store.delete_proposal(proposal.id)
             discarded.append((proposal.id, reason))
         return discarded
 
@@ -631,8 +631,6 @@ class CoachEngine:
             proposal = self._store.get_proposal(proposal_id)
             if proposal is None:
                 raise ValueError(f"proposal not found: {proposal_id}")
-            if proposal.applied_at is not None:
-                raise ValueError(f"proposal {proposal_id} is already applied")
             proposals = [proposal]
         else:
             proposals = self._store.list_unapplied_proposals()
@@ -663,5 +661,6 @@ class CoachEngine:
                 )
             outcomes = await self._writer.apply_proposal(proposal, mutations=kept)
             applied.append(AppliedProposal(proposal_id=proposal.id, outcomes=outcomes))
-            self._store.mark_proposal_applied(proposal.id)
+            if all(not outcome.drift for outcome in outcomes):
+                self._store.delete_proposal(proposal.id)
         return ApplyReport(proposals=applied)

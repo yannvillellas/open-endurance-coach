@@ -43,7 +43,7 @@ def make_store(tmp_path: Path) -> CoachStore:
 def test_new_store_is_empty(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     assert store.list_proposals() == []
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
     assert store.unseen_activity_ids(["a", "b"]) == {"a", "b"}
 
 
@@ -132,7 +132,7 @@ def test_list_proposals_filters_by_status(tmp_path: Path) -> None:
     )
     store.approve_proposal(approved_id)
     pending = store.list_proposals(ProposalStatus.PENDING)
-    approved = store.list_proposals(ProposalStatus.APPROVED)
+    approved = store.list_proposals(ProposalStatus.UNAPPLIED)
     assert [proposal.id for proposal in pending] == [pending_id]
     assert [proposal.id for proposal in approved] == [approved_id]
 
@@ -202,8 +202,8 @@ def test_approve_proposal_creates_proposal_and_flips_status(tmp_path: Path) -> N
     assert proposal.approved_report == make_report()
     stored = store.get_proposal(proposal_id)
     assert stored is not None
-    assert stored.status is ProposalStatus.APPROVED
-    proposals = store.list_approved_proposals()
+    assert stored.status is ProposalStatus.UNAPPLIED
+    proposals = store.list_unapplied_proposals()
     assert len(proposals) == 1
     assert proposals[0].id == stored.id
 
@@ -219,7 +219,7 @@ def test_approve_proposal_records_the_approved_report(tmp_path: Path) -> None:
     assert stored.approved_report == subset
     stored = store.get_proposal(proposal_id)
     assert stored is not None
-    assert stored.status is ProposalStatus.APPROVED
+    assert stored.status is ProposalStatus.UNAPPLIED
     assert stored.report == make_report()
 
 
@@ -235,7 +235,7 @@ def test_approve_twice_raises(tmp_path: Path) -> None:
     store.approve_proposal(proposal_id)
     with pytest.raises(ValueError, match="pending"):
         store.approve_proposal(proposal_id)
-    assert len(store.list_approved_proposals()) == 1
+    assert len(store.list_unapplied_proposals()) == 1
 
 
 def test_approve_proposal_is_atomic_when_the_update_fails(tmp_path: Path) -> None:
@@ -252,15 +252,15 @@ def test_approve_proposal_is_atomic_when_the_update_fails(tmp_path: Path) -> Non
     assert proposal is not None
     assert proposal.status is ProposalStatus.PENDING
     assert proposal.approved_report is None
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
     store._connection.execute("DROP TRIGGER refuse_proposal")
     store._connection.commit()
     proposal = store.approve_proposal(proposal_id)
     assert proposal.id == proposal_id
     reopened = store.get_proposal(proposal_id)
     assert reopened is not None
-    assert reopened.status is ProposalStatus.APPROVED
-    assert len(store.list_approved_proposals()) == 1
+    assert reopened.status is ProposalStatus.UNAPPLIED
+    assert len(store.list_unapplied_proposals()) == 1
 
 
 def test_store_persists_across_reopen(tmp_path: Path) -> None:
@@ -293,58 +293,6 @@ def approve_proposal(store: CoachStore) -> int:
     return store.approve_proposal(proposal_id).id
 
 
-def test_proposals_have_no_applied_at_initially(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    proposal_id = approve_proposal(store)
-    proposal = store.list_approved_proposals()[0]
-    assert proposal.id == proposal_id
-    assert proposal.applied_at is None
-
-
-def test_mark_proposal_applied_sets_timestamp(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    proposal_id = approve_proposal(store)
-    store.mark_proposal_applied(proposal_id)
-    proposal = store.list_approved_proposals()[0]
-    assert proposal.applied_at == NOW
-    assert store.list_unapplied_proposals() == []
-
-
-def test_mark_proposal_applied_twice_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    proposal_id = approve_proposal(store)
-    store.mark_proposal_applied(proposal_id)
-    with pytest.raises(ValueError, match="already applied"):
-        store.mark_proposal_applied(proposal_id)
-
-
-def test_mark_proposal_applied_missing_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.mark_proposal_applied(404)
-
-
-def test_list_unapplied_proposals_only_unapplied(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    first = approve_proposal(store)
-    second = approve_proposal(store)
-    store.mark_proposal_applied(first)
-    unapplied = store.list_unapplied_proposals()
-    assert [proposal.id for proposal in unapplied] == [second]
-
-
-def test_applied_at_persists_across_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "coach.db"
-    store = CoachStore(path)
-    proposal_id = approve_proposal(store)
-    store.mark_proposal_applied(proposal_id)
-    store.close()
-    reopened = CoachStore(path)
-    proposal = reopened.list_approved_proposals()[0]
-    assert proposal.applied_at is not None
-    assert reopened.list_unapplied_proposals() == []
-
-
 def test_store_creates_the_fresh_proposals_schema(tmp_path: Path) -> None:
     import sqlite3
 
@@ -358,7 +306,7 @@ def test_store_creates_the_fresh_proposals_schema(tmp_path: Path) -> None:
     connection = sqlite3.connect(path)
     columns = {row[1] for row in connection.execute("PRAGMA table_info(proposals)").fetchall()}
     connection.close()
-    assert {"approved_json", "decided_at", "applied_at"} <= columns
+    assert {"approved_json", "decided_at"} <= columns
 
 
 def test_recent_messages_respects_rows_without_a_report(tmp_path: Path) -> None:
@@ -446,7 +394,7 @@ def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
     assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
     assert [proposal.focus for proposal in store.list_proposals()] == ["recent"]
     assert [row.content for row in store.recent_messages(10)] == ["recent feedback"]
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
     assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
 
 
@@ -466,24 +414,7 @@ def test_prune_before_keeps_messages_newer_than_the_cutoff(tmp_path: Path) -> No
     assert counts == {"messages": 0, "proposals": 1, "seen_activities": 0}
     assert [row.content for row in store.list_messages()] == ["late feedback"]
     assert store.list_proposals() == []
-    assert store.list_approved_proposals() == []
-
-
-def test_rejected_legacy_proposals_are_dropped_on_open(tmp_path: Path) -> None:
-    path = tmp_path / "coach.db"
-    store = CoachStore(path)
-    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
-    store.add_message(MessageRole.USER, "rejected feedback")
-    store._connection.execute(
-        "UPDATE proposals SET status = 'rejected' WHERE id = ?", (proposal_id,)
-    )
-    store._connection.commit()
-    store.close()
-
-    reopened = CoachStore(path)
-    assert reopened.list_proposals() == []
-    assert [row.content for row in reopened.list_messages()] == ["rejected feedback"]
-    reopened.close()
+    assert store.list_unapplied_proposals() == []
 
 
 def test_database_file_is_owner_only(tmp_path: Path) -> None:
@@ -500,27 +431,16 @@ def test_unseen_activity_ids_handles_large_batches(tmp_path: Path) -> None:
     assert unseen == {"fx-new-1", "fx-new-2"}
 
 
-def test_reject_proposal_marks_it_rejected_and_is_terminal(tmp_path: Path) -> None:
+def test_reject_proposal_deletes_it_and_keeps_messages(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "legs heavy")
     store.reject_proposal(proposal_id)
-    proposal = store.get_proposal(proposal_id)
-    assert proposal is not None
-    assert proposal.status is ProposalStatus.REJECTED
-    assert store.list_proposals(ProposalStatus.PENDING) == []
-    with pytest.raises(ValueError, match="only pending"):
+    assert store.get_proposal(proposal_id) is None
+    assert store.list_proposals() == []
+    assert [row.content for row in store.list_messages()] == ["legs heavy"]
+    with pytest.raises(ValueError, match="not found"):
         store.reject_proposal(proposal_id)
-
-
-def test_rejected_proposal_is_purged_on_reopen(tmp_path: Path) -> None:
-    path = tmp_path / "coach.db"
-    store = CoachStore(path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.reject_proposal(proposal_id)
-    store.close()
-    reopened = CoachStore(path)
-    assert reopened.get_proposal(proposal_id) is None
-    reopened.close()
 
 
 def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:

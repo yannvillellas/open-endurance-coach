@@ -24,8 +24,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     context_json TEXT NOT NULL,
     report_json TEXT NOT NULL,
     approved_json TEXT,
-    decided_at TEXT,
-    applied_at TEXT
+    decided_at TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +54,7 @@ class CoachStore:
         self._connection.executescript("DELETE FROM proposals WHERE status = 'rejected';")
         self._connection.commit()
 
-    def discard_proposal(self, proposal_id: int) -> None:
+    def delete_proposal(self, proposal_id: int) -> None:
         self._connection.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))
         self._connection.commit()
 
@@ -150,7 +149,6 @@ class CoachStore:
     def _proposal_from_row(self, row: sqlite3.Row) -> Proposal:
         approved_json = row["approved_json"]
         decided_at = row["decided_at"]
-        applied_at = row["applied_at"]
         return Proposal(
             id=row["id"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -165,7 +163,6 @@ class CoachStore:
                 else None
             ),
             decided_at=datetime.fromisoformat(decided_at) if decided_at else None,
-            applied_at=datetime.fromisoformat(applied_at) if applied_at else None,
         )
 
     def get_proposal(self, proposal_id: int) -> Proposal | None:
@@ -183,8 +180,12 @@ class CoachStore:
             ).fetchall()
         return [self._proposal_from_row(row) for row in rows]
 
-    def list_approved_proposals(self) -> list[Proposal]:
-        return self.list_proposals(ProposalStatus.APPROVED)
+    def list_unapplied_proposals(self) -> list[Proposal]:
+        rows = self._connection.execute(
+            "SELECT * FROM proposals WHERE status = ? ORDER BY id",
+            (ProposalStatus.UNAPPLIED.value,),
+        ).fetchall()
+        return [self._proposal_from_row(row) for row in rows]
 
     def update_proposal_report(
         self,
@@ -297,7 +298,7 @@ class CoachStore:
             self._connection.execute(
                 "UPDATE proposals SET status = ?, approved_json = ?, decided_at = ? WHERE id = ?",
                 (
-                    ProposalStatus.APPROVED.value,
+                    ProposalStatus.UNAPPLIED.value,
                     json.dumps(approved.model_dump(mode="json")),
                     decided_at.isoformat(),
                     proposal_id,
@@ -316,27 +317,4 @@ class CoachStore:
                 f"proposal {proposal_id} is {proposal.status.value};"
                 " only pending proposals can be rejected"
             )
-        self._connection.execute(
-            "UPDATE proposals SET status = ? WHERE id = ?",
-            (ProposalStatus.REJECTED.value, proposal_id),
-        )
-        self._connection.commit()
-
-    def list_unapplied_proposals(self) -> list[Proposal]:
-        rows = self._connection.execute(
-            "SELECT * FROM proposals WHERE status = ? AND applied_at IS NULL ORDER BY id",
-            (ProposalStatus.APPROVED.value,),
-        ).fetchall()
-        return [self._proposal_from_row(row) for row in rows]
-
-    def mark_proposal_applied(self, proposal_id: int) -> None:
-        proposal = self.get_proposal(proposal_id)
-        if proposal is None:
-            raise ValueError(f"proposal not found: {proposal_id}")
-        if proposal.applied_at is not None:
-            raise ValueError(f"proposal {proposal_id} is already applied")
-        self._connection.execute(
-            "UPDATE proposals SET applied_at = ? WHERE id = ?",
-            (self._clock().isoformat(), proposal_id),
-        )
-        self._connection.commit()
+        self.delete_proposal(proposal_id)

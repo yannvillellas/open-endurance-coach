@@ -8,8 +8,7 @@ from open_endurance_coach.schemas.decisions import DecisionReport
 
 class ProposalStatus(StrEnum):
     PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    UNAPPLIED = "unapplied"
 
 
 class MessageRole(StrEnum):
@@ -28,7 +27,6 @@ class Proposal:
     report: DecisionReport
     approved_report: DecisionReport | None = None
     decided_at: datetime | None = None
-    applied_at: datetime | None = None
 
 
 @dataclass(frozen=True)

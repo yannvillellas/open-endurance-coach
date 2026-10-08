@@ -32,14 +32,13 @@ def make_proposal(*mutations: object) -> Proposal:
     return Proposal(
         id=1,
         created_at=datetime.fromisoformat(DECIDED_AT),
-        status=ProposalStatus.APPROVED,
+        status=ProposalStatus.UNAPPLIED,
         focus="f",
         user_feedback=None,
         context=CoachContext(focus="f"),
         report=report,
         approved_report=report,
         decided_at=datetime.fromisoformat(DECIDED_AT),
-        applied_at=None,
     )
 
 

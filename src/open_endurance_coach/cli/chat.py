@@ -203,7 +203,7 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
         report = await engine.apply(session.pending_proposal_id)
     except (StaleProposalError, PlaceholderMutationError, StateDriftError) as exc:
         console.print(f"[warn]Proposal #{session.pending_proposal_id} discarded: {exc}[/warn]")
-        engine.discard_proposal(session.pending_proposal_id)
+        engine.delete_proposal(session.pending_proposal_id)
         remaining = engine.unapplied_proposals()
         session.pending_proposal_id = remaining[0].id if remaining else None
         if remaining:

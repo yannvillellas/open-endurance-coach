@@ -676,8 +676,8 @@ async def test_approve_records_proposal(settings: Settings, tmp_path: Path) -> N
     assert mutation.name == "Tempo Session"
     approved = store.get_proposal(proposal.id)
     assert approved is not None
-    assert approved.status is ProposalStatus.APPROVED
-    assert store.list_approved_proposals() == [proposal]
+    assert approved.status is ProposalStatus.UNAPPLIED
+    assert store.list_unapplied_proposals() == [proposal]
 
 
 async def test_approve_keeps_only_the_selected_mutations(
@@ -694,10 +694,10 @@ async def test_approve_keeps_only_the_selected_mutations(
     assert [m.name for m in approved_report.mutations if isinstance(m, CreateWorkout)] == [
         "Easy Spin"
     ]
-    assert store.list_approved_proposals() == [proposal]
+    assert store.list_unapplied_proposals() == [proposal]
     stored = store.get_proposal(proposal.id)
     assert stored is not None
-    assert stored.status is ProposalStatus.APPROVED
+    assert stored.status is ProposalStatus.UNAPPLIED
     assert len(stored.report.mutations) == 2
 
 
@@ -713,13 +713,7 @@ async def test_apply_without_writer_raises(settings: Settings, tmp_path: Path) -
         await engine.apply()
 
 
-def applied_proposal(store: CoachStore, proposal_id: int) -> Any:
-    proposal = store.get_proposal(proposal_id)
-    assert proposal is not None
-    return proposal
-
-
-async def test_apply_applies_unapplied_proposals_and_marks_applied(
+async def test_apply_applies_approved_proposals_and_deletes_them(
     settings: Settings, tmp_path: Path
 ) -> None:
     store = CoachStore(tmp_path / "coach.db")
@@ -734,9 +728,9 @@ async def test_apply_applies_unapplied_proposals_and_marks_applied(
     assert report.proposals[0].proposal_id == 1
     assert report.proposals[0].outcomes[0].target == "created"
     assert len(calendar.created) == 1
-    assert store.get_proposal(1) is not None
-    assert applied_proposal(store, 1).applied_at is not None
+    assert store.get_proposal(1) is None
     assert store.list_unapplied_proposals() == []
+    assert store.list_messages() != []
 
 
 async def test_apply_specific_proposal_only(settings: Settings, tmp_path: Path) -> None:
@@ -751,11 +745,13 @@ async def test_apply_specific_proposal_only(settings: Settings, tmp_path: Path) 
     writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
     report = await writer_engine.apply(proposal_id=second.id)
     assert [item.proposal_id for item in report.proposals] == [second.id]
-    assert applied_proposal(store, first.id).applied_at is None
-    assert applied_proposal(store, second.id).applied_at is not None
+    assert store.get_proposal(second.id) is None
+    kept = store.get_proposal(first.id)
+    assert kept is not None
+    assert kept.status is ProposalStatus.UNAPPLIED
 
 
-async def test_apply_already_applied_proposal_raises(settings: Settings, tmp_path: Path) -> None:
+async def test_apply_a_deleted_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
@@ -765,11 +761,11 @@ async def test_apply_already_applied_proposal_raises(settings: Settings, tmp_pat
         settings, store, provider, writer=CalendarWriter(FakeCalendarClient())
     )
     await writer_engine.apply()
-    with pytest.raises(ValueError, match="already applied"):
+    with pytest.raises(ValueError, match="not found"):
         await writer_engine.apply(proposal_id=1)
 
 
-async def test_apply_marks_empty_proposal_applied(settings: Settings, tmp_path: Path) -> None:
+async def test_apply_deletes_an_empty_proposal(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, store, provider)
@@ -780,7 +776,7 @@ async def test_apply_marks_empty_proposal_applied(settings: Settings, tmp_path: 
     report = await writer_engine.apply()
     assert report.proposals[0].outcomes == []
     assert calendar.created == []
-    assert applied_proposal(store, 1).applied_at is not None
+    assert store.get_proposal(1) is None
 
 
 async def test_analyze_reuses_a_provided_context_without_extraction(
@@ -1145,7 +1141,6 @@ async def test_apply_refuses_a_proposal_with_a_past_dated_mutation(
     assert [row.id for row in store.list_unapplied_proposals()] == [proposal.id]
     stored = store.get_proposal(proposal.id)
     assert stored is not None
-    assert stored.applied_at is None
 
 
 async def test_discard_removes_a_proposal_with_any_dropped_mutation(
@@ -1576,3 +1571,27 @@ def test_validate_report_accepts_string_event_ids() -> None:
     mutation = report.mutations[0]
     assert isinstance(mutation, UpdateWorkout)
     assert mutation.event_id == "e20001"
+
+
+async def test_apply_keeps_the_proposal_when_the_read_back_differs(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    engine.approve(proposal.id)
+    calendar = FakeCalendarClient()
+    writer_engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+
+    async def failing_read_back(event_id: str) -> dict[str, Any]:
+        raise IntervalsApiError(500, "read-back down")
+
+    monkeypatch.setattr(calendar, "get_event", failing_read_back)
+    report = await writer_engine.apply()
+    assert report.proposals[0].outcomes[0].drift == [
+        "read-back failed; planned values were not verified"
+    ]
+    kept = store.get_proposal(proposal.id)
+    assert kept is not None
+    assert kept.status is ProposalStatus.UNAPPLIED

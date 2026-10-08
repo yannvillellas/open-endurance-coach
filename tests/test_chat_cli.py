@@ -33,7 +33,6 @@ from .fakes import (
     make_event,
     make_intervals_client,
     near_future,
-    proposal_of,
     report_json,
 )
 
@@ -327,7 +326,7 @@ def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
     assert "Apply this to Intervals.icu" in result.output
     assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
-    assert proposal_of(store, 1).applied_at is not None
+    assert store.get_proposal(1) is None
 
 
 def test_chat_proposal_shows_resolved_event_date(patched: Any) -> None:
@@ -354,8 +353,8 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
-    assert store.list_approved_proposals() == []
-    assert store.get_proposal(1).status is ProposalStatus.REJECTED
+    assert store.list_unapplied_proposals() == []
+    assert store.get_proposal(1) is None
 
 
 def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
@@ -373,9 +372,8 @@ def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
-    proposal = store.get_proposal(1)
-    assert proposal is not None
-    assert proposal.user_feedback == "make it easier"
+    assert store.get_proposal(1) is None
+    assert user_messages(store) == ["analyze my week", "make it easier"]
 
 
 def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> None:
@@ -426,8 +424,8 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\nno\n")
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
-    assert store.list_approved_proposals() == []
-    assert store.get_proposal(1).status is ProposalStatus.REJECTED
+    assert store.list_unapplied_proposals() == []
+    assert store.get_proposal(1) is None
 
 
 def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
@@ -438,7 +436,7 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Sure." in result.output
     assert calls == {"approve": 0, "apply_write": 0}
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
@@ -536,7 +534,7 @@ def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
     assert "Cancelled. Nothing changed." in result.output
     assert "/provider" in result.output
     assert store.get_proposal(1).status is ProposalStatus.PENDING
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_eof_during_confirmation_cancels_and_exits(
@@ -549,7 +547,7 @@ def test_chat_eof_during_confirmation_cancels_and_exits(
     assert "Cancelled. Nothing changed." in result.output
     assert "bye" in result.output
     assert store.get_proposal(1).status is ProposalStatus.PENDING
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -677,11 +675,8 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
     assert "Explanation." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
-    assert len(store.list_proposals()) == 1
+    assert store.list_proposals() == []
     assert user_messages(store) == ["analyze my week", "what would this train exactly?"]
-    proposal = store.get_proposal(1)
-    assert proposal is not None
-    assert proposal.user_feedback is None
 
 
 def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> None:
@@ -700,10 +695,11 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
     assert result.exit_code == 0
     assert len(provider.calls) == 2
     assert "Revised." in result.output
-    proposal = store.get_proposal(1)
-    assert proposal is not None
-    assert proposal.user_feedback == "make it 45 minutes, why did you pick 60?"
-    assert proposal.status is ProposalStatus.APPROVED
+    assert store.get_proposal(1) is None
+    assert user_messages(store) == [
+        "analyze my week",
+        "make it 45 minutes, why did you pick 60?",
+    ]
 
 
 def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None:
@@ -780,7 +776,7 @@ def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
     assert "bye" in result.output
     assert len(provider.calls) == 1
     assert store.get_proposal(1).status is ProposalStatus.PENDING
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_help_explains_confirmation_replies(patched: Any) -> None:
@@ -864,7 +860,6 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     assert 'say "retry"' in result.output
     proposal = store.get_proposal(1)
     assert proposal is not None
-    assert proposal.applied_at is None
     asyncio.run(noop())
 
 
@@ -1226,7 +1221,7 @@ def test_chat_revision_to_chat_intent_keeps_the_gate_open(patched: Any) -> None:
     assert "Just advice." in result.output
     assert user_messages(store) == ["analyze my week", "make it easier"]
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) -> None:
@@ -1307,9 +1302,7 @@ def test_chat_gate_question_with_needs_input_keeps_the_proposal_pending(patched:
     assert "needs answers before proposing calendar changes" in result.output
     assert "What is your goal time?" in result.output
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    proposal = store.get_proposal(1)
-    assert proposal is not None
-    assert proposal.report.summary == "Load stable."
+    assert store.get_proposal(1) is None
 
 
 def test_chat_yes_after_a_blocked_plan_applies_the_original(patched: Any) -> None:
@@ -1446,11 +1439,7 @@ def test_chat_yes_except_writes_only_the_approved_items(patched: Any) -> None:
     assert calls == {"approve": 1, "apply_write": 1}
     assert [event["name"] for event in calendar.created] == ["Tempo Session"]
     assert "Skipped 1 change you did not approve." in result.output
-    proposal = proposal_of(store, 1)
-    assert proposal.applied_at is not None
-    approved_report = proposal.approved_report
-    assert approved_report is not None
-    assert [mutation.name for mutation in approved_report.mutations] == ["Tempo Session"]
+    assert store.get_proposal(1) is None
     assert len(provider.calls) == 1
 
 
@@ -1491,7 +1480,7 @@ def test_chat_yes_with_an_unknown_item_writes_nothing_and_keeps_the_gate(
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 1
     assert user_messages(store) == ["analyze my week"]
-    assert store.get_proposal(1).status is ProposalStatus.REJECTED
+    assert store.get_proposal(1) is None
 
 
 def test_chat_yes_except_after_a_revision_uses_the_revised_items(patched: Any) -> None:
@@ -1695,7 +1684,7 @@ def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> No
     assert result.exit_code == 0
     assert "Answer." in result.output
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    assert store.list_approved_proposals() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_render_failure_after_apply_is_not_reported_as_unapplied(
