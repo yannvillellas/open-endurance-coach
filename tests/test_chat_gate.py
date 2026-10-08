@@ -14,18 +14,17 @@ from open_endurance_coach.chat.gate import (
     handle,
 )
 
-APPROVE = PlanSnapshot(plan_text="Draft #3 - approve these mutations: ...", draft_id=3)
+TUE_MUTATION = PlanItem(index=2, day=date(2026, 10, 6))
+THU_TEMPO_MUTATION = PlanItem(index=0, day=date(2026, 10, 8))
+THU_EASY_MUTATION = PlanItem(index=3, day=date(2026, 10, 8))
+UNDATED_MUTATION = PlanItem(index=1, day=None)
 
-# Displayed as 1: Tue (mutation 2), 2: Thu (mutation 0), 3: Thu (mutation 3), 4: undated (1).
+APPROVE = PlanSnapshot(plan_text="Proposal #3 - approve these mutations: ...", proposal_id=3)
+
 ITEMS = PlanSnapshot(
     plan_text="Apply this to Intervals.icu: ...",
-    draft_id=3,
-    items=(
-        PlanItem(index=2, day=date(2026, 10, 6)),
-        PlanItem(index=0, day=date(2026, 10, 8)),
-        PlanItem(index=3, day=date(2026, 10, 8)),
-        PlanItem(index=1, day=None),
-    ),
+    proposal_id=3,
+    items=(TUE_MUTATION, THU_TEMPO_MUTATION, THU_EASY_MUTATION, UNDATED_MUTATION),
 )
 
 

@@ -12,10 +12,10 @@ NOW = datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def entry(
-    feedback_id: int, draft_id: int, content: str, report: DecisionReport
+    feedback_id: int, proposal_id: int, content: str, report: DecisionReport
 ) -> FeedbackWithReport:
     return FeedbackWithReport(
-        feedback=Feedback(id=feedback_id, draft_id=draft_id, created_at=NOW, content=content),
+        feedback=Feedback(id=feedback_id, proposal_id=proposal_id, created_at=NOW, content=content),
         report=report,
     )
 
@@ -36,7 +36,7 @@ def test_seed_turns_single_entry_pairs_user_with_assistant() -> None:
     ]
 
 
-def test_seed_turns_multi_round_draft_emits_one_final_reply() -> None:
+def test_seed_turns_multi_round_proposal_emits_one_final_reply() -> None:
     turns = seed_turns(
         [
             entry(3, 10, "third answer", REPORT_A),
@@ -53,7 +53,7 @@ def test_seed_turns_multi_round_draft_emits_one_final_reply() -> None:
     assert turns[3].content == "Summary A.\n- Finding A1.\n- Finding A2."
 
 
-def test_seed_turns_groups_consecutive_drafts() -> None:
+def test_seed_turns_groups_consecutive_proposals() -> None:
     turns = seed_turns(
         [
             entry(2, 20, "answer B", REPORT_B),
@@ -67,7 +67,7 @@ def test_seed_turns_groups_consecutive_drafts() -> None:
     assert turns[3].content.startswith("Summary B.")
 
 
-def test_seed_turns_interleaved_drafts_reply_per_group() -> None:
+def test_seed_turns_interleaved_proposals_reply_per_group() -> None:
     turns = seed_turns(
         [
             entry(3, 10, "answer A2", REPORT_A),

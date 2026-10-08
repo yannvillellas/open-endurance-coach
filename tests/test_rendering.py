@@ -25,17 +25,17 @@ from open_endurance_coach.schemas.decisions import (
     UpdateRace,
     UpdateWorkout,
 )
-from open_endurance_coach.store.records import Draft, DraftStatus
-from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
+from open_endurance_coach.store.records import Proposal, ProposalStatus
+from open_endurance_coach.writer.records import AppliedProposal, ApplyReport, MutationOutcome
 
 from .fakes import report_json
 
 
-def make_draft(summary: str = "Load stable.") -> Draft:
-    return Draft(
+def make_proposal(summary: str = "Load stable.") -> Proposal:
+    return Proposal(
         id=1,
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
-        status=DraftStatus.PENDING,
+        status=ProposalStatus.PENDING,
         focus="focus",
         user_feedback=None,
         context=CoachContext(focus="focus"),
@@ -46,7 +46,7 @@ def make_draft(summary: str = "Load stable.") -> Draft:
 def test_render_report_prints_summary_findings_questions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    render_report(make_draft().report)
+    render_report(make_proposal().report)
     out = capsys.readouterr().out
     assert "Coach" in out
     assert "Load stable." in out
@@ -83,9 +83,9 @@ def test_mutations_plan_text_shows_dates_and_descriptions(
 
 def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
+        proposals=[
+            AppliedProposal(
+                proposal_id=1,
                 outcomes=[MutationOutcome(action="update", target="updated", event_id=10001)],
             )
         ]
@@ -100,7 +100,7 @@ def test_render_apply_prints_outcomes(capsys: pytest.CaptureFixture[str]) -> Non
 def test_render_apply_empty_report(capsys: pytest.CaptureFixture[str]) -> None:
     render_apply(ApplyReport())
     out = capsys.readouterr().out
-    assert "No unapplied decisions." in out
+    assert "No unapplied proposals." in out
 
 
 def test_mutations_plan_text_lists_each_mutation() -> None:
@@ -208,11 +208,11 @@ def test_mutations_plan_text_empty_mutations() -> None:
     assert "(no calendar changes)" in text
 
 
-def test_apply_plan_text_lists_decisions_and_outcomes() -> None:
+def test_apply_plan_text_lists_proposals_and_outcomes() -> None:
     report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
+        proposals=[
+            AppliedProposal(
+                proposal_id=1,
                 outcomes=[
                     MutationOutcome(action="create", target="created", name="Tempo Session"),
                     MutationOutcome(action="update", target="updated", event_id=10001),
@@ -221,7 +221,7 @@ def test_apply_plan_text_lists_decisions_and_outcomes() -> None:
         ]
     )
     text = apply_plan_text(report)
-    assert "Decision #1:" in text
+    assert "Proposal #1:" in text
     assert "- create -> created: Tempo Session" in text
     assert "- update -> updated event 10001" in text
 
@@ -237,7 +237,7 @@ def test_render_report_escapes_llm_markup(capsys: pytest.CaptureFixture[str]) ->
 
 def test_plan_texts_escape_llm_markup() -> None:
     from open_endurance_coach.cli.rendering import apply_plan_text, mutations_plan_text
-    from open_endurance_coach.writer.records import AppliedDecision, ApplyReport, MutationOutcome
+    from open_endurance_coach.writer.records import AppliedProposal, ApplyReport, MutationOutcome
 
     mutations: list[Mutation] = [
         CreateWorkout(
@@ -249,9 +249,9 @@ def test_plan_texts_escape_llm_markup() -> None:
     text = mutations_plan_text(mutations)
     assert "Weird \\[bold]Session\\[/bold]" in text
     report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
+        proposals=[
+            AppliedProposal(
+                proposal_id=1,
                 outcomes=[MutationOutcome(action="create", target="created", name="Weird [x]")],
             )
         ]
@@ -262,9 +262,9 @@ def test_plan_texts_escape_llm_markup() -> None:
 
 def test_apply_plan_text_escapes_event_id(capsys: pytest.CaptureFixture[str]) -> None:
     report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=1,
+        proposals=[
+            AppliedProposal(
+                proposal_id=1,
                 outcomes=[
                     MutationOutcome(action="update", target="updated", event_id="[red]9[/red]")
                 ],
@@ -324,9 +324,9 @@ def test_mutations_plan_text_renders_race_update_and_delete() -> None:
 
 def test_apply_plan_text_reports_drift() -> None:
     report = ApplyReport(
-        decisions=[
-            AppliedDecision(
-                decision_id=10,
+        proposals=[
+            AppliedProposal(
+                proposal_id=10,
                 outcomes=[
                     MutationOutcome(
                         action="update",
@@ -380,7 +380,7 @@ def test_prompt_plan_frames_the_proposal(capsys: pytest.CaptureFixture[str]) -> 
     prompt_plan(
         PlanSnapshot(
             plan_text="Apply this to Intervals.icu:\nProposed changes:\n  2026-09-17",
-            draft_id=1,
+            proposal_id=1,
         )
     )
     out = capsys.readouterr().out
@@ -444,6 +444,6 @@ def test_prompt_plan_does_not_render_llm_markup(capsys: pytest.CaptureFixture[st
             )
         ]
     )
-    prompt_plan(PlanSnapshot(plan_text=plan_text, draft_id=1))
+    prompt_plan(PlanSnapshot(plan_text=plan_text, proposal_id=1))
     out = capsys.readouterr().out
     assert "[bold]Session[/bold]" in out

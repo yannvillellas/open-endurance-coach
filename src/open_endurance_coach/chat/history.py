@@ -23,16 +23,16 @@ def seed_turns(entries: list[FeedbackWithReport]) -> list[LlmMessage]:
     count = len(entries)
     for position, entry in enumerate(reversed(entries)):
         turns.append(LlmMessage(role="user", content=entry.feedback.content))
-        next_draft = (
-            entries[count - 2 - position].feedback.draft_id if position + 1 < count else None
+        next_proposal = (
+            entries[count - 2 - position].feedback.proposal_id if position + 1 < count else None
         )
-        if next_draft != entry.feedback.draft_id:
+        if next_proposal != entry.feedback.proposal_id:
             turns.append(assistant_turn(entry.report))
     return turns
 
 
 def count_exchanges(turns: list[LlmMessage]) -> int:
-    """One exchange is one coach reply; multi-round drafts can add user turns without one."""
+    """One exchange is one coach reply; multi-round proposals can add user turns without one."""
     return sum(1 for turn in turns if turn.role == "assistant")
 
 
@@ -72,7 +72,7 @@ class ChatSession:
     history: list[LlmMessage] = field(default_factory=list)
     context: CoachContext | None = None
     cap: int | None = None
-    pending_decision_id: int | None = None
+    pending_proposal_id: int | None = None
     notified: set[float] = field(default_factory=set)
 
     def seed(self, entries: list[FeedbackWithReport], *, max_tokens: int) -> None:

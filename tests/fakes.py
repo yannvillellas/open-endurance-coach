@@ -307,7 +307,6 @@ TODAY = date(2024, 2, 1)
 
 
 def near_future(days: int = 30) -> str:
-    # Deterministic: the fixed clock the engine tests inject.
     return (date(2026, 9, 16) + timedelta(days=days)).isoformat()
 
 
@@ -351,7 +350,7 @@ class FakeRunner:
         await callback(self.engine)
 
 
-def decision_of(store: CoachStore, decision_id: int) -> Any:
-    decision = store.get_decision(decision_id)
-    assert decision is not None
-    return decision
+def proposal_of(store: CoachStore, proposal_id: int) -> Any:
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    return proposal

@@ -8,35 +8,31 @@ from pathlib import Path
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 
-from .records import Decision, Draft, DraftStatus, Feedback, FeedbackWithReport
+from .records import Feedback, FeedbackWithReport, Proposal, ProposalStatus
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_activities (
     activity_id TEXT PRIMARY KEY,
     seen_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS drafts (
+CREATE TABLE IF NOT EXISTS proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     focus TEXT NOT NULL,
     user_feedback TEXT,
     context_json TEXT NOT NULL,
-    report_json TEXT NOT NULL
+    report_json TEXT NOT NULL,
+    approved_json TEXT,
+    decided_at TEXT,
+    applied_at TEXT
 );
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    draft_id INTEGER NOT NULL REFERENCES drafts(id),
+    proposal_id INTEGER REFERENCES proposals(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     content TEXT NOT NULL,
     report_json TEXT
-);
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    draft_id INTEGER NOT NULL REFERENCES drafts(id),
-    decided_at TEXT NOT NULL,
-    report_json TEXT NOT NULL,
-    applied_at TEXT
 );
 """
 
@@ -56,29 +52,15 @@ class CoachStore:
         self._restrict_permissions()
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.executescript(_SCHEMA)
-        columns = {
-            row["name"]
-            for row in self._connection.execute("PRAGMA table_info(decisions)").fetchall()
-        }
-        if "applied_at" not in columns:
-            self._connection.execute("ALTER TABLE decisions ADD COLUMN applied_at TEXT")
-        feedback_columns = {
-            row["name"]
-            for row in self._connection.execute("PRAGMA table_info(feedback)").fetchall()
-        }
-        if "report_json" not in feedback_columns:
-            self._connection.execute("ALTER TABLE feedback ADD COLUMN report_json TEXT")
         self._connection.executescript(
-            "DELETE FROM feedback WHERE draft_id IN"
-            " (SELECT id FROM drafts WHERE status = 'rejected');"
-            "DELETE FROM decisions WHERE draft_id IN"
-            " (SELECT id FROM drafts WHERE status = 'rejected');"
-            "DELETE FROM drafts WHERE status = 'rejected';"
+            "DELETE FROM feedback WHERE proposal_id IN"
+            " (SELECT id FROM proposals WHERE status = 'rejected');"
+            "DELETE FROM proposals WHERE status = 'rejected';"
         )
         self._connection.commit()
 
-    def discard_decision(self, decision_id: int) -> None:
-        self._connection.execute("DELETE FROM decisions WHERE id = ?", (decision_id,))
+    def discard_proposal(self, proposal_id: int) -> None:
+        self._connection.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))
         self._connection.commit()
 
     def _restrict_permissions(self) -> None:
@@ -93,14 +75,10 @@ class CoachStore:
         stamp = cutoff.isoformat()
         statements = {
             "feedback": (
-                "DELETE FROM feedback WHERE draft_id IN"
-                " (SELECT id FROM drafts WHERE created_at < ?)"
+                "DELETE FROM feedback WHERE proposal_id IN"
+                " (SELECT id FROM proposals WHERE created_at < ?)"
             ),
-            "decisions": (
-                "DELETE FROM decisions WHERE draft_id IN"
-                " (SELECT id FROM drafts WHERE created_at < ?)"
-            ),
-            "drafts": "DELETE FROM drafts WHERE created_at < ?",
+            "proposals": "DELETE FROM proposals WHERE created_at < ?",
             "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
         }
         counts: dict[str, int] = {}
@@ -151,7 +129,7 @@ class CoachStore:
             seen.update(row["activity_id"] for row in rows)
         return {item for item in ids if item not in seen}
 
-    def save_draft(
+    def save_proposal(
         self,
         *,
         focus: str,
@@ -160,11 +138,11 @@ class CoachStore:
         user_feedback: str | None = None,
     ) -> int:
         cursor = self._connection.execute(
-            "INSERT INTO drafts (created_at, status, focus, user_feedback, context_json,"
+            "INSERT INTO proposals (created_at, status, focus, user_feedback, context_json,"
             " report_json) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 self._clock().isoformat(),
-                DraftStatus.PENDING.value,
+                ProposalStatus.PENDING.value,
                 focus,
                 user_feedback,
                 json.dumps(context.model_dump(mode="json")),
@@ -176,72 +154,89 @@ class CoachStore:
         assert lastrowid is not None
         return lastrowid
 
-    def _draft_from_row(self, row: sqlite3.Row) -> Draft:
-        return Draft(
+    def _proposal_from_row(self, row: sqlite3.Row) -> Proposal:
+        approved_json = row["approved_json"]
+        decided_at = row["decided_at"]
+        applied_at = row["applied_at"]
+        return Proposal(
             id=row["id"],
             created_at=datetime.fromisoformat(row["created_at"]),
-            status=DraftStatus(row["status"]),
+            status=ProposalStatus(row["status"]),
             focus=row["focus"],
             user_feedback=row["user_feedback"],
             context=CoachContext.model_validate(json.loads(row["context_json"])),
             report=DecisionReport.model_validate(json.loads(row["report_json"])),
+            approved_report=(
+                DecisionReport.model_validate(json.loads(approved_json))
+                if approved_json is not None
+                else None
+            ),
+            decided_at=datetime.fromisoformat(decided_at) if decided_at else None,
+            applied_at=datetime.fromisoformat(applied_at) if applied_at else None,
         )
 
-    def get_draft(self, draft_id: int) -> Draft | None:
-        row = self._connection.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-        return self._draft_from_row(row) if row else None
+    def get_proposal(self, proposal_id: int) -> Proposal | None:
+        row = self._connection.execute(
+            "SELECT * FROM proposals WHERE id = ?", (proposal_id,)
+        ).fetchone()
+        return self._proposal_from_row(row) if row else None
 
-    def list_drafts(self, status: DraftStatus | None = None) -> list[Draft]:
+    def list_proposals(self, status: ProposalStatus | None = None) -> list[Proposal]:
         if status is None:
-            rows = self._connection.execute("SELECT * FROM drafts ORDER BY id DESC").fetchall()
+            rows = self._connection.execute("SELECT * FROM proposals ORDER BY id DESC").fetchall()
         else:
             rows = self._connection.execute(
-                "SELECT * FROM drafts WHERE status = ? ORDER BY id DESC", (status.value,)
+                "SELECT * FROM proposals WHERE status = ? ORDER BY id DESC", (status.value,)
             ).fetchall()
-        return [self._draft_from_row(row) for row in rows]
+        return [self._proposal_from_row(row) for row in rows]
 
-    def update_draft_report(
+    def list_approved_proposals(self) -> list[Proposal]:
+        return self.list_proposals(ProposalStatus.APPROVED)
+
+    def update_proposal_report(
         self,
-        draft_id: int,
+        proposal_id: int,
         *,
         report: DecisionReport,
         user_feedback: str | None,
         context: CoachContext | None = None,
     ) -> None:
-        draft = self.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
+        proposal = self.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        if proposal.status != ProposalStatus.PENDING:
             raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts can be updated"
+                f"proposal {proposal_id} is {proposal.status.value};"
+                " only pending proposals can be updated"
             )
         if context is not None:
             self._connection.execute(
-                "UPDATE drafts SET report_json = ?, user_feedback = ?, context_json = ?"
+                "UPDATE proposals SET report_json = ?, user_feedback = ?, context_json = ?"
                 " WHERE id = ?",
                 (
                     json.dumps(report.model_dump(mode="json")),
                     user_feedback,
                     json.dumps(context.model_dump(mode="json")),
-                    draft_id,
+                    proposal_id,
                 ),
             )
         else:
             self._connection.execute(
-                "UPDATE drafts SET report_json = ?, user_feedback = ? WHERE id = ?",
-                (json.dumps(report.model_dump(mode="json")), user_feedback, draft_id),
+                "UPDATE proposals SET report_json = ?, user_feedback = ? WHERE id = ?",
+                (json.dumps(report.model_dump(mode="json")), user_feedback, proposal_id),
             )
         self._connection.commit()
 
     def add_feedback(
-        self, draft_id: int, content: str, *, report: DecisionReport | None = None
+        self, proposal_id: int, content: str, *, report: DecisionReport | None = None
     ) -> int:
-        if self.get_draft(draft_id) is None:
-            raise ValueError(f"draft not found: {draft_id}")
+        if self.get_proposal(proposal_id) is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
         cursor = self._connection.execute(
-            "INSERT INTO feedback (draft_id, created_at, content, report_json) VALUES (?, ?, ?, ?)",
+            "INSERT INTO feedback (proposal_id, created_at, content, report_json)"
+            " VALUES (?, ?, ?, ?)",
             (
-                draft_id,
+                proposal_id,
                 self._clock().isoformat(),
                 content,
                 json.dumps(report.model_dump(mode="json")) if report is not None else None,
@@ -259,14 +254,14 @@ class CoachStore:
         )
         self._connection.commit()
 
-    def list_feedback(self, draft_id: int) -> list[Feedback]:
+    def list_feedback(self, proposal_id: int) -> list[Feedback]:
         rows = self._connection.execute(
-            "SELECT * FROM feedback WHERE draft_id = ? ORDER BY id", (draft_id,)
+            "SELECT * FROM feedback WHERE proposal_id = ? ORDER BY id", (proposal_id,)
         ).fetchall()
         return [
             Feedback(
                 id=row["id"],
-                draft_id=row["draft_id"],
+                proposal_id=row["proposal_id"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 content=row["content"],
             )
@@ -279,10 +274,10 @@ class CoachStore:
         if limit <= 0:
             return []
         query = (
-            "SELECT f.id AS id, f.draft_id AS draft_id, f.created_at AS created_at,"
+            "SELECT f.id AS id, f.proposal_id AS proposal_id, f.created_at AS created_at,"
             " f.content AS content,"
-            " COALESCE(f.report_json, d.report_json) AS report_json"
-            " FROM feedback f JOIN drafts d ON d.id = f.draft_id"
+            " COALESCE(f.report_json, p.report_json) AS report_json"
+            " FROM feedback f JOIN proposals p ON p.id = f.proposal_id"
         )
         params: tuple[object, ...] = ()
         if max_age_days is not None:
@@ -296,7 +291,7 @@ class CoachStore:
             FeedbackWithReport(
                 feedback=Feedback(
                     id=row["id"],
-                    draft_id=row["draft_id"],
+                    proposal_id=row["proposal_id"],
                     created_at=datetime.fromisoformat(row["created_at"]),
                     content=row["content"],
                 ),
@@ -305,87 +300,63 @@ class CoachStore:
             for row in rows
         ]
 
-    def approve_draft(self, draft_id: int, *, report: DecisionReport | None = None) -> Decision:
-        draft = self.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
+    def approve_proposal(
+        self, proposal_id: int, *, report: DecisionReport | None = None
+    ) -> Proposal:
+        proposal = self.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        if proposal.status != ProposalStatus.PENDING:
             raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts can be approved"
+                f"proposal {proposal_id} is {proposal.status.value};"
+                " only pending proposals can be approved"
             )
-        approved = report if report is not None else draft.report
+        approved = report if report is not None else proposal.report
         decided_at = self._clock()
         with self._connection:
             self._connection.execute(
-                "UPDATE drafts SET status = ? WHERE id = ?",
-                (DraftStatus.APPROVED.value, draft_id),
-            )
-            cursor = self._connection.execute(
-                "INSERT INTO decisions (draft_id, decided_at, report_json) VALUES (?, ?, ?)",
+                "UPDATE proposals SET status = ?, approved_json = ?, decided_at = ? WHERE id = ?",
                 (
-                    draft_id,
-                    decided_at.isoformat(),
+                    ProposalStatus.APPROVED.value,
                     json.dumps(approved.model_dump(mode="json")),
+                    decided_at.isoformat(),
+                    proposal_id,
                 ),
             )
-        lastrowid = cursor.lastrowid
-        assert lastrowid is not None
-        return Decision(
-            id=lastrowid,
-            draft_id=draft_id,
-            decided_at=decided_at,
-            applied_at=None,
-            report=approved,
-        )
+        updated = self.get_proposal(proposal_id)
+        assert updated is not None
+        return updated
 
-    def reject_draft(self, draft_id: int) -> None:
-        draft = self.get_draft(draft_id)
-        if draft is None:
-            raise ValueError(f"draft not found: {draft_id}")
-        if draft.status != DraftStatus.PENDING:
+    def reject_proposal(self, proposal_id: int) -> None:
+        proposal = self.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        if proposal.status != ProposalStatus.PENDING:
             raise ValueError(
-                f"draft {draft_id} is {draft.status.value}; only pending drafts can be rejected"
+                f"proposal {proposal_id} is {proposal.status.value};"
+                " only pending proposals can be rejected"
             )
         self._connection.execute(
-            "UPDATE drafts SET status = ? WHERE id = ?",
-            (DraftStatus.REJECTED.value, draft_id),
+            "UPDATE proposals SET status = ? WHERE id = ?",
+            (ProposalStatus.REJECTED.value, proposal_id),
         )
         self._connection.commit()
 
-    def _decision_from_row(self, row: sqlite3.Row) -> Decision:
-        applied_at = row["applied_at"]
-        return Decision(
-            id=row["id"],
-            draft_id=row["draft_id"],
-            decided_at=datetime.fromisoformat(row["decided_at"]),
-            applied_at=datetime.fromisoformat(applied_at) if applied_at else None,
-            report=DecisionReport.model_validate(json.loads(row["report_json"])),
-        )
-
-    def list_decisions(self) -> list[Decision]:
-        rows = self._connection.execute("SELECT * FROM decisions ORDER BY id").fetchall()
-        return [self._decision_from_row(row) for row in rows]
-
-    def get_decision(self, decision_id: int) -> Decision | None:
-        row = self._connection.execute(
-            "SELECT * FROM decisions WHERE id = ?", (decision_id,)
-        ).fetchone()
-        return self._decision_from_row(row) if row else None
-
-    def list_unapplied_decisions(self) -> list[Decision]:
+    def list_unapplied_proposals(self) -> list[Proposal]:
         rows = self._connection.execute(
-            "SELECT * FROM decisions WHERE applied_at IS NULL ORDER BY id"
+            "SELECT * FROM proposals WHERE status = ? AND applied_at IS NULL ORDER BY id",
+            (ProposalStatus.APPROVED.value,),
         ).fetchall()
-        return [self._decision_from_row(row) for row in rows]
+        return [self._proposal_from_row(row) for row in rows]
 
-    def mark_decision_applied(self, decision_id: int) -> None:
-        decision = self.get_decision(decision_id)
-        if decision is None:
-            raise ValueError(f"decision not found: {decision_id}")
-        if decision.applied_at is not None:
-            raise ValueError(f"decision {decision_id} is already applied")
+    def mark_proposal_applied(self, proposal_id: int) -> None:
+        proposal = self.get_proposal(proposal_id)
+        if proposal is None:
+            raise ValueError(f"proposal not found: {proposal_id}")
+        if proposal.applied_at is not None:
+            raise ValueError(f"proposal {proposal_id} is already applied")
         self._connection.execute(
-            "UPDATE decisions SET applied_at = ? WHERE id = ?",
-            (self._clock().isoformat(), decision_id),
+            "UPDATE proposals SET applied_at = ? WHERE id = ?",
+            (self._clock().isoformat(), proposal_id),
         )
         self._connection.commit()

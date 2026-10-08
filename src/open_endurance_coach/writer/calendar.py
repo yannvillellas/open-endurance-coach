@@ -14,7 +14,7 @@ from open_endurance_coach.schemas.decisions import (
     UpdateRace,
     UpdateWorkout,
 )
-from open_endurance_coach.store.records import Decision
+from open_endurance_coach.store.records import Proposal
 
 from .records import MutationOutcome
 
@@ -179,11 +179,12 @@ class CalendarWriter:
     def __init__(self, client: IntervalsCalendarClient) -> None:
         self._client = client
 
-    async def apply_decision(
-        self, decision: Decision, *, mutations: list[Mutation] | None = None
+    async def apply_proposal(
+        self, proposal: Proposal, *, mutations: list[Mutation] | None = None
     ) -> list[MutationOutcome]:
+        approved = proposal.approved_report or proposal.report
         outcomes = []
-        for mutation in mutations if mutations is not None else decision.report.mutations:
+        for mutation in mutations if mutations is not None else approved.mutations:
             outcomes.append(await self._apply_mutation(mutation))
         return outcomes
 

@@ -18,7 +18,7 @@ from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import DraftStatus
+from open_endurance_coach.store.records import ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN
 from open_endurance_coach.writer.calendar import WriterError
 
@@ -29,11 +29,11 @@ from .fakes import (
     FakeLlmProvider,
     FakeRunner,
     completion,
-    decision_of,
     make_engine,
     make_event,
     make_intervals_client,
     near_future,
+    proposal_of,
     report_json,
 )
 
@@ -84,13 +84,13 @@ def _spy_writes(engine: CoachEngine) -> dict[str, int]:
     original_approve = engine.approve
     original_apply = engine.apply
 
-    def approve(draft_id: int, **kwargs: Any) -> Any:
+    def approve(proposal_id: int, **kwargs: Any) -> Any:
         calls["approve"] += 1
-        return original_approve(draft_id, **kwargs)
+        return original_approve(proposal_id, **kwargs)
 
-    async def apply(decision_id: int | None = None) -> Any:
+    async def apply(proposal_id: int | None = None) -> Any:
         calls["apply_write"] += 1
-        return await original_apply(decision_id)
+        return await original_apply(proposal_id)
 
     engine.approve = approve  # type: ignore[method-assign]
     engine.apply = apply  # type: ignore[method-assign]
@@ -282,7 +282,7 @@ def test_chat_unknown_command_shows_help_without_engine_calls(patched: Any) -> N
     result = runner.invoke(cli_main.app, [], input="/bogus\n")
     assert result.exit_code == 0
     assert "/help" in result.output
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
 
 
 def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
@@ -291,7 +291,7 @@ def test_chat_first_free_text_runs_analysis(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
     assert "Load stable." in result.output
-    assert store.list_drafts() != []
+    assert store.list_proposals() != []
     assert store.is_activity_seen("fx-a") is True
     assert provider.calls[0]["json_mode"] is True
 
@@ -301,16 +301,16 @@ def test_chat_free_text_becomes_the_analysis_focus(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="analyze the week how was my week\n")
     assert result.exit_code == 0
     assert "Load stable." in result.output
-    drafts = store.list_drafts()
-    assert len(drafts) == 1
-    assert drafts[0].focus.splitlines()[0] == "analyze the week how was my week"
+    proposals = store.list_proposals()
+    assert len(proposals) == 1
+    assert proposals[0].focus.splitlines()[0] == "analyze the week how was my week"
 
 
 def test_chat_first_free_text_keeps_the_exact_focus(patched: Any) -> None:
     _, store = patched(FakeLlmProvider([completion(report_json())]))
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert store.list_drafts()[0].focus.splitlines()[0] == "how was my week?"
+    assert store.list_proposals()[0].focus.splitlines()[0] == "how was my week?"
 
 
 def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
@@ -323,7 +323,7 @@ def test_chat_proposal_yes_writes_calendar(patched: Any) -> None:
     assert "Apply this to Intervals.icu" in result.output
     assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
-    assert decision_of(store, 1).applied_at is not None
+    assert proposal_of(store, 1).applied_at is not None
 
 
 def test_chat_proposal_shows_resolved_event_date(patched: Any) -> None:
@@ -350,8 +350,8 @@ def test_chat_proposal_no_writes_nothing(patched: Any) -> None:
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
-    assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.REJECTED
+    assert store.list_approved_proposals() == []
+    assert store.get_proposal(1).status is ProposalStatus.REJECTED
 
 
 def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
@@ -369,9 +369,9 @@ def test_chat_proposal_modification_reruns_and_reasks(patched: Any) -> None:
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert calls == {"approve": 1, "apply_write": 1}
     assert len(calendar.created) == 1
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.user_feedback == "make it easier"
+    proposal = store.get_proposal(1)
+    assert proposal is not None
+    assert proposal.user_feedback == "make it easier"
 
 
 def test_chat_proposal_modification_to_no_mutations_exits_gate(patched: Any) -> None:
@@ -422,8 +422,8 @@ def test_chat_proposal_never_writes_without_literal_yes(patched: Any, answer: st
     result = runner.invoke(cli_main.app, [], input=f"analyze my week\n{answer}\nno\n")
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
-    assert store.list_decisions() == []
-    assert store.get_draft(1).status is DraftStatus.REJECTED
+    assert store.list_approved_proposals() == []
+    assert store.get_proposal(1).status is ProposalStatus.REJECTED
 
 
 def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
@@ -434,7 +434,7 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Sure." in result.output
     assert calls == {"approve": 0, "apply_write": 0}
-    assert store.list_decisions() == []
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
@@ -447,18 +447,18 @@ def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
     )
     assert result.exit_code == 0
     assert '"activity_detail": null' not in provider.calls[0]["messages"][1].content
-    assert len(store.list_drafts()) == 1
+    assert len(store.list_proposals()) == 1
 
 
 def test_chat_seeds_history_from_feedback(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json("Reconsidered."))),
         context=CoachContext(focus="f"),
     )
-    store.add_feedback(draft_id, "legs heavy")
+    store.add_feedback(proposal_id, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     prompt = provider.calls[1]["messages"][1].content
@@ -534,8 +534,8 @@ def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
     assert result.exit_code == 0
     assert "Cancelled. Nothing changed." in result.output
     assert "/provider" in result.output
-    assert store.get_draft(1).status is DraftStatus.PENDING
-    assert store.list_decisions() == []
+    assert store.get_proposal(1).status is ProposalStatus.PENDING
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_eof_during_confirmation_cancels_and_exits(
@@ -547,8 +547,8 @@ def test_chat_eof_during_confirmation_cancels_and_exits(
     assert result.exit_code == 0
     assert "Cancelled. Nothing changed." in result.output
     assert "bye" in result.output
-    assert store.get_draft(1).status is DraftStatus.PENDING
-    assert store.list_decisions() == []
+    assert store.get_proposal(1).status is ProposalStatus.PENDING
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -565,12 +565,12 @@ def test_chat_startup_keeps_history_when_window_is_zero(
 ) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json())),
         context=CoachContext(focus="f"),
     )
-    store.add_feedback(draft_id, "legs heavy")
+    store.add_feedback(proposal_id, "legs heavy")
     monkeypatch.setattr(
         cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 0})
     )
@@ -583,12 +583,12 @@ def test_chat_startup_keeps_history_when_window_is_zero(
 def test_chat_does_not_announce_seeded_memory(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json())),
         context=CoachContext(focus="f"),
     )
-    store.add_feedback(draft_id, "legs heavy")
+    store.add_feedback(proposal_id, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="/exit\n")
     assert result.exit_code == 0
     assert "Remembering" not in result.output
@@ -602,12 +602,12 @@ def test_chat_warns_when_memory_is_filling(
     settings = settings.model_copy(update={"llm_input_budget": budget})
     provider = FakeLlmProvider([completion(report_json())])
     engine, store = make_engine(settings, tmp_path, provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json())),
         context=CoachContext(focus="f"),
     )
-    store.add_feedback(draft_id, "x" * transcript_chars)
+    store.add_feedback(proposal_id, "x" * transcript_chars)
     monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
@@ -624,9 +624,9 @@ def test_chat_forget_wipes_stored_history_and_memory(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Forgot" in result.output
     assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
-    drafts = store.list_drafts()
-    assert len(drafts) == 1
-    assert drafts[0].focus.startswith("third")
+    proposals = store.list_proposals()
+    assert len(proposals) == 1
+    assert proposals[0].focus.startswith("third")
 
 
 def test_chat_session_cap_comes_from_the_budget(
@@ -691,11 +691,11 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
     assert "Explanation." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
-    assert len(store.list_drafts()) == 1
+    assert len(store.list_proposals()) == 1
     assert [row.content for row in store.list_feedback(1)] == ["what would this train exactly?"]
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.user_feedback is None
+    proposal = store.get_proposal(1)
+    assert proposal is not None
+    assert proposal.user_feedback is None
 
 
 def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> None:
@@ -714,10 +714,10 @@ def test_chat_question_plus_change_request_revises_the_plan(patched: Any) -> Non
     assert result.exit_code == 0
     assert len(provider.calls) == 2
     assert "Revised." in result.output
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.user_feedback == "make it 45 minutes, why did you pick 60?"
-    assert draft.status is DraftStatus.APPROVED
+    proposal = store.get_proposal(1)
+    assert proposal is not None
+    assert proposal.user_feedback == "make it 45 minutes, why did you pick 60?"
+    assert proposal.status is ProposalStatus.APPROVED
 
 
 def test_chat_proposal_question_answer_hints_how_to_revise(patched: Any) -> None:
@@ -752,7 +752,7 @@ def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> No
     assert "Tempo Session" in user_message
 
 
-def test_chat_proposal_modification_reshows_report_without_draft_line(patched: Any) -> None:
+def test_chat_proposal_modification_reshows_report_without_proposal_line(patched: Any) -> None:
     provider = FakeLlmProvider(
         [
             completion(report_json(mutations=[CREATE_MUTATION])),
@@ -765,7 +765,7 @@ def test_chat_proposal_modification_reshows_report_without_draft_line(patched: A
     )
     assert result.exit_code == 0
     assert "Revised plan." in result.output
-    assert "Draft #" not in result.output
+    assert "Proposal #" not in result.output
     assert "Review it" not in result.output
 
 
@@ -793,8 +793,8 @@ def test_chat_exit_at_gate_leaves_without_llm(patched: Any) -> None:
     assert result.exit_code == 0
     assert "bye" in result.output
     assert len(provider.calls) == 1
-    assert store.get_draft(1).status is DraftStatus.PENDING
-    assert store.list_decisions() == []
+    assert store.get_proposal(1).status is ProposalStatus.PENDING
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_help_explains_confirmation_replies(patched: Any) -> None:
@@ -814,7 +814,7 @@ def test_chat_proposal_question_context_is_trimmed_to_the_budget(
 
     provider = FakeLlmProvider([completion(report_json("Explanation."))])
     engine, store = patched(provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="tight",
         report=DecisionReport.model_validate(json.loads(report_json(mutations=[CREATE_MUTATION]))),
         context=CoachContext(focus="tight", max_tokens=150),
@@ -823,7 +823,7 @@ def test_chat_proposal_question_context_is_trimmed_to_the_budget(
     state = ChatState(
         plan=PlanSnapshot(
             plan_text="Apply this to Intervals.icu:\nProposed changes:\n  - create Tempo Session",
-            draft_id=draft_id,
+            proposal_id=proposal_id,
         )
     )
 
@@ -842,19 +842,19 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider)
     big_report = DecisionReport(summary="x" * 400)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f", report=big_report, context=CoachContext(focus="f", max_tokens=100)
     )
-    state = ChatState(plan=PlanSnapshot(plan_text="plan", draft_id=draft_id))
+    state = ChatState(plan=PlanSnapshot(plan_text="plan", proposal_id=proposal_id))
     session = ChatSession()
     session.context = CoachContext(focus="f", max_tokens=100)
     result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
     assert isinstance(result, ChatState)
     assert result.plan is not None
-    assert [row.content for row in store.list_feedback(draft_id)] == ["make it easier"]
-    draft = store.get_draft(draft_id)
-    assert draft is not None
-    assert draft.context.current_proposal is None
+    assert [row.content for row in store.list_feedback(proposal_id)] == ["make it easier"]
+    proposal = store.get_proposal(proposal_id)
+    assert proposal is not None
+    assert proposal.context.current_proposal is None
 
 
 def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
@@ -862,7 +862,7 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
 
-    async def broken_apply(decision_id: int | None = None) -> Any:
+    async def broken_apply(proposal_id: int | None = None) -> Any:
         raise WriterError("writer exploded")
 
     import asyncio
@@ -876,24 +876,24 @@ def test_chat_apply_failure_after_yes_shows_retry_hint(patched: Any) -> None:
     assert "writer exploded" in result.output
     assert "not applied" in result.output
     assert 'say "retry"' in result.output
-    decision = store.get_decision(1)
-    assert decision is not None
-    assert decision.applied_at is None
+    proposal = store.get_proposal(1)
+    assert proposal is not None
+    assert proposal.applied_at is None
     asyncio.run(noop())
 
 
-def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
+def test_chat_retry_applies_the_recorded_proposal(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
     original = engine.apply
     attempts: list[int] = []
 
-    async def flaky_apply(decision_id: int | None = None) -> Any:
+    async def flaky_apply(proposal_id: int | None = None) -> Any:
         attempts.append(1)
         if len(attempts) == 1:
             raise WriterError("writer exploded")
-        return await original(decision_id)
+        return await original(proposal_id)
 
     engine.apply = flaky_apply
     result = runner.invoke(cli_main.app, [], input="analyze my week\nyes\nretry\n")
@@ -901,7 +901,7 @@ def test_chat_retry_applies_the_recorded_decision(patched: Any) -> None:
     assert 'say "retry"' in result.output
     assert len(attempts) == 2
     assert len(calendar.created) == 1
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_sqlite_error_survives_repl(patched: Any) -> None:
@@ -980,7 +980,7 @@ def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> No
     )
     assert result.exit_code == 0
     assert '"activity_detail": null' not in provider.calls[1]["messages"][1].content
-    assert len(store.list_drafts()) == 2
+    assert len(store.list_proposals()) == 2
 
 
 def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
@@ -991,7 +991,7 @@ def test_chat_discussion_does_not_open_proposal(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="review my last two runs\n/exit\n")
     assert result.exit_code == 0
     assert "Confirm? Reply exactly yes to apply" not in result.output
-    assert "did not read this as a planning request" in result.output
+    assert "did not read this as a planning request" in " ".join(result.output.split())
     assert len(provider.calls) == 1
 
 
@@ -1020,7 +1020,7 @@ def test_chat_analysis_intent_with_mutations_shows_the_refusal(patched: Any) -> 
     patched(provider)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
-    assert "did not read this as a planning request" in result.output
+    assert "did not read this as a planning request" in " ".join(result.output.split())
     assert "Confirm? Reply exactly yes to apply" not in result.output
     assert len(provider.calls) == 1
 
@@ -1100,7 +1100,7 @@ def test_chat_non_plan_report_with_needs_input_shows_only_the_intent_hint(
     patched(provider)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
     assert result.exit_code == 0
-    assert "did not read this as a planning request" in result.output
+    assert "did not read this as a planning request" in " ".join(result.output.split())
     assert "needs answers before proposing calendar changes" not in result.output
 
 
@@ -1160,12 +1160,12 @@ def test_chat_unexpected_error_keeps_the_session(patched: Any) -> None:
 def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json())),
         context=CoachContext(focus="f"),
     )
-    store.add_feedback(draft_id, "legs heavy")
+    store.add_feedback(proposal_id, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="/forget 30\nhow was my week?\n")
     assert result.exit_code == 0
     assert "history older than 30 days" in result.output
@@ -1177,7 +1177,7 @@ def test_chat_startup_reports_pruned_records(
 ) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     engine, _ = patched(provider)
-    monkeypatch.setattr(engine, "prune_history", lambda days=None, **kwargs: {"drafts": 2})
+    monkeypatch.setattr(engine, "prune_history", lambda days=None, **kwargs: {"proposals": 2})
     monkeypatch.setattr(
         cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 180})
     )
@@ -1245,7 +1245,7 @@ def test_chat_revision_to_chat_intent_keeps_the_gate_open(patched: Any) -> None:
     assert "Just advice." in result.output
     assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    assert store.list_decisions() == []
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) -> None:
@@ -1271,7 +1271,7 @@ def test_chat_retry_with_nothing_pending_does_not_write(patched: Any) -> None:
     provider = FakeLlmProvider()
     engine, store = patched(provider, calendar=calendar)
 
-    async def broken_apply(decision_id: int | None = None) -> Any:
+    async def broken_apply(proposal_id: int | None = None) -> Any:
         raise AssertionError("apply must not be called")
 
     engine.apply = broken_apply
@@ -1280,29 +1280,29 @@ def test_chat_retry_with_nothing_pending_does_not_write(patched: Any) -> None:
     assert "Nothing to apply." in result.output
     assert "recorded but never applied" not in result.output
     assert calendar.created == []
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
-def test_chat_startup_offers_an_unapplied_decision_after_restart(patched: Any) -> None:
+def test_chat_startup_offers_an_unapplied_proposal_after_restart(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
     engine, store = patched(provider, calendar=calendar)
     original = engine.apply
 
-    async def broken_apply(decision_id: int | None = None) -> Any:
+    async def broken_apply(proposal_id: int | None = None) -> Any:
         raise WriterError("writer exploded")
 
     engine.apply = broken_apply
     first = runner.invoke(cli_main.app, [], input="analyze my week\nyes\n/exit\n")
     assert first.exit_code == 0
-    assert len(store.list_unapplied_decisions()) == 1
+    assert len(store.list_unapplied_proposals()) == 1
 
     engine.apply = original
     second = runner.invoke(cli_main.app, [], input="retry\n/exit\n")
     assert second.exit_code == 0
     assert "was recorded but never applied" in second.output
     assert len(calendar.created) == 1
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_gate_question_with_needs_input_keeps_the_proposal_pending(patched: Any) -> None:
@@ -1326,9 +1326,9 @@ def test_chat_gate_question_with_needs_input_keeps_the_proposal_pending(patched:
     assert "needs answers before proposing calendar changes" in result.output
     assert "What is your goal time?" in result.output
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    draft = store.get_draft(1)
-    assert draft is not None
-    assert draft.report.summary == "Load stable."
+    proposal = store.get_proposal(1)
+    assert proposal is not None
+    assert proposal.report.summary == "Load stable."
 
 
 def test_chat_yes_after_a_blocked_plan_applies_the_original(patched: Any) -> None:
@@ -1373,43 +1373,43 @@ def test_chat_gate_assume_answers_applies_the_assumption_plan(patched: Any) -> N
     assert [event["name"] for event in calendar.created] == ["Assumed Session"]
 
 
-def test_chat_retry_applies_each_unapplied_decision_in_order(patched: Any) -> None:
+def test_chat_retry_applies_each_unapplied_proposal_in_order(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     _, store = patched(provider, calendar=calendar)
     for index in range(2):
         mutation = dict(CREATE_MUTATION, name=f"Session {index}")
-        draft_id = store.save_draft(
+        proposal_id = store.save_proposal(
             focus=f"f{index}",
             report=DecisionReport.model_validate(json.loads(report_json(mutations=[mutation]))),
             context=CoachContext(focus=f"f{index}"),
         )
-        store.approve_draft(draft_id)
+        store.approve_proposal(proposal_id)
 
     result = runner.invoke(cli_main.app, [], input="retry\nretry\n/exit\n")
     assert result.exit_code == 0
     assert "was recorded but never applied" in result.output
-    assert "Decision #2 is still unapplied" in result.output
+    assert "Proposal #2 is still unapplied" in result.output
     assert len(calendar.created) == 2
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_forget_clears_the_retry_pointer(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     _, store = patched(provider, calendar=calendar)
-    draft_id = store.save_draft(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json(mutations=[CREATE_MUTATION]))),
         context=CoachContext(focus="f"),
     )
-    store.approve_draft(draft_id)
+    store.approve_proposal(proposal_id)
 
     result = runner.invoke(cli_main.app, [], input="/forget\nretry\n/exit\n")
     assert result.exit_code == 0
     assert "Forgot" in result.output
     assert "Nothing to apply." in result.output
-    assert "decision not found" not in result.output
+    assert "proposal not found" not in result.output
     assert calendar.created == []
 
 
@@ -1430,7 +1430,7 @@ def test_chat_race_proposal_yes_writes_the_race(patched: Any) -> None:
     assert result.exit_code == 0
     assert calendar.created[0]["category"] == "RACE_A"
     assert calendar.created[0]["moving_time"] == 4200
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 EASY_MUTATION = {
@@ -1465,9 +1465,11 @@ def test_chat_yes_except_writes_only_the_approved_items(patched: Any) -> None:
     assert calls == {"approve": 1, "apply_write": 1}
     assert [event["name"] for event in calendar.created] == ["Tempo Session"]
     assert "Skipped 1 change you did not approve." in result.output
-    decision = decision_of(store, 1)
-    assert decision.applied_at is not None
-    assert [mutation.name for mutation in decision.report.mutations] == ["Tempo Session"]
+    proposal = proposal_of(store, 1)
+    assert proposal.applied_at is not None
+    approved_report = proposal.approved_report
+    assert approved_report is not None
+    assert [mutation.name for mutation in approved_report.mutations] == ["Tempo Session"]
     assert len(provider.calls) == 1
 
 
@@ -1488,7 +1490,7 @@ def test_chat_yes_with_numbers_approves_a_race_and_skips_a_workout(patched: Any)
     assert result.exit_code == 0
     assert [event["name"] for event in calendar.created] == ["Autumn Trail Race"]
     assert calendar.created[0]["category"] == "RACE_A"
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
 def test_chat_yes_with_an_unknown_item_writes_nothing_and_keeps_the_gate(
@@ -1508,7 +1510,7 @@ def test_chat_yes_with_an_unknown_item_writes_nothing_and_keeps_the_gate(
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 1
     assert store.list_feedback(1) == []
-    assert store.get_draft(1).status is DraftStatus.REJECTED
+    assert store.get_proposal(1).status is ProposalStatus.REJECTED
 
 
 def test_chat_yes_except_after_a_revision_uses_the_revised_items(patched: Any) -> None:
@@ -1553,7 +1555,7 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     assert calendar.created == []
 
 
-def test_chat_startup_discards_a_stale_approved_decision(patched: Any) -> None:
+def test_chat_startup_discards_a_stale_approved_proposal(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     _, store = patched(provider, calendar=calendar)
@@ -1572,18 +1574,18 @@ def test_chat_startup_discards_a_stale_approved_decision(patched: Any) -> None:
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    store.approve_proposal(proposal_id)
 
     result = runner.invoke(cli_main.app, [], input="retry\n/exit\n")
     assert result.exit_code == 0
     assert "was approved with dates that have passed; discarded" in result.output
     assert "was recorded but never applied" not in result.output
     assert "Nothing to apply." in result.output
-    assert store.list_unapplied_decisions() == []
+    assert store.list_unapplied_proposals() == []
 
 
-def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
+def test_retry_apply_discards_a_stale_proposal(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
     engine, store = patched(provider, calendar=calendar)
@@ -1602,20 +1604,20 @@ def test_retry_apply_discards_a_stale_decision(patched: Any) -> None:
             )
         )
     )
-    draft_id = store.save_draft(focus="f", report=report, context=CoachContext(focus="f"))
-    decision = store.approve_draft(draft_id)
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+    proposal = store.approve_proposal(proposal_id)
     session = ChatSession(cap=100)
-    session.pending_decision_id = decision.id
+    session.pending_proposal_id = proposal.id
     engine.today = lambda: today + timedelta(days=2)
 
     asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
 
-    assert session.pending_decision_id is None
-    assert store.list_unapplied_decisions() == []
+    assert session.pending_proposal_id is None
+    assert store.list_unapplied_proposals() == []
     assert calendar.created == []
 
 
-def test_retry_apply_surfaces_the_next_decision_after_discarding_a_stale_one(
+def test_retry_apply_surfaces_the_next_proposal_after_discarding_a_stale_one(
     patched: Any,
 ) -> None:
     calendar = FakeCalendarClient()
@@ -1650,23 +1652,23 @@ def test_retry_apply_surfaces_the_next_decision_after_discarding_a_stale_one(
             )
         )
     )
-    stale_id = store.approve_draft(
-        store.save_draft(focus="a", report=stale_report, context=CoachContext(focus="a"))
+    stale_id = store.approve_proposal(
+        store.save_proposal(focus="a", report=stale_report, context=CoachContext(focus="a"))
     ).id
-    next_id = store.approve_draft(
-        store.save_draft(focus="b", report=next_report, context=CoachContext(focus="b"))
+    next_id = store.approve_proposal(
+        store.save_proposal(focus="b", report=next_report, context=CoachContext(focus="b"))
     ).id
     session = ChatSession(cap=100)
-    session.pending_decision_id = stale_id
+    session.pending_proposal_id = stale_id
     engine.today = lambda: today + timedelta(days=2)
 
     asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
-    assert session.pending_decision_id == next_id
-    assert [row.id for row in store.list_unapplied_decisions()] == [next_id]
+    assert session.pending_proposal_id == next_id
+    assert [row.id for row in store.list_unapplied_proposals()] == [next_id]
 
     asyncio.run(cli_chat._retry_apply(engine, session, "retry"))
-    assert session.pending_decision_id is None
-    assert store.list_unapplied_decisions() == []
+    assert session.pending_proposal_id is None
+    assert store.list_unapplied_proposals() == []
     assert [event["name"] for event in calendar.created] == ["Next Session"]
 
 
@@ -1695,7 +1697,7 @@ def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
     assert result.exit_code == 0
     assert result.output.count("Usage: /forget [days>0]") == 2
     assert "Forgot" not in result.output
-    assert store.list_drafts() == []
+    assert store.list_proposals() == []
 
 
 def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> None:
@@ -1712,7 +1714,7 @@ def test_chat_question_with_chat_intent_does_not_open_a_gate(patched: Any) -> No
     assert result.exit_code == 0
     assert "Answer." in result.output
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
-    assert store.list_decisions() == []
+    assert store.list_approved_proposals() == []
 
 
 def test_chat_render_failure_after_apply_is_not_reported_as_unapplied(

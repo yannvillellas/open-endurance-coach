@@ -263,8 +263,8 @@ def mutations_plan_text(
 
 def apply_plan_text(report: ApplyReport) -> str:
     lines: list[str] = []
-    for applied in report.decisions:
-        lines.append(f"Decision #{applied.decision_id}:")
+    for applied in report.proposals:
+        lines.append(f"Proposal #{applied.proposal_id}:")
         for outcome in applied.outcomes:
             if outcome.event_id is not None:
                 lines.append(
@@ -281,8 +281,8 @@ def apply_plan_text(report: ApplyReport) -> str:
 
 
 def render_apply(report: ApplyReport) -> None:
-    if not report.decisions:
-        console.print("No unapplied decisions.")
+    if not report.proposals:
+        console.print("No unapplied proposals.")
         return
     console.print()
     console.print("[success]Applied:[/success]")

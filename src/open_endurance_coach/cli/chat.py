@@ -41,12 +41,12 @@ from open_endurance_coach.engine.coach import (
     CoachEngine,
     FeedbackOutcome,
     PlaceholderMutationError,
-    StaleDecisionError,
+    StaleProposalError,
     StateDriftError,
 )
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.deep import detect_deep_query
-from open_endurance_coach.store.records import Draft
+from open_endurance_coach.store.records import Proposal
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
 
@@ -111,17 +111,19 @@ def _handle_llm_command(
         print_error(exc)
 
 
-async def _proposal(engine: CoachEngine, draft: Draft) -> tuple[str, tuple[PlanItem, ...]]:
-    event_dates = await engine.resolve_event_dates(draft.context, draft.report.mutations)
+async def _proposal(engine: CoachEngine, proposal: Proposal) -> tuple[str, tuple[PlanItem, ...]]:
+    event_dates = await engine.resolve_event_dates(proposal.context, proposal.report.mutations)
     plan_text = "Apply this to Intervals.icu:\n" + mutations_plan_text(
-        draft.report.mutations, event_dates=event_dates, numbered=True
+        proposal.report.mutations, event_dates=event_dates, numbered=True
     )
-    return plan_text, plan_items(draft.report.mutations, event_dates=event_dates)
+    return plan_text, plan_items(proposal.report.mutations, event_dates=event_dates)
 
 
-async def _open_proposal(engine: CoachEngine, draft: Draft) -> ChatState:
-    plan_text, items = await _proposal(engine, draft)
-    return _enter_confirmation(PlanSnapshot(plan_text=plan_text, draft_id=draft.id, items=items))
+async def _open_proposal(engine: CoachEngine, proposal: Proposal) -> ChatState:
+    plan_text, items = await _proposal(engine, proposal)
+    return _enter_confirmation(
+        PlanSnapshot(plan_text=plan_text, proposal_id=proposal.id, items=items)
+    )
 
 
 def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
@@ -138,13 +140,13 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     else:
         cached = None
     async with thinking():
-        draft = await engine.analyze(
+        proposal = await engine.analyze(
             focus,
             context=cached,
             history=session.history,
             today=today if cached is None else None,
         )
-    report = draft.report
+    report = proposal.report
     if report.needs_input:
         blocking = {question.strip().casefold() for question in report.needs_input}
         remaining = [
@@ -153,21 +155,21 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
         if len(remaining) != len(report.questions):
             report = report.model_copy(update={"questions": remaining})
     render_report(report)
-    session.context = draft.context
-    session.append(focus, assistant_turn(draft.report).content)
-    needs_input = draft.report.needs_input
+    session.context = proposal.context
+    session.append(focus, assistant_turn(proposal.report).content)
+    needs_input = proposal.report.needs_input
     assumed = _assumes_answers(focus)
-    if draft.report.mutations:
-        if draft.report.intent != "plan":
+    if proposal.report.mutations:
+        if proposal.report.intent != "plan":
             console.print(
-                "[meta]The coach drafted calendar changes but did not read this as a"
+                "[meta]The coach proposaled calendar changes but did not read this as a"
                 " planning request; ask him to plan if you want a proposal.[/meta]"
             )
             return None
         if needs_input and not assumed:
             _print_needs_input(needs_input)
             return None
-        return await _open_proposal(engine, draft)
+        return await _open_proposal(engine, proposal)
     if needs_input:
         _print_needs_input(needs_input)
     else:
@@ -187,36 +189,36 @@ async def _read_input() -> str:
     return await _INPUT_SESSION.prompt_async(HTML("<ansigreen><b>you</b></ansigreen>: "))
 
 
-def _print_still_unapplied(decision_id: int) -> None:
+def _print_still_unapplied(proposal_id: int) -> None:
     console.print(
-        f'[warn]Decision #{decision_id} is still unapplied. Say "retry" to apply it.[/warn]'
+        f'[warn]Proposal #{proposal_id} is still unapplied. Say "retry" to apply it.[/warn]'
     )
 
 
 async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> None:
-    if session.pending_decision_id is None:
+    if session.pending_proposal_id is None:
         console.print("Nothing to apply.")
         return
     try:
-        report = await engine.apply(session.pending_decision_id)
-    except (StaleDecisionError, PlaceholderMutationError, StateDriftError) as exc:
-        console.print(f"[warn]Decision #{session.pending_decision_id} discarded: {exc}[/warn]")
-        engine.discard_decision(session.pending_decision_id)
-        remaining = engine.unapplied_decisions()
-        session.pending_decision_id = remaining[0].id if remaining else None
+        report = await engine.apply(session.pending_proposal_id)
+    except (StaleProposalError, PlaceholderMutationError, StateDriftError) as exc:
+        console.print(f"[warn]Proposal #{session.pending_proposal_id} discarded: {exc}[/warn]")
+        engine.discard_proposal(session.pending_proposal_id)
+        remaining = engine.unapplied_proposals()
+        session.pending_proposal_id = remaining[0].id if remaining else None
         if remaining:
             _print_still_unapplied(remaining[0].id)
         return
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return
-    if not report.decisions:
+    if not report.proposals:
         console.print("Nothing to apply.")
         return
     render_apply(report)
     session.append(text, "Applied the recorded calendar changes.")
-    remaining = engine.unapplied_decisions()
-    session.pending_decision_id = remaining[0].id if remaining else None
+    remaining = engine.unapplied_proposals()
+    session.pending_proposal_id = remaining[0].id if remaining else None
     if remaining:
         _print_still_unapplied(remaining[0].id)
 
@@ -235,30 +237,31 @@ async def _handle_text(engine: CoachEngine, session: ChatSession, text: str) -> 
 async def _apply_proposal(
     engine: CoachEngine,
     session: ChatSession,
-    draft_id: int,
+    proposal_id: int,
     keep: tuple[int, ...] | None = None,
 ) -> None:
     try:
-        decision = engine.approve(draft_id, keep=keep)
+        proposal = engine.approve(proposal_id, keep=keep)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
-        session.pending_decision_id = None
+        session.pending_proposal_id = None
         return
     if keep is not None:
-        skipped = len(engine.review(draft_id).report.mutations) - len(decision.report.mutations)
+        approved = proposal.approved_report or proposal.report
+        skipped = len(engine.review(proposal_id).report.mutations) - len(approved.mutations)
         noun = "change" if skipped == 1 else "changes"
         console.print(f"[meta]Skipped {skipped} {noun} you did not approve.[/meta]")
     try:
-        report = await engine.apply(decision.id)
+        report = await engine.apply(proposal.id)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
-        session.pending_decision_id = decision.id
+        session.pending_proposal_id = proposal.id
         console.print(
-            f"[warn]Decision #{decision.id} was recorded but not applied;"
+            f"[warn]Proposal #{proposal.id} was recorded but not applied;"
             ' say "retry" to apply it again.[/warn]'
         )
         return
-    session.pending_decision_id = None
+    session.pending_proposal_id = None
     render_apply(report)
 
 
@@ -272,7 +275,7 @@ async def _handle_proposal(
 ) -> ChatState | ExitChat:
     assert state.plan is not None
     snapshot = state.plan
-    draft_id = snapshot.draft_id
+    proposal_id = snapshot.proposal_id
     if is_exit_command(line):
         console.print("[warn]Cancelled. Nothing changed.[/warn]")
         return ExitChat()
@@ -293,7 +296,7 @@ async def _handle_proposal(
         return state
 
     async def execute(current: CoachEngine, keep: tuple[int, ...] | None) -> None:
-        await _apply_proposal(current, session, draft_id, keep)
+        await _apply_proposal(current, session, proposal_id, keep)
 
     async def feedback(line: str, outcome: FeedbackOutcome) -> bool | None:
         report = outcome.report
@@ -312,8 +315,8 @@ async def _handle_proposal(
         )
         return None
 
-    async def restate(draft: Draft) -> tuple[str, tuple[PlanItem, ...]]:
-        return await _proposal(engine, draft)
+    async def restate(proposal: Proposal) -> tuple[str, tuple[PlanItem, ...]]:
+        return await _proposal(engine, proposal)
 
     try:
         step = await respond(
@@ -350,7 +353,7 @@ async def _run_command(
                 return None
             days = int(args[0])
         removed = engine.prune_history(days)
-        session.pending_decision_id = None
+        session.pending_proposal_id = None
         if days is None:
             session.history = []
             session.context = None
@@ -381,14 +384,15 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
             console.print(
                 f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
             )
-    for stale_id, reason in engine.discard_stale_decisions():
-        console.print(f"[warn]Decision #{stale_id} was approved with {reason}; discarded.[/warn]")
-    unapplied = engine.unapplied_decisions()
+    for stale_id, reason in engine.discard_stale_proposals():
+        console.print(f"[warn]Proposal #{stale_id} was approved with {reason}; discarded.[/warn]")
+    unapplied = engine.unapplied_proposals()
     if unapplied:
         oldest = unapplied[0]
-        session.pending_decision_id = oldest.id
+        session.pending_proposal_id = oldest.id
+        approved_on = oldest.decided_at.date().isoformat() if oldest.decided_at else "unknown"
         console.print(
-            f"[warn]Decision #{oldest.id} (approved {oldest.decided_at.date().isoformat()})"
+            f"[warn]Proposal #{oldest.id} (approved {approved_on})"
             ' was recorded but never applied. Say "retry" to apply it.[/warn]'
         )
     session.seed(
