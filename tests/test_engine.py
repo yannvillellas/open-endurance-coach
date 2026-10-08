@@ -37,7 +37,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import ProposalStatus
+from open_endurance_coach.store.records import MessageRole, ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
 from open_endurance_coach.writer.calendar import CalendarWriter
 
@@ -59,6 +59,10 @@ from .fakes import (
 )
 
 CLOCK = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+
+
+def user_messages(store: CoachStore) -> list[str]:
+    return [item.content for item in store.list_messages() if item.role is MessageRole.USER]
 
 
 def make_engine(
@@ -310,7 +314,10 @@ async def test_submit_feedback_updates_proposal_and_injects_feedback(
     assert outcome.proposal.user_feedback == "Legs heavy, RPE 8"
     assert outcome.proposal.status is ProposalStatus.PENDING
     assert "Legs heavy, RPE 8" in provider.calls[1]["messages"][1].content
-    assert [item.content for item in store.list_feedback(proposal.id)] == ["Legs heavy, RPE 8"]
+    assert user_messages(store) == [
+        "status check",
+        "Legs heavy, RPE 8",
+    ]
 
 
 async def test_submit_feedback_answer_does_not_replace_the_pending_plan(
@@ -325,7 +332,10 @@ async def test_submit_feedback_answer_does_not_replace_the_pending_plan(
     outcome = await engine.submit_feedback(proposal.id, "what about the hike?")
     assert outcome.report.summary == "Answer."
     assert outcome.proposal.report.summary == "Load stable."
-    assert [row.content for row in store.list_feedback(proposal.id)] == ["what about the hike?"]
+    assert user_messages(store) == [
+        "status check",
+        "what about the hike?",
+    ]
     stored = store.get_proposal(proposal.id)
     assert stored is not None
     assert stored.report.summary == "Load stable."
@@ -341,8 +351,9 @@ async def test_recent_feedback_keeps_the_answer_report_for_transient_turns(
     engine = make_engine(settings, store, provider)
     proposal = await engine.analyze("status check", today=TODAY)
     await engine.submit_feedback(proposal.id, "what about the hike?")
-    recent = store.recent_feedback(1)
-    assert recent[0].feedback.content == "what about the hike?"
+    recent = store.recent_messages(1)
+    assert recent[0].role is MessageRole.ASSISTANT
+    assert recent[0].report is not None
     assert recent[0].report.summary == "Answer."
 
 
@@ -520,7 +531,10 @@ async def test_submit_feedback_records_the_message_when_the_llm_fails(
     monkeypatch.setattr(engine, "_run_llm", boom)
     with pytest.raises(LlmError):
         await engine.submit_feedback(proposal.id, "legs heavy")
-    assert [row.content for row in store.list_feedback(proposal.id)] == ["legs heavy"]
+    assert user_messages(store) == [
+        "status check",
+        "legs heavy",
+    ]
 
 
 async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
@@ -617,7 +631,7 @@ async def test_submit_feedback_falls_back_without_current_proposal_on_budget_ove
     provider = FakeLlmProvider([completion(report_json("Revised.", mutations=[CREATE_MUTATION]))])
     engine = make_engine(settings, store, provider)
     updated = await engine.submit_feedback(proposal_id, "make it easier")
-    assert [row.content for row in store.list_feedback(proposal_id)] == ["make it easier"]
+    assert user_messages(store) == ["make it easier"]
     assert updated.proposal.context.current_proposal is None
     assert updated.proposal.context.user_feedback == "make it easier"
     assert updated.report.summary == "Revised."
@@ -831,16 +845,14 @@ async def test_analyze_empty_content_raises_without_writes(
     assert store.list_proposals() == []
 
 
-async def test_recent_history_reads_feedback_from_store(settings: Settings, tmp_path: Path) -> None:
+async def test_recent_history_reads_messages_from_store(settings: Settings, tmp_path: Path) -> None:
     store = CoachStore(tmp_path / "coach.db")
     engine = make_engine(settings, store, FakeLlmProvider())
-    proposal_id = store.save_proposal(
-        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
-    )
-    store.add_feedback(proposal_id, "legs heavy")
+    store.add_message(MessageRole.USER, "legs heavy", report=DecisionReport(summary="ok"))
     rows = engine.recent_history(10)
     assert len(rows) == 1
-    assert rows[0].feedback.content == "legs heavy"
+    assert rows[0].content == "legs heavy"
+    assert rows[0].report is not None
     assert rows[0].report.summary == "ok"
     assert engine.recent_history(0) == []
 
@@ -849,14 +861,11 @@ def test_recent_history_applies_max_age_cutoff(settings: Settings, tmp_path: Pat
     clock = FakeClock(datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC))
     store = CoachStore(tmp_path / "coach.db", clock=clock)
     engine = make_engine(settings, store, FakeLlmProvider())
-    proposal_id = store.save_proposal(
-        focus="f", report=DecisionReport(summary="ok"), context=CoachContext(focus="f")
-    )
-    store.add_feedback(proposal_id, "old")
+    store.add_message(MessageRole.USER, "old")
     clock.now = clock.now + timedelta(days=10)
-    store.add_feedback(proposal_id, "new")
+    store.add_message(MessageRole.USER, "new")
     rows = engine.recent_history(10, max_age_days=5)
-    assert [row.feedback.content for row in rows] == ["new"]
+    assert [row.content for row in rows] == ["new"]
 
 
 async def test_build_context_surfaces_unseen_without_marking(

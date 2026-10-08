@@ -18,7 +18,7 @@ from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import ProposalStatus
+from open_endurance_coach.store.records import MessageRole, ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN
 from open_endurance_coach.writer.calendar import WriterError
 
@@ -39,6 +39,10 @@ from .fakes import (
 
 CLOCK = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
 runner = CliRunner()
+
+
+def user_messages(store: Any) -> list[str]:
+    return [row.content for row in store.list_messages() if row.role is MessageRole.USER]
 
 
 @pytest.fixture
@@ -211,7 +215,7 @@ def test_chat_provider_during_confirmation_switches_without_llm(patched: Any) ->
     assert result.exit_code == 0
     assert "Using fake (" in result.output
     assert len(provider.calls) == 1
-    assert store.list_feedback(1) == []
+    assert user_messages(store) == ["analyze my week"]
 
 
 def test_chat_help_lists_commands(patched: Any) -> None:
@@ -405,7 +409,7 @@ def test_chat_proposal_fuzzy_yes_never_writes(patched: Any) -> None:
     assert result.exit_code == 0
     assert calls == {"approve": 0, "apply_write": 0}
     assert calendar.created == []
-    assert [row.content for row in store.list_feedback(1)] == ["yes please"]
+    assert user_messages(store) == ["analyze my week", "yes please"]
 
 
 @pytest.mark.parametrize("answer", ["y", "sure", "yes!", "YES SIR"])
@@ -450,15 +454,12 @@ def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
     assert len(store.list_proposals()) == 1
 
 
-def test_chat_seeds_history_from_feedback(patched: Any) -> None:
+def test_chat_seeds_history_from_messages(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
-    proposal_id = store.save_proposal(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json("Reconsidered."))),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(proposal_id, "legs heavy")
+    report = DecisionReport.model_validate(json.loads(report_json("Reconsidered.")))
+    store.add_message(MessageRole.USER, "legs heavy")
+    store.add_message(MessageRole.ASSISTANT, "Reconsidered.", report=report)
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
     prompt = provider.calls[1]["messages"][1].content
@@ -565,12 +566,7 @@ def test_chat_startup_keeps_history_when_window_is_zero(
 ) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
-    proposal_id = store.save_proposal(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(proposal_id, "legs heavy")
+    store.add_message(MessageRole.USER, "legs heavy")
     monkeypatch.setattr(
         cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 0})
     )
@@ -583,12 +579,7 @@ def test_chat_startup_keeps_history_when_window_is_zero(
 def test_chat_does_not_announce_seeded_memory(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
-    proposal_id = store.save_proposal(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(proposal_id, "legs heavy")
+    store.add_message(MessageRole.USER, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="/exit\n")
     assert result.exit_code == 0
     assert "Remembering" not in result.output
@@ -602,12 +593,7 @@ def test_chat_warns_when_memory_is_filling(
     settings = settings.model_copy(update={"llm_input_budget": budget})
     provider = FakeLlmProvider([completion(report_json())])
     engine, store = make_engine(settings, tmp_path, provider)
-    proposal_id = store.save_proposal(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(proposal_id, "x" * transcript_chars)
+    store.add_message(MessageRole.USER, "x" * transcript_chars)
     monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n/exit\n")
@@ -692,7 +678,7 @@ def test_chat_proposal_question_line_gets_an_answer_without_replan(
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 2
     assert len(store.list_proposals()) == 1
-    assert [row.content for row in store.list_feedback(1)] == ["what would this train exactly?"]
+    assert user_messages(store) == ["analyze my week", "what would this train exactly?"]
     proposal = store.get_proposal(1)
     assert proposal is not None
     assert proposal.user_feedback is None
@@ -851,7 +837,7 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
     assert isinstance(result, ChatState)
     assert result.plan is not None
-    assert [row.content for row in store.list_feedback(proposal_id)] == ["make it easier"]
+    assert user_messages(store) == ["make it easier"]
     proposal = store.get_proposal(proposal_id)
     assert proposal is not None
     assert proposal.context.current_proposal is None
@@ -927,7 +913,7 @@ def test_chat_help_during_confirmation_skips_llm(patched: Any) -> None:
     assert result.exit_code == 0
     assert "/provider" in result.output
     assert len(provider.calls) == 1
-    assert store.list_feedback(1) == []
+    assert user_messages(store) == ["analyze my week"]
 
 
 def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) -> None:
@@ -937,7 +923,7 @@ def test_chat_forget_during_confirmation_is_refused_without_llm(patched: Any) ->
     assert result.exit_code == 0
     assert "unavailable while a proposal is open" in result.output
     assert len(provider.calls) == 1
-    assert store.list_feedback(1) == []
+    assert user_messages(store) == ["analyze my week"]
 
 
 def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any) -> None:
@@ -955,7 +941,7 @@ def test_chat_question_after_refused_forget_mid_gate_still_answered(patched: Any
     assert "/forget is unavailable while a proposal is open." in result.output
     assert "Explanation." in result.output
     assert len(provider.calls) == 2
-    assert [row.content for row in store.list_feedback(1)] == ["what does this train?"]
+    assert user_messages(store) == ["analyze my week", "what does this train?"]
 
 
 def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> None:
@@ -965,7 +951,7 @@ def test_chat_unknown_command_during_confirmation_skips_llm(patched: Any) -> Non
     assert result.exit_code == 0
     assert "Unknown command." in result.output
     assert len(provider.calls) == 1
-    assert store.list_feedback(1) == []
+    assert user_messages(store) == ["analyze my week"]
 
 
 def test_chat_leading_trend_question_refreshes_deep_analysis(patched: Any) -> None:
@@ -1160,12 +1146,7 @@ def test_chat_unexpected_error_keeps_the_session(patched: Any) -> None:
 def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json()), completion(report_json())])
     _, store = patched(provider)
-    proposal_id = store.save_proposal(
-        focus="f",
-        report=DecisionReport.model_validate(json.loads(report_json())),
-        context=CoachContext(focus="f"),
-    )
-    store.add_feedback(proposal_id, "legs heavy")
+    store.add_message(MessageRole.USER, "legs heavy")
     result = runner.invoke(cli_main.app, [], input="/forget 30\nhow was my week?\n")
     assert result.exit_code == 0
     assert "history older than 30 days" in result.output
@@ -1229,7 +1210,7 @@ def test_chat_revision_with_needs_input_keeps_the_gate_closed(patched: Any) -> N
     result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\n/exit\n")
     assert result.exit_code == 0
     assert "needs answers before proposing calendar changes" in result.output
-    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
+    assert user_messages(store) == ["analyze my week", "make it easier"]
 
 
 def test_chat_revision_to_chat_intent_keeps_the_gate_open(patched: Any) -> None:
@@ -1243,7 +1224,7 @@ def test_chat_revision_to_chat_intent_keeps_the_gate_open(patched: Any) -> None:
     result = runner.invoke(cli_main.app, [], input="analyze my week\nmake it easier\nno\n")
     assert result.exit_code == 0
     assert "Just advice." in result.output
-    assert [row.content for row in store.list_feedback(1)] == ["make it easier"]
+    assert user_messages(store) == ["analyze my week", "make it easier"]
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
     assert store.list_approved_proposals() == []
 
@@ -1509,7 +1490,7 @@ def test_chat_yes_with_an_unknown_item_writes_nothing_and_keeps_the_gate(
     assert "No proposed item matches 3." in result.output
     assert result.output.count("Apply this to Intervals.icu") == 2
     assert len(provider.calls) == 1
-    assert store.list_feedback(1) == []
+    assert user_messages(store) == ["analyze my week"]
     assert store.get_proposal(1).status is ProposalStatus.REJECTED
 
 

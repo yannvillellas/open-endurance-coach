@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
-from open_endurance_coach.chat.history import count_exchanges
+from open_endurance_coach.chat.history import assistant_turn, count_exchanges
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.clients.protocols import IntervalsReadClient
@@ -35,7 +35,8 @@ from open_endurance_coach.schemas.decisions import (
 from open_endurance_coach.schemas.intervals import Event
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
-    FeedbackWithReport,
+    Message,
+    MessageRole,
     Proposal,
     ProposalStatus,
 )
@@ -398,6 +399,10 @@ class CoachEngine:
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
         self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
+        self._store.add_message(MessageRole.USER, focus)
+        self._store.add_message(
+            MessageRole.ASSISTANT, assistant_turn(report).content, report=report
+        )
         proposal = self._store.get_proposal(proposal_id)
         assert proposal is not None
         return proposal
@@ -481,10 +486,8 @@ class CoachEngine:
             cutoff = cutoff - timedelta(days=days)
         return self._store.prune_before(cutoff)
 
-    def recent_history(
-        self, limit: int, *, max_age_days: int | None = None
-    ) -> list[FeedbackWithReport]:
-        return self._store.recent_feedback(limit, max_age_days=max_age_days)
+    def recent_history(self, limit: int, *, max_age_days: int | None = None) -> list[Message]:
+        return self._store.recent_messages(limit, max_age_days=max_age_days)
 
     def _context_around(
         self,
@@ -556,9 +559,12 @@ class CoachEngine:
             user_feedback=None if focus is not None else feedback,
             today=self.today(),
         )
-        feedback_id = self._store.add_feedback(proposal_id, feedback)
+        message_id = self._store.add_message(MessageRole.USER, feedback)
         report = await self._run_llm(context, history=history)
-        self._store.set_feedback_report(feedback_id, report)
+        self._store.set_message_report(message_id, report)
+        self._store.add_message(
+            MessageRole.ASSISTANT, assistant_turn(report).content, report=report
+        )
         if report.intent != "plan" or (report.needs_input and not assume):
             # Conversational turn or a plan still blocked on material questions:
             # keep the pending proposal and only carry the report for display.

@@ -12,6 +12,11 @@ class ProposalStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
 @dataclass(frozen=True)
 class Proposal:
     id: int
@@ -27,14 +32,9 @@ class Proposal:
 
 
 @dataclass(frozen=True)
-class Feedback:
+class Message:
     id: int
-    proposal_id: int
     created_at: datetime
+    role: MessageRole
     content: str
-
-
-@dataclass(frozen=True)
-class FeedbackWithReport:
-    feedback: Feedback
-    report: DecisionReport
+    report: DecisionReport | None = None

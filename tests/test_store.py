@@ -12,7 +12,7 @@ from open_endurance_coach.schemas.decisions import (
     UpdateWorkout,
 )
 from open_endurance_coach.store.db import CoachStore
-from open_endurance_coach.store.records import ProposalStatus
+from open_endurance_coach.store.records import MessageRole, ProposalStatus
 
 NOW = datetime(2024, 2, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -180,22 +180,17 @@ def test_update_proposal_report_non_pending_proposal_raises(tmp_path: Path) -> N
         store.update_proposal_report(proposal_id, report=make_report(), user_feedback=None)
 
 
-def test_add_feedback_records_rows(tmp_path: Path) -> None:
+def test_add_message_records_rows(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    first = store.add_feedback(proposal_id, "RPE was 7")
-    second = store.add_feedback(proposal_id, "Slept poorly")
-    feedback = store.list_feedback(proposal_id)
-    assert [item.id for item in feedback] == [first, second]
-    assert [item.content for item in feedback] == ["RPE was 7", "Slept poorly"]
-    assert all(item.proposal_id == proposal_id for item in feedback)
-    assert all(item.created_at == NOW for item in feedback)
-
-
-def test_add_feedback_missing_proposal_raises(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    with pytest.raises(ValueError, match="not found"):
-        store.add_feedback(404, "RPE was 7")
+    first = store.add_message(MessageRole.USER, "RPE was 7")
+    second = store.add_message(MessageRole.ASSISTANT, "Noted.", report=make_report())
+    messages = store.list_messages()
+    assert [item.id for item in messages] == [first, second]
+    assert [item.content for item in messages] == ["RPE was 7", "Noted."]
+    assert [item.role for item in messages] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert messages[0].report is None
+    assert messages[1].report == make_report()
+    assert all(item.created_at == NOW for item in messages)
 
 
 def test_approve_proposal_creates_proposal_and_flips_status(tmp_path: Path) -> None:
@@ -366,91 +361,69 @@ def test_store_creates_the_fresh_proposals_schema(tmp_path: Path) -> None:
     assert {"approved_json", "decided_at", "applied_at"} <= columns
 
 
-def test_recent_feedback_falls_back_to_the_proposal_report(tmp_path: Path) -> None:
+def test_recent_messages_respects_rows_without_a_report(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "old row")
-    old = store.recent_feedback(1)[0]
-    assert old.feedback.content == "old row"
-    assert old.report.summary == "Load stable."
-    store.add_feedback(proposal_id, "new row", report=DecisionReport(summary="Answer."))
-    new = store.recent_feedback(1)[0]
+    store.add_message(MessageRole.USER, "old row")
+    old = store.recent_messages(1)[0]
+    assert old.content == "old row"
+    assert old.report is None
+    store.add_message(MessageRole.ASSISTANT, "new row", report=DecisionReport(summary="Answer."))
+    new = store.recent_messages(1)[0]
+    assert new.report is not None
     assert new.report.summary == "Answer."
 
 
-def test_recent_feedback_empty_store(tmp_path: Path) -> None:
+def test_recent_messages_empty_store(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    assert store.recent_feedback(10) == []
+    assert store.recent_messages(10) == []
 
 
-def test_recent_feedback_zero_or_negative_limit_returns_empty(tmp_path: Path) -> None:
+def test_recent_messages_zero_or_negative_limit_returns_empty(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "RPE was 7")
-    assert store.recent_feedback(0) == []
-    assert store.recent_feedback(-3) == []
+    store.add_message(MessageRole.USER, "RPE was 7")
+    assert store.recent_messages(0) == []
+    assert store.recent_messages(-3) == []
 
 
-def test_recent_feedback_pairs_rows_with_proposal_report(tmp_path: Path) -> None:
+def test_recent_messages_carry_their_own_report(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "RPE was 7")
-    rows = store.recent_feedback(10)
+    store.add_message(MessageRole.ASSISTANT, "RPE was 7", report=make_report())
+    rows = store.recent_messages(10)
     assert len(rows) == 1
-    assert rows[0].feedback.content == "RPE was 7"
-    assert rows[0].feedback.proposal_id == proposal_id
+    assert rows[0].content == "RPE was 7"
     assert rows[0].report == make_report()
 
 
-def test_recent_feedback_orders_newest_first_across_proposals(tmp_path: Path) -> None:
+def test_recent_messages_orders_newest_first(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    first_proposal = store.save_proposal(
-        focus="first", report=make_report(), context=make_context()
-    )
-    second_proposal = store.save_proposal(
-        focus="second", report=make_report(), context=make_context()
-    )
-    store.add_feedback(first_proposal, "one")
-    store.add_feedback(second_proposal, "two")
-    store.add_feedback(first_proposal, "three")
-    rows = store.recent_feedback(10)
-    assert [row.feedback.content for row in rows] == ["three", "two", "one"]
+    store.add_message(MessageRole.USER, "one")
+    store.add_message(MessageRole.USER, "two")
+    store.add_message(MessageRole.USER, "three")
+    rows = store.recent_messages(10)
+    assert [row.content for row in rows] == ["three", "two", "one"]
 
 
-def test_recent_feedback_limit_caps_the_window(tmp_path: Path) -> None:
+def test_recent_messages_limit_caps_the_window(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
     for index in range(5):
-        store.add_feedback(proposal_id, f"note {index}")
-    rows = store.recent_feedback(2)
-    assert [row.feedback.content for row in rows] == ["note 4", "note 3"]
+        store.add_message(MessageRole.USER, f"note {index}")
+    rows = store.recent_messages(2)
+    assert [row.content for row in rows] == ["note 4", "note 3"]
 
 
-def test_recent_feedback_falls_back_to_the_proposals_current_report(tmp_path: Path) -> None:
-    store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "first answer")
-    replacement = DecisionReport(summary="Revised.")
-    store.update_proposal_report(proposal_id, report=replacement, user_feedback="first answer")
-    rows = store.recent_feedback(10)
-    assert len(rows) == 1
-    assert rows[0].report.summary == "Revised."
-
-
-def test_recent_feedback_cutoff_filters_old_rows(tmp_path: Path) -> None:
+def test_recent_messages_cutoff_filters_old_rows(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 
     clock = FakeClock(NOW)
     store = CoachStore(tmp_path / "coach.db", clock=clock)
-    proposal_id = store.save_proposal(focus="first", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "old row")
+    store.add_message(MessageRole.USER, "old row")
     clock.now = NOW + timedelta(days=10)
-    store.add_feedback(proposal_id, "recent row")
-    recent = store.recent_feedback(10, max_age_days=5)
-    assert [row.feedback.content for row in recent] == ["recent row"]
-    assert all(row.feedback.created_at == NOW + timedelta(days=10) for row in recent)
-    unfiltered = store.recent_feedback(10)
-    assert [row.feedback.content for row in unfiltered] == ["recent row", "old row"]
+    store.add_message(MessageRole.USER, "recent row")
+    recent = store.recent_messages(10, max_age_days=5)
+    assert [row.content for row in recent] == ["recent row"]
+    assert all(row.created_at == NOW + timedelta(days=10) for row in recent)
+    unfiltered = store.recent_messages(10)
+    assert [row.content for row in unfiltered] == ["recent row", "old row"]
 
 
 def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
@@ -459,27 +432,25 @@ def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
     clock = FakeClock(NOW)
     store = CoachStore(tmp_path / "coach.db", clock=clock)
     old_proposal = store.save_proposal(focus="old", report=make_report(), context=make_context())
-    store.add_feedback(old_proposal, "old feedback")
+    store.add_message(MessageRole.USER, "old feedback")
     store.mark_activities_seen(["fx-old"])
     store.approve_proposal(old_proposal)
 
     clock.now = NOW + timedelta(days=200)
-    recent_proposal = store.save_proposal(
-        focus="recent", report=make_report(), context=make_context()
-    )
-    store.add_feedback(recent_proposal, "recent feedback")
+    store.save_proposal(focus="recent", report=make_report(), context=make_context())
+    store.add_message(MessageRole.USER, "recent feedback")
     store.mark_activities_seen(["fx-recent"])
 
     counts = store.prune_before(NOW + timedelta(days=100))
 
-    assert counts == {"feedback": 1, "proposals": 1, "seen_activities": 1}
+    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
     assert [proposal.focus for proposal in store.list_proposals()] == ["recent"]
-    assert [row.feedback.content for row in store.recent_feedback(10)] == ["recent feedback"]
+    assert [row.content for row in store.recent_messages(10)] == ["recent feedback"]
     assert store.list_approved_proposals() == []
     assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
 
 
-def test_prune_before_deletes_dependents_created_after_the_cutoff(tmp_path: Path) -> None:
+def test_prune_before_keeps_messages_newer_than_the_cutoff(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 
     clock = FakeClock(NOW)
@@ -487,14 +458,14 @@ def test_prune_before_deletes_dependents_created_after_the_cutoff(tmp_path: Path
     proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
 
     clock.now = NOW + timedelta(days=200)
-    store.add_feedback(proposal_id, "late feedback")
+    store.add_message(MessageRole.USER, "late feedback")
     store.approve_proposal(proposal_id)
 
     counts = store.prune_before(NOW + timedelta(days=100))
 
-    assert counts == {"feedback": 1, "proposals": 1, "seen_activities": 0}
+    assert counts == {"messages": 0, "proposals": 1, "seen_activities": 0}
+    assert [row.content for row in store.list_messages()] == ["late feedback"]
     assert store.list_proposals() == []
-    assert store.list_feedback(proposal_id) == []
     assert store.list_approved_proposals() == []
 
 
@@ -502,7 +473,7 @@ def test_rejected_legacy_proposals_are_dropped_on_open(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     store = CoachStore(path)
     proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
-    store.add_feedback(proposal_id, "rejected feedback")
+    store.add_message(MessageRole.USER, "rejected feedback")
     store._connection.execute(
         "UPDATE proposals SET status = 'rejected' WHERE id = ?", (proposal_id,)
     )
@@ -511,7 +482,7 @@ def test_rejected_legacy_proposals_are_dropped_on_open(tmp_path: Path) -> None:
 
     reopened = CoachStore(path)
     assert reopened.list_proposals() == []
-    assert reopened.list_feedback(proposal_id) == []
+    assert [row.content for row in reopened.list_messages()] == ["rejected feedback"]
     reopened.close()
 
 

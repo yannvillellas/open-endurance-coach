@@ -8,7 +8,7 @@ from pathlib import Path
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 
-from .records import Feedback, FeedbackWithReport, Proposal, ProposalStatus
+from .records import Message, MessageRole, Proposal, ProposalStatus
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_activities (
@@ -27,10 +27,10 @@ CREATE TABLE IF NOT EXISTS proposals (
     decided_at TEXT,
     applied_at TEXT
 );
-CREATE TABLE IF NOT EXISTS feedback (
+CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    proposal_id INTEGER REFERENCES proposals(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
+    role TEXT NOT NULL,
     content TEXT NOT NULL,
     report_json TEXT
 );
@@ -52,11 +52,7 @@ class CoachStore:
         self._restrict_permissions()
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.executescript(_SCHEMA)
-        self._connection.executescript(
-            "DELETE FROM feedback WHERE proposal_id IN"
-            " (SELECT id FROM proposals WHERE status = 'rejected');"
-            "DELETE FROM proposals WHERE status = 'rejected';"
-        )
+        self._connection.executescript("DELETE FROM proposals WHERE status = 'rejected';")
         self._connection.commit()
 
     def discard_proposal(self, proposal_id: int) -> None:
@@ -74,10 +70,7 @@ class CoachStore:
     def prune_before(self, cutoff: datetime) -> dict[str, int]:
         stamp = cutoff.isoformat()
         statements = {
-            "feedback": (
-                "DELETE FROM feedback WHERE proposal_id IN"
-                " (SELECT id FROM proposals WHERE created_at < ?)"
-            ),
+            "messages": "DELETE FROM messages WHERE created_at < ?",
             "proposals": "DELETE FROM proposals WHERE created_at < ?",
             "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
         }
@@ -227,17 +220,18 @@ class CoachStore:
             )
         self._connection.commit()
 
-    def add_feedback(
-        self, proposal_id: int, content: str, *, report: DecisionReport | None = None
+    def add_message(
+        self,
+        role: MessageRole,
+        content: str,
+        *,
+        report: DecisionReport | None = None,
     ) -> int:
-        if self.get_proposal(proposal_id) is None:
-            raise ValueError(f"proposal not found: {proposal_id}")
         cursor = self._connection.execute(
-            "INSERT INTO feedback (proposal_id, created_at, content, report_json)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO messages (created_at, role, content, report_json) VALUES (?, ?, ?, ?)",
             (
-                proposal_id,
                 self._clock().isoformat(),
+                role.value,
                 content,
                 json.dumps(report.model_dump(mode="json")) if report is not None else None,
             ),
@@ -247,58 +241,44 @@ class CoachStore:
         assert lastrowid is not None
         return lastrowid
 
-    def set_feedback_report(self, feedback_id: int, report: DecisionReport) -> None:
+    def set_message_report(self, message_id: int, report: DecisionReport) -> None:
         self._connection.execute(
-            "UPDATE feedback SET report_json = ? WHERE id = ?",
-            (json.dumps(report.model_dump(mode="json")), feedback_id),
+            "UPDATE messages SET report_json = ? WHERE id = ?",
+            (json.dumps(report.model_dump(mode="json")), message_id),
         )
         self._connection.commit()
 
-    def list_feedback(self, proposal_id: int) -> list[Feedback]:
-        rows = self._connection.execute(
-            "SELECT * FROM feedback WHERE proposal_id = ? ORDER BY id", (proposal_id,)
-        ).fetchall()
-        return [
-            Feedback(
-                id=row["id"],
-                proposal_id=row["proposal_id"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                content=row["content"],
-            )
-            for row in rows
-        ]
+    def _message_from_row(self, row: sqlite3.Row) -> Message:
+        report_json = row["report_json"]
+        return Message(
+            id=row["id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            role=MessageRole(row["role"]),
+            content=row["content"],
+            report=(
+                DecisionReport.model_validate(json.loads(report_json))
+                if report_json is not None
+                else None
+            ),
+        )
 
-    def recent_feedback(
-        self, limit: int, *, max_age_days: int | None = None
-    ) -> list[FeedbackWithReport]:
+    def list_messages(self) -> list[Message]:
+        rows = self._connection.execute("SELECT * FROM messages ORDER BY id").fetchall()
+        return [self._message_from_row(row) for row in rows]
+
+    def recent_messages(self, limit: int, *, max_age_days: int | None = None) -> list[Message]:
         if limit <= 0:
             return []
-        query = (
-            "SELECT f.id AS id, f.proposal_id AS proposal_id, f.created_at AS created_at,"
-            " f.content AS content,"
-            " COALESCE(f.report_json, p.report_json) AS report_json"
-            " FROM feedback f JOIN proposals p ON p.id = f.proposal_id"
-        )
+        query = "SELECT * FROM messages"
         params: tuple[object, ...] = ()
         if max_age_days is not None:
             cutoff = (self._clock() - timedelta(days=max_age_days)).isoformat()
-            query += " WHERE f.created_at >= ?"
+            query += " WHERE created_at >= ?"
             params += (cutoff,)
-        query += " ORDER BY f.id DESC LIMIT ?"
+        query += " ORDER BY id DESC LIMIT ?"
         params += (limit,)
         rows = self._connection.execute(query, params).fetchall()
-        return [
-            FeedbackWithReport(
-                feedback=Feedback(
-                    id=row["id"],
-                    proposal_id=row["proposal_id"],
-                    created_at=datetime.fromisoformat(row["created_at"]),
-                    content=row["content"],
-                ),
-                report=DecisionReport.model_validate(json.loads(row["report_json"])),
-            )
-            for row in rows
-        ]
+        return [self._message_from_row(row) for row in rows]
 
     def approve_proposal(
         self, proposal_id: int, *, report: DecisionReport | None = None
