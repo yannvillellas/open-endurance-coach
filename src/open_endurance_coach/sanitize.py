@@ -18,6 +18,11 @@ _REPLACED_CATEGORIES = frozenset({"Cc", "Cs"})
 _REPLACEMENT = "\ufffd"
 
 
+def single_line(text: str) -> str:
+    """Sanitise and collapse whitespace, for logs and error messages."""
+    return " ".join(sanitize_text(text).split())
+
+
 def sanitize_text(text: str) -> str:
     """Replace characters that can corrupt terminals, logs or UTF-8 encoding.
 

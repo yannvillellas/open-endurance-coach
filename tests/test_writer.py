@@ -917,3 +917,36 @@ async def test_read_back_failure_is_logged_without_a_traceback(
     records = [record for record in caplog.records if "read event" in record.getMessage()]
     assert records
     assert records[0].exc_info is None
+
+
+class _HostileReadBackClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = dict(payload)
+        created["id"] = "1\nCRITICAL forged"
+        self.events.append(created)
+        self.created.append(created)
+        return dict(created)
+
+    async def get_event(self, event_id: str) -> Any:
+        return ["not", "a", "dict"]
+
+
+async def test_non_dict_read_back_keeps_the_log_on_one_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    writer = CalendarWriter(_HostileReadBackClient())
+    with caplog.at_level("WARNING"):
+        outcomes = await writer.apply_proposal(
+            make_proposal(
+                CreateWorkout(
+                    action="create",
+                    name="Session",
+                    start_date_local=date(2024, 2, 5),
+                    moving_time=3600,
+                )
+            )
+        )
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages
+    assert all("\n" not in message for message in messages)

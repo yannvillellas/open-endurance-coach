@@ -1,4 +1,4 @@
-from open_endurance_coach.sanitize import sanitize_text
+from open_endurance_coach.sanitize import sanitize_text, single_line
 
 
 def test_replaces_terminal_escapes_and_control_characters() -> None:
@@ -30,3 +30,8 @@ def test_replaces_unpaired_surrogates_and_stays_encodable() -> None:
     cleaned = sanitize_text("ok \ud800 bad \udfff end")
     assert cleaned == "ok \ufffd bad \ufffd end"
     cleaned.encode("utf-8")
+
+
+def test_single_line_collapses_whitespace_and_controls() -> None:
+    assert single_line(" boom\nforged\x1b[2Jline ") == "boom forged\ufffd[2Jline"
+    assert single_line("plain text") == "plain text"

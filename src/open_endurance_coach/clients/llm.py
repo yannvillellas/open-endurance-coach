@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from open_endurance_coach.config import Settings, describe_providers
+from open_endurance_coach.sanitize import single_line
 from open_endurance_coach.tokens import estimate_text_tokens
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,12 @@ class LlmCompletion:
 
 
 def _completion_diagnostics(completion: LlmCompletion) -> str:
-    usage = completion.usage or {}
+    usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+    finish_reason = single_line(str(completion.finish_reason or "unknown"))
+    completion_tokens = single_line(str(usage.get("completion_tokens", "unknown")))
     return (
-        f"finish_reason={completion.finish_reason or 'unknown'},"
-        f" completion_tokens={usage.get('completion_tokens', 'unknown')},"
+        f"finish_reason={finish_reason},"
+        f" completion_tokens={completion_tokens},"
         f" reasoning_content={'present' if completion.reasoning_content else 'absent'}"
     )
 

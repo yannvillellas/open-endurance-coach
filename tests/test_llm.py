@@ -4,7 +4,13 @@ from typing import Any
 import httpx
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient, LlmCompletion, LlmError, LlmMessage
+from open_endurance_coach.clients.llm import (
+    LlmClient,
+    LlmCompletion,
+    LlmError,
+    LlmMessage,
+    _completion_diagnostics,
+)
 from open_endurance_coach.clients.providers import DeepSeekProvider, OvhProvider
 from open_endurance_coach.config import Settings
 from open_endurance_coach.tokens import estimate_text_tokens
@@ -1098,3 +1104,20 @@ async def test_provider_non_json_error_is_a_single_line(settings: Settings) -> N
     message = str(excinfo.value)
     assert "\n" not in message
     assert "\x1b" not in message
+
+
+def test_completion_diagnostics_stay_on_one_line() -> None:
+    completion = LlmCompletion(
+        content="",
+        finish_reason="length\n2026-01-01 CRITICAL forged",
+        usage={"completion_tokens": "1\nforged\x1b[2J"},
+    )
+    text = _completion_diagnostics(completion)
+    assert "\n" not in text
+    assert "\x1b" not in text
+    assert "forged" in text
+
+
+def test_completion_diagnostics_tolerate_a_non_mapping_usage() -> None:
+    completion = LlmCompletion(content="", usage=["x"])  # type: ignore[arg-type]
+    assert "completion_tokens=unknown" in _completion_diagnostics(completion)

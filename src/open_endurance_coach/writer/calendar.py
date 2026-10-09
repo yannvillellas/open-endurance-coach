@@ -215,7 +215,7 @@ class CalendarWriter:
             return None
         if not isinstance(stored, dict):
             logger.warning(
-                "event %s read back as %s; drift not checked", event_id, type(stored).__name__
+                "event %r read back as %s; drift not checked", event_id, type(stored).__name__
             )
             return None
         return stored

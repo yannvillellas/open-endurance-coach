@@ -4,6 +4,8 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
+from open_endurance_coach.sanitize import single_line
+
 MAX_RETRY_AFTER_SECONDS = 300.0
 
 
@@ -17,7 +19,7 @@ def error_detail(response: httpx.Response) -> str:
         for key in ("error", "message", "detail"):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
-                return " ".join(value.split())[:120]
+                return single_line(value)[:120]
     return ""
 
 

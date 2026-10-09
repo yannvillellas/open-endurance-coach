@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 
 from open_endurance_coach.config import Settings
-from open_endurance_coach.sanitize import sanitize_text
+from open_endurance_coach.sanitize import single_line
 
 from .http import error_detail, parse_retry_after
 from .llm import LlmCompletion, LlmError, LlmMessage, LlmProvider
@@ -112,7 +112,7 @@ class _OpenAiCompatibleProvider:
         try:
             data = response.json()
         except ValueError as exc:
-            detail = " ".join(sanitize_text(response.text).split())[:200]
+            detail = single_line(response.text)[:200]
             raise LlmError(f"{self._error_label} returned non-JSON response: {detail}") from exc
         try:
             first = data["choices"][0]
