@@ -137,7 +137,7 @@ async def fetch_training_rollup(client: IntervalsReadClient, current: date) -> l
     try:
         return training_rollup(rows, today=current)
     except ValueError as exc:
-        logger.warning("dropping the training rollup: %s", exc)
+        logger.warning("dropping the training rollup: %r", exc)
         return []
 
 

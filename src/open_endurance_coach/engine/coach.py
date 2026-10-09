@@ -376,12 +376,12 @@ class CoachEngine:
             except (IntervalsApiError, ValueError) as exc:
                 # Expected: the API refused the id, or the payload did not validate
                 # (pydantic's ValidationError is a ValueError). Leave it undated.
-                logger.warning("could not resolve the date of event %s: %s", event_id, exc)
+                logger.warning("could not resolve the date of event %r: %r", event_id, exc)
                 continue
             except Exception:
                 # A genuine defect must not stay invisible: log the traceback and
                 # keep the proposal renderable rather than dropping it.
-                logger.exception("unexpected error resolving the date of event %s", event_id)
+                logger.exception("unexpected error resolving the date of event %r", event_id)
                 continue
             if event.id is not None:
                 dates[str(event.id)] = event.start_date_local.date()
@@ -660,6 +660,8 @@ class CoachEngine:
             proposal = self._store.get_proposal(proposal_id)
             if proposal is None:
                 raise ValueError(f"proposal not found: {proposal_id}")
+            if proposal.status is not ProposalStatus.UNAPPLIED:
+                raise ValueError(f"proposal not approved: {proposal_id}")
             proposals = [proposal]
         else:
             proposals = self._store.list_unapplied_proposals()

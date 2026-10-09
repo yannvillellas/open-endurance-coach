@@ -187,7 +187,7 @@ async def test_resolve_event_dates_logs_expected_lookup_failure(
             CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
         )
     assert dates == {}
-    assert "could not resolve the date of event 999" in caplog.text
+    assert "could not resolve the date of event '999'" in caplog.text
 
 
 async def test_resolve_event_dates_logs_unexpected_lookup_failure(
@@ -210,7 +210,7 @@ async def test_resolve_event_dates_logs_unexpected_lookup_failure(
             CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
         )
     assert dates == {}
-    assert "unexpected error resolving the date of event 999" in caplog.text
+    assert "unexpected error resolving the date of event '999'" in caplog.text
 
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
@@ -734,6 +734,18 @@ async def test_approve_accepts_the_displayed_plan_when_unchanged(
     proposal = await engine.analyze("status check")
     approved = engine.approve(proposal.id, expect=mutations_fingerprint(proposal.report))
     assert approved.status is ProposalStatus.UNAPPLIED
+
+
+async def test_apply_refuses_a_pending_proposal(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    proposal = await engine.analyze("status check")
+    assert proposal.status is ProposalStatus.PENDING
+    with pytest.raises(ValueError, match="not approved"):
+        await engine.apply(proposal.id)
+    assert calendar.created == []
 
 
 async def test_approve_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:

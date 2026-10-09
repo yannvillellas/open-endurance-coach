@@ -126,6 +126,8 @@ def build_within_budget(
                 key=lambda candidate: ctx.recent_activities[candidate].start_date_local,
             )
             ctx.recent_activities.pop(index)
+        elif ctx.sport_settings:
+            ctx.sport_settings.pop()
         else:
             raise InternalError(f"cannot fit the context data in token budget: {max_tokens}")
     return CoachContext.model_validate(ctx.model_dump(mode="json"))

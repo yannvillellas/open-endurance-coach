@@ -61,7 +61,7 @@ def _warn_on_token_estimate_drift(messages: list[LlmMessage], completion: LlmCom
     drift = abs(estimated - prompt_tokens) / prompt_tokens
     if drift > TOKEN_ESTIMATE_DRIFT_THRESHOLD:
         logger.warning(
-            "token estimate drift: estimated=%d actual=%d (%.0f%%) model=%s",
+            "token estimate drift: estimated=%d actual=%d (%.0f%%) model=%r",
             estimated,
             prompt_tokens,
             drift * 100,
@@ -157,7 +157,7 @@ class LlmClient:
         )
         cached = (completion.usage or {}).get("prompt_cache_hit_tokens")
         if cached is not None:
-            logger.debug("prompt cache hit tokens: %s", cached)
+            logger.debug("prompt cache hit tokens: %r", cached)
         _warn_on_token_estimate_drift(messages, completion)
         return completion
 

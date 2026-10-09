@@ -15,7 +15,13 @@ from open_endurance_coach.extractors.deep import (
 )
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Event, Wellness
+from open_endurance_coach.schemas.intervals import (
+    Activity,
+    ActivitySplit,
+    Event,
+    SportSettings,
+    Wellness,
+)
 
 from .fakes import (
     TODAY,
@@ -442,6 +448,30 @@ async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
     with pytest.raises(InternalError, match="token budget"):
         await extractor.extract("status check", today=TODAY, max_tokens=1)
+
+
+def test_budget_evicts_sport_settings_before_failing() -> None:
+    huge = SportSettings.model_validate({"id": 1, "types": ["X" * 100_000], "ftp": 250.0})
+    context = build_within_budget(
+        "status check",
+        [],
+        [],
+        [],
+        [huge],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=500,
+        today=TODAY,
+    )
+    assert context.sport_settings == []
+
+
+def test_split_coverage_warning_stays_on_one_line(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        _warn_on_split_coverage("a1\nFORGED", 1000.0, [])
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages
+    assert all("\n" not in message for message in messages)
 
 
 @pytest.mark.parametrize(

@@ -29,11 +29,11 @@ EventId = Annotated[int | str, AfterValidator(_validate_event_id)]
 
 def _validate_name(value: str) -> str:
     """Mutation names are single-line printable text: displayed as they are written."""
+    if "\n" in value or "\t" in value or sanitize_text(value) != value:
+        raise ValueError("name must be a single line without control characters")
     name = value.strip()
     if not name:
         raise ValueError("name must not be blank")
-    if "\n" in name or "\t" in name or sanitize_text(name) != name:
-        raise ValueError("name must be a single line without control characters")
     return name
 
 

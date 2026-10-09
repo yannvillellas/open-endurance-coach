@@ -211,7 +211,7 @@ class CalendarWriter:
         try:
             stored: Any = await self._client.get_event(str(event_id))
         except (IntervalsApiError, ValueError) as exc:
-            logger.warning("could not read event %s back; drift not checked: %r", event_id, exc)
+            logger.warning("could not read event %r back; drift not checked: %r", event_id, exc)
             return None
         if not isinstance(stored, dict):
             logger.warning(
