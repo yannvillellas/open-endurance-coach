@@ -31,6 +31,7 @@ from open_endurance_coach.schemas.decisions import (
     Mutation,
     UpdateRace,
     UpdateWorkout,
+    mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Event
 from open_endurance_coach.store.db import CoachStore
@@ -93,6 +94,10 @@ class PlaceholderMutationError(ValueError):
 
 class StateDriftError(ValueError):
     """Some of the proposal's mutations are no longer valid."""
+
+
+class ProposalChangedError(ValueError):
+    """The proposal changed after the plan was displayed for approval."""
 
 
 def _is_stale(mutation: Any, *, today: date) -> bool:
@@ -604,11 +609,26 @@ class CoachEngine:
             discarded.append((proposal.id, reason))
         return discarded
 
-    def approve(self, proposal_id: int, *, keep: Sequence[int] | None = None) -> Proposal:
-        """Approve a pending proposal; ``keep`` limits the proposal to those mutation indices."""
+    def approve(
+        self,
+        proposal_id: int,
+        *,
+        keep: Sequence[int] | None = None,
+        expect: str | None = None,
+    ) -> Proposal:
+        """Approve a pending proposal; ``keep`` limits the proposal to those mutation indices.
+
+        ``expect`` is the fingerprint of the plan that was displayed; the approval is
+        refused when the stored report no longer matches it.
+        """
         proposal = self._store.get_proposal(proposal_id)
         if proposal is None:
             raise ValueError(f"proposal not found: {proposal_id}")
+        if expect is not None and mutations_fingerprint(proposal.report) != expect:
+            raise ProposalChangedError(
+                f"proposal {proposal_id} changed since it was displayed;"
+                " nothing was written, review the updated plan"
+            )
         report = proposal.report
         if keep is not None:
             report = report.model_copy(

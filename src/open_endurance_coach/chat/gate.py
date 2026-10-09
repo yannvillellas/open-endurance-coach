@@ -29,6 +29,7 @@ class PlanSnapshot:
     plan_text: str
     proposal_id: int
     items: tuple[PlanItem, ...] = ()
+    fingerprint: str = ""
 
 
 @dataclass(frozen=True)

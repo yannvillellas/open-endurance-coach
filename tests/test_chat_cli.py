@@ -1934,3 +1934,33 @@ def test_chat_forget_all_rejects_extra_args(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Usage: /forget" in result.output
     assert [row.content for row in store.list_messages()] == ["hello"]
+
+
+async def test_confirmation_redisplays_when_the_plan_changed(
+    patched: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    proposal = await engine.analyze("plan my week")
+    state = await cli_chat._open_proposal(engine, proposal)
+
+    changed = DecisionReport.model_validate(
+        json.loads(report_json(mutations=[{**CREATE_MUTATION, "name": "Other Session"}]))
+    )
+    store.update_proposal_report(proposal.id, report=changed, user_feedback="easier")
+
+    result = await cli_chat._handle_proposal(engine, state, "yes", ChatSession())
+
+    out = capsys.readouterr().out
+    assert "changed since it was displayed" in out
+    assert calendar.created == []
+    assert isinstance(result, cli_chat.ChatState)
+    assert result.plan is not None
+    assert "Other Session" in result.plan.plan_text
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.PENDING
+
+    await cli_chat._handle_proposal(engine, result, "yes", ChatSession())
+    assert len(calendar.created) == 1

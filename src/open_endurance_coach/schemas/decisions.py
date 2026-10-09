@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from datetime import date
 from typing import Annotated, Literal, Self, get_args
@@ -166,3 +168,10 @@ class DecisionReport(BaseModel):
     questions: list[str] = Field(default_factory=list)
     needs_input: list[str] = Field(default_factory=list)
     mutations: list[Mutation] = Field(default_factory=list)
+
+
+def mutations_fingerprint(report: DecisionReport) -> str:
+    """Stable content hash binding an approval to the plan that was displayed."""
+    mutations = report.model_dump(mode="json")["mutations"]
+    payload = json.dumps(mutations, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

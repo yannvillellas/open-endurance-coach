@@ -14,6 +14,7 @@ from open_endurance_coach.engine.coach import (
     PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
+    ProposalChangedError,
     StaleProposalError,
     StateDriftError,
     _bad_race_number,
@@ -34,6 +35,7 @@ from open_endurance_coach.schemas.decisions import (
     DecisionReport,
     DeleteWorkout,
     UpdateWorkout,
+    mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
 from open_endurance_coach.store.db import CoachStore
@@ -699,6 +701,39 @@ async def test_approve_keeps_only_the_selected_mutations(
     assert stored is not None
     assert stored.status is ProposalStatus.UNAPPLIED
     assert len(stored.report.mutations) == 2
+
+
+async def test_approve_rejects_a_plan_changed_since_display(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    expect = mutations_fingerprint(proposal.report)
+
+    changed = DecisionReport.model_validate(
+        json.loads(report_json(mutations=[{**CREATE_MUTATION, "name": "Other Session"}]))
+    )
+    store.update_proposal_report(proposal.id, report=changed, user_feedback="easier")
+
+    with pytest.raises(ProposalChangedError):
+        engine.approve(proposal.id, expect=expect)
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.PENDING
+    assert store.list_unapplied_proposals() == []
+
+
+async def test_approve_accepts_the_displayed_plan_when_unchanged(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    approved = engine.approve(proposal.id, expect=mutations_fingerprint(proposal.report))
+    assert approved.status is ProposalStatus.UNAPPLIED
 
 
 async def test_approve_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:
