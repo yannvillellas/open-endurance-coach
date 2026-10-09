@@ -60,7 +60,7 @@ async def respond(
     line: str,
     *,
     executor: Executor,
-    restate: Callable[[Proposal], Awaitable[tuple[str, tuple[PlanItem, ...]]]],
+    restate: Callable[[Proposal], Awaitable[tuple[str, tuple[PlanItem, ...], str]]],
     on_feedback: Callable[[str, FeedbackOutcome], Awaitable[bool | None]] | None = None,
     assume_answers: bool = False,
     history: list[LlmMessage] | None = None,
@@ -93,5 +93,5 @@ async def respond(
             render_report(outcome.report)
             if on_feedback is not None and await on_feedback(feedback, outcome):
                 return Done()
-            plan_text, items = await restate(outcome.proposal)
-            return replace(snapshot, plan_text=plan_text, items=items)
+            plan_text, items, fingerprint = await restate(outcome.proposal)
+            return replace(snapshot, plan_text=plan_text, items=items, fingerprint=fingerprint)

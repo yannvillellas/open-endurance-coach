@@ -211,11 +211,11 @@ class CalendarWriter:
         try:
             stored: Any = await self._client.get_event(str(event_id))
         except (IntervalsApiError, ValueError) as exc:
-            logger.warning("could not read event %s back; drift not checked: %s", event_id, exc)
+            logger.warning("could not read event %r back; drift not checked: %r", event_id, exc)
             return None
         if not isinstance(stored, dict):
             logger.warning(
-                "event %s read back as %s; drift not checked", event_id, type(stored).__name__
+                "event %r read back as %s; drift not checked", event_id, type(stored).__name__
             )
             return None
         return stored
@@ -301,7 +301,8 @@ class CalendarWriter:
             mutation.name, mutation.start_date_local
         )
         if existing is not None:
-            if existing.get("category") not in (None, WORKOUT_CATEGORY):
+            category = existing.get("category")
+            if category not in (None, WORKOUT_CATEGORY):
                 raise WriterError(
                     f"refusing to update non-WORKOUT event {existing.get('id')}"
                     f" (category: {existing.get('category')})"
@@ -313,18 +314,24 @@ class CalendarWriter:
                     event_id=existing["id"],
                     name=mutation.name,
                 )
-            await self._client.update_event(str(existing["id"]), payload)
-            return MutationOutcome(
-                action="create",
-                target="updated",
-                event_id=existing["id"],
-                name=mutation.name,
-                drift=await self._drift_after_write(existing["id"], mutation),
+            if category is None:
+                await self._client.update_event(str(existing["id"]), payload)
+                return MutationOutcome(
+                    action="create",
+                    target="updated",
+                    event_id=existing["id"],
+                    name=mutation.name,
+                    drift=await self._drift_after_write(existing["id"], mutation),
+                )
+            raise WriterError(
+                f"refusing to overwrite existing WORKOUT {existing['id']}:"
+                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+                " with different values; ask the coach for an update"
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
-            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            logger.warning("create returned no id for %r; values were not verified", mutation.name)
             return MutationOutcome(
                 action="create",
                 target="created",
@@ -408,18 +415,24 @@ class CalendarWriter:
                     event_id=existing["id"],
                     name=mutation.name,
                 )
-            await self._client.update_event(str(existing["id"]), payload)
-            return MutationOutcome(
-                action="create_race",
-                target="updated",
-                event_id=existing["id"],
-                name=mutation.name,
-                drift=await self._drift_after_write(existing["id"], mutation),
+            if category is None:
+                await self._client.update_event(str(existing["id"]), payload)
+                return MutationOutcome(
+                    action="create_race",
+                    target="updated",
+                    event_id=existing["id"],
+                    name=mutation.name,
+                    drift=await self._drift_after_write(existing["id"], mutation),
+                )
+            raise WriterError(
+                f"refusing to overwrite existing RACE {existing['id']}:"
+                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+                " with different values; ask the coach for an update"
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
-            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            logger.warning("create returned no id for %r; values were not verified", mutation.name)
             return MutationOutcome(
                 action="create_race",
                 target="created",

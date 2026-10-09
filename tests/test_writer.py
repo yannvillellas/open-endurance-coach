@@ -250,25 +250,48 @@ async def test_create_race_posts_race_category_payload() -> None:
     assert outcomes[0].target == "created"
 
 
-async def test_create_race_updates_same_name_and_date_across_race_categories() -> None:
+async def test_create_race_refuses_a_same_name_different_category() -> None:
     client = FakeCalendarClient(
         [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
     )
     writer = CalendarWriter(client)
-    outcomes = await writer.apply_proposal(make_proposal(make_race_create()))
+    with pytest.raises(WriterError, match="already exists"):
+        await writer.apply_proposal(make_proposal(make_race_create()))
     assert client.created == []
-    assert client.updated == [
-        (
-            "10001",
-            {
-                "category": "RACE_A",
-                "name": "Autumn Trail Race",
-                "start_date_local": "2026-09-27T00:00:00",
-            },
+    assert client.updated == []
+
+
+async def test_create_refuses_to_overwrite_a_different_existing_workout() -> None:
+    existing = make_event(10001, "2024-02-05", name="Tempo Session")
+    existing["moving_time"] = 1800
+    client = FakeCalendarClient([existing])
+    writer = CalendarWriter(client)
+    with pytest.raises(WriterError, match="already exists"):
+        await writer.apply_proposal(
+            make_proposal(
+                CreateWorkout(
+                    action="create",
+                    name="Tempo Session",
+                    start_date_local=date(2024, 2, 5),
+                    moving_time=3600,
+                )
+            )
         )
-    ]
-    assert outcomes[0].target == "updated"
-    assert outcomes[0].event_id == 10001
+    assert client.created == []
+    assert client.updated == []
+    assert client.events[0]["moving_time"] == 1800
+
+
+async def test_create_race_refuses_to_overwrite_a_different_existing_race() -> None:
+    existing = make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_B")
+    existing["moving_time"] = 1800
+    client = FakeCalendarClient([existing])
+    writer = CalendarWriter(client)
+    with pytest.raises(WriterError, match="already exists"):
+        await writer.apply_proposal(make_proposal(make_race_create(moving_time=3600)))
+    assert client.created == []
+    assert client.updated == []
+    assert client.events[0]["moving_time"] == 1800
 
 
 async def test_create_race_refuses_a_same_name_workout_event_with_a_compliant_server() -> None:
@@ -338,9 +361,7 @@ async def test_delete_race_missing_event_is_skipped() -> None:
 
 
 async def test_mixed_workout_and_race_proposal_applies_in_order() -> None:
-    client = FakeCalendarClient(
-        [make_event(10001, "2026-09-27", name="Autumn Trail Race", category="RACE_B")]
-    )
+    client = FakeCalendarClient()
     writer = CalendarWriter(client)
     proposal = make_proposal(
         CreateWorkout(action="create", name="Taper Opener", start_date_local=date(2026, 9, 22)),
@@ -348,17 +369,8 @@ async def test_mixed_workout_and_race_proposal_applies_in_order() -> None:
     )
     outcomes = await writer.apply_proposal(proposal)
     assert [outcome.action for outcome in outcomes] == ["create", "create_race"]
-    assert len(client.created) == 1
-    assert client.updated == [
-        (
-            "10001",
-            {
-                "category": "RACE_A",
-                "name": "Autumn Trail Race",
-                "start_date_local": "2026-09-27T00:00:00",
-            },
-        )
-    ]
+    assert [event["name"] for event in client.created] == ["Taper Opener", "Autumn Trail Race"]
+    assert client.updated == []
 
 
 class _LeakyCategoryClient(FakeCalendarClient):
@@ -905,3 +917,36 @@ async def test_read_back_failure_is_logged_without_a_traceback(
     records = [record for record in caplog.records if "read event" in record.getMessage()]
     assert records
     assert records[0].exc_info is None
+
+
+class _HostileReadBackClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = dict(payload)
+        created["id"] = "1\nCRITICAL forged"
+        self.events.append(created)
+        self.created.append(created)
+        return dict(created)
+
+    async def get_event(self, event_id: str) -> Any:
+        return ["not", "a", "dict"]
+
+
+async def test_non_dict_read_back_keeps_the_log_on_one_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    writer = CalendarWriter(_HostileReadBackClient())
+    with caplog.at_level("WARNING"):
+        outcomes = await writer.apply_proposal(
+            make_proposal(
+                CreateWorkout(
+                    action="create",
+                    name="Session",
+                    start_date_local=date(2024, 2, 5),
+                    moving_time=3600,
+                )
+            )
+        )
+    assert outcomes[0].drift == ["read-back failed; planned values were not verified"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages
+    assert all("\n" not in message for message in messages)

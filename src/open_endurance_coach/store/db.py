@@ -337,15 +337,19 @@ class CoachStore:
         approved = report if report is not None else proposal.report
         decided_at = self._clock()
         with self._connection:
-            self._connection.execute(
-                "UPDATE proposals SET status = ?, approved_json = ?, decided_at = ? WHERE id = ?",
+            cursor = self._connection.execute(
+                "UPDATE proposals SET status = ?, approved_json = ?, decided_at = ?"
+                " WHERE id = ? AND status = ?",
                 (
                     ProposalStatus.UNAPPLIED.value,
                     json.dumps(approved.model_dump(mode="json")),
                     decided_at.isoformat(),
                     proposal_id,
+                    ProposalStatus.PENDING.value,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise ValueError(f"proposal {proposal_id} is no longer pending")
         updated = self.get_proposal(proposal_id)
         assert updated is not None
         return updated

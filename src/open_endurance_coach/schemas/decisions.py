@@ -1,8 +1,12 @@
+import hashlib
+import json
 import re
 from datetime import date
 from typing import Annotated, Literal, Self, get_args
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+from open_endurance_coach.sanitize import sanitize_text
 
 _EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -23,14 +27,31 @@ def _validate_event_id(value: int | str) -> int | str:
 EventId = Annotated[int | str, AfterValidator(_validate_event_id)]
 
 
+def _validate_name(value: str) -> str:
+    """Mutation names are single-line printable text: displayed as they are written."""
+    if "\n" in value or "\t" in value or sanitize_text(value) != value:
+        raise ValueError("name must be a single line without control characters")
+    name = value.strip()
+    if not name:
+        raise ValueError("name must not be blank")
+    return name
+
+
+MutationName = Annotated[str, AfterValidator(_validate_name)]
+
+# Free text written to the hub: control characters are replaced, not rejected,
+# so the displayed plan stays exactly what will be written.
+MutationText = Annotated[str, AfterValidator(sanitize_text)]
+
+
 class CreateWorkout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["create"]
-    name: str = Field(min_length=1)
+    name: MutationName
     start_date_local: date
-    description: str | None = None
-    type: str | None = None
+    description: MutationText | None = None
+    type: MutationText | None = None
     moving_time: int | None = None
     distance: float | None = None
     icu_training_load: float | None = None
@@ -41,10 +62,10 @@ class UpdateWorkout(BaseModel):
 
     action: Literal["update"]
     event_id: EventId
-    name: str | None = None
+    name: MutationName | None = None
     start_date_local: date | None = None
-    description: str | None = None
-    type: str | None = None
+    description: MutationText | None = None
+    type: MutationText | None = None
     moving_time: int | None = None
     distance: float | None = None
     icu_training_load: float | None = None
@@ -82,11 +103,11 @@ class CreateRace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["create_race"]
-    name: str = Field(min_length=1)
+    name: MutationName
     start_date_local: date
     category: RaceCategory
-    description: str | None = None
-    type: str | None = None
+    description: MutationText | None = None
+    type: MutationText | None = None
     moving_time: int | None = None
     distance: float | None = None
     icu_training_load: float | None = None
@@ -97,11 +118,11 @@ class UpdateRace(BaseModel):
 
     action: Literal["update_race"]
     event_id: EventId
-    name: str | None = None
+    name: MutationName | None = None
     start_date_local: date | None = None
     category: RaceCategory | None = None
-    description: str | None = None
-    type: str | None = None
+    description: MutationText | None = None
+    type: MutationText | None = None
     moving_time: int | None = None
     distance: float | None = None
     icu_training_load: float | None = None
@@ -147,3 +168,10 @@ class DecisionReport(BaseModel):
     questions: list[str] = Field(default_factory=list)
     needs_input: list[str] = Field(default_factory=list)
     mutations: list[Mutation] = Field(default_factory=list)
+
+
+def mutations_fingerprint(report: DecisionReport) -> str:
+    """Stable content hash binding an approval to the plan that was displayed."""
+    mutations = report.model_dump(mode="json")["mutations"]
+    payload = json.dumps(mutations, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

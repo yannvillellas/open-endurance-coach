@@ -5,11 +5,25 @@ from typing import Any
 import httpx
 
 from open_endurance_coach.config import Settings
+from open_endurance_coach.sanitize import single_line
 
 from .http import error_detail, parse_retry_after
 from .llm import LlmCompletion, LlmError, LlmMessage, LlmProvider
 
 OVH_MIN_429_BACKOFF_SECONDS = 60.0
+
+
+def _text_content(value: Any) -> str:
+    """OpenAI-compatible content is a string; multimodal parts arrive as a list."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            part["text"]
+            for part in value
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return ""
 
 
 class _OpenAiCompatibleProvider:
@@ -98,9 +112,8 @@ class _OpenAiCompatibleProvider:
         try:
             data = response.json()
         except ValueError as exc:
-            raise LlmError(
-                f"{self._error_label} returned non-JSON response: {response.text[:200]}"
-            ) from exc
+            detail = single_line(response.text)[:200]
+            raise LlmError(f"{self._error_label} returned non-JSON response: {detail}") from exc
         try:
             first = data["choices"][0]
             choice = first["message"]
@@ -111,12 +124,15 @@ class _OpenAiCompatibleProvider:
         if not isinstance(choice, dict):
             raise LlmError(f"unexpected {self._error_label} response shape: {str(data)[:200]}")
         finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
+        reasoning = choice.get("reasoning_content")
+        usage = data.get("usage")
+        reported_model = data.get("model")
         return LlmCompletion(
-            content=choice.get("content") or "",
-            reasoning_content=choice.get("reasoning_content"),
-            model=data.get("model", model),
-            usage=data.get("usage") or {},
-            finish_reason=finish_reason,
+            content=_text_content(choice.get("content")),
+            reasoning_content=reasoning if isinstance(reasoning, str) else None,
+            model=reported_model if isinstance(reported_model, str) else model,
+            usage=usage if isinstance(usage, dict) else {},
+            finish_reason=finish_reason if isinstance(finish_reason, str) else None,
         )
 
     async def aclose(self) -> None:

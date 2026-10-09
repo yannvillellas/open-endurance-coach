@@ -9,13 +9,20 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import (
+    MAX_DEEP_LOOKBACK_DAYS,
     DeepHistoricalExtractor,
     _warn_on_split_coverage,
     detect_deep_query,
 )
 from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
-from open_endurance_coach.schemas.intervals import Activity, ActivitySplit, Event, Wellness
+from open_endurance_coach.schemas.intervals import (
+    Activity,
+    ActivitySplit,
+    Event,
+    SportSettings,
+    Wellness,
+)
 
 from .fakes import (
     TODAY,
@@ -442,6 +449,30 @@ async def test_budget_too_small_to_fit_focus_raises(settings: Settings) -> None:
     extractor = StandardExtractor(settings, make_intervals_client())
     with pytest.raises(InternalError, match="token budget"):
         await extractor.extract("status check", today=TODAY, max_tokens=1)
+
+
+def test_budget_evicts_sport_settings_before_failing() -> None:
+    huge = SportSettings.model_validate({"id": 1, "types": ["X" * 100_000], "ftp": 250.0})
+    context = build_within_budget(
+        "status check",
+        [],
+        [],
+        [],
+        [huge],
+        user_feedback=None,
+        activity_detail=None,
+        max_tokens=500,
+        today=TODAY,
+    )
+    assert context.sport_settings == []
+
+
+def test_split_coverage_warning_stays_on_one_line(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        _warn_on_split_coverage("a1\nFORGED", 1000.0, [])
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages
+    assert all("\n" not in message for message in messages)
 
 
 @pytest.mark.parametrize(
@@ -1077,3 +1108,9 @@ def test_bare_relative_year_keeps_the_generic_lookback() -> None:
     query = detect_deep_query("what did I do last year", today=date(2026, 9, 16))
     assert query is not None
     assert query.reference == date(2025, 9, 16)
+
+
+def test_deep_query_clamps_an_absurd_duration() -> None:
+    query = detect_deep_query("trend in heart rate over the last 3000000 weeks", today=TODAY)
+    assert query is not None
+    assert query.lookback_days == MAX_DEEP_LOOKBACK_DAYS

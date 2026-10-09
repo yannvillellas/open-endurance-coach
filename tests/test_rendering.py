@@ -431,6 +431,49 @@ def test_render_report_skips_blank_findings_and_questions(
     assert "Open questions:" not in out
 
 
+def test_render_report_neutralises_terminal_escapes(capsys: pytest.CaptureFixture[str]) -> None:
+    report = DecisionReport.model_validate(
+        json.loads(report_json("Load\x1b[2Jstable.", findings=["HR\x1b[1Aok"]))
+    )
+    render_report(report)
+    out = capsys.readouterr().out
+    assert "\x1b" not in out
+    assert "Load\ufffd[2Jstable." in out
+
+
+def test_mutations_plan_text_neutralises_terminal_escapes() -> None:
+    mutations: list[Mutation] = [
+        CreateWorkout(
+            action="create",
+            name="Recovery Spin",
+            start_date_local=date(2026, 8, 23),
+            description="step A\x1b[2Jstep B",
+        )
+    ]
+    text = mutations_plan_text(mutations)
+    assert "\x1b" not in text
+    assert "step A\ufffd[2Jstep B" in text
+
+
+def test_apply_plan_text_neutralises_terminal_escapes() -> None:
+    report = ApplyReport(
+        proposals=[
+            AppliedProposal(
+                proposal_id=1,
+                outcomes=[MutationOutcome(action="create", target="created", name="Evil\x1b[2J")],
+            )
+        ]
+    )
+    assert "\x1b" not in apply_plan_text(report)
+
+
+def test_print_error_neutralises_terminal_escapes(capsys: pytest.CaptureFixture[str]) -> None:
+    print_error(ValueError("bad\x1b[2Jpayload"))
+    out = capsys.readouterr().out
+    assert "\x1b" not in out
+    assert "bad\ufffd[2Jpayload" in out
+
+
 def test_prompt_plan_does_not_render_llm_markup(capsys: pytest.CaptureFixture[str]) -> None:
     from open_endurance_coach.chat.gate import PlanSnapshot
     from open_endurance_coach.cli.confirmation import prompt_plan

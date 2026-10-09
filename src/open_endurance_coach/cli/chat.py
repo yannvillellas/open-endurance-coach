@@ -41,11 +41,13 @@ from open_endurance_coach.engine.coach import (
     CoachEngine,
     FeedbackOutcome,
     PlaceholderMutationError,
+    ProposalChangedError,
     StaleProposalError,
     StateDriftError,
 )
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.deep import detect_deep_query
+from open_endurance_coach.schemas.decisions import mutations_fingerprint
 from open_endurance_coach.store.records import Proposal
 
 _RETRY_RE = re.compile(r"^\s*retry\s*$", re.IGNORECASE)
@@ -112,18 +114,26 @@ def _handle_llm_command(
         print_error(exc)
 
 
-async def _proposal(engine: CoachEngine, proposal: Proposal) -> tuple[str, tuple[PlanItem, ...]]:
+async def _proposal(
+    engine: CoachEngine, proposal: Proposal
+) -> tuple[str, tuple[PlanItem, ...], str]:
     event_dates = await engine.resolve_event_dates(proposal.context, proposal.report.mutations)
     plan_text = "Apply this to Intervals.icu:\n" + mutations_plan_text(
         proposal.report.mutations, event_dates=event_dates, numbered=True
     )
-    return plan_text, plan_items(proposal.report.mutations, event_dates=event_dates)
+    items = plan_items(proposal.report.mutations, event_dates=event_dates)
+    return plan_text, items, mutations_fingerprint(proposal.report)
 
 
 async def _open_proposal(engine: CoachEngine, proposal: Proposal) -> ChatState:
-    plan_text, items = await _proposal(engine, proposal)
+    plan_text, items, fingerprint = await _proposal(engine, proposal)
     return _enter_confirmation(
-        PlanSnapshot(plan_text=plan_text, proposal_id=proposal.id, items=items)
+        PlanSnapshot(
+            plan_text=plan_text,
+            proposal_id=proposal.id,
+            items=items,
+            fingerprint=fingerprint,
+        )
     )
 
 
@@ -203,7 +213,9 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     try:
         report = await engine.apply(session.pending_proposal_id)
     except (StaleProposalError, PlaceholderMutationError, StateDriftError) as exc:
-        console.print(f"[warn]Proposal #{session.pending_proposal_id} discarded: {exc}[/warn]")
+        console.print(
+            f"[warn]Proposal #{session.pending_proposal_id} discarded: {escape(str(exc))}[/warn]"
+        )
         engine.delete_proposal(session.pending_proposal_id)
         remaining = engine.unapplied_proposals()
         session.pending_proposal_id = remaining[0].id if remaining else None
@@ -240,9 +252,12 @@ async def _apply_proposal(
     session: ChatSession,
     proposal_id: int,
     keep: tuple[int, ...] | None = None,
+    expect: str | None = None,
 ) -> None:
     try:
-        proposal = engine.approve(proposal_id, keep=keep)
+        proposal = engine.approve(proposal_id, keep=keep, expect=expect)
+    except ProposalChangedError:
+        raise
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         session.pending_proposal_id = None
@@ -297,7 +312,7 @@ async def _handle_proposal(
         return state
 
     async def execute(current: CoachEngine, keep: tuple[int, ...] | None) -> None:
-        await _apply_proposal(current, session, proposal_id, keep)
+        await _apply_proposal(current, session, proposal_id, keep, snapshot.fingerprint)
 
     async def feedback(line: str, outcome: FeedbackOutcome) -> bool | None:
         report = outcome.report
@@ -316,7 +331,7 @@ async def _handle_proposal(
         )
         return None
 
-    async def restate(proposal: Proposal) -> tuple[str, tuple[PlanItem, ...]]:
+    async def restate(proposal: Proposal) -> tuple[str, tuple[PlanItem, ...], str]:
         return await _proposal(engine, proposal)
 
     try:
@@ -330,6 +345,13 @@ async def _handle_proposal(
             assume_answers=_assumes_answers(line),
             history=session.history,
         )
+    except ProposalChangedError as exc:
+        console.print(f"[warn]{escape(str(exc))}[/warn]")
+        try:
+            refreshed = engine.review(proposal_id)
+        except RECOVERABLE_EXCEPTIONS:
+            return ChatState()
+        return await _open_proposal(engine, refreshed)
     except RECOVERABLE_EXCEPTIONS as exc:
         print_error(exc)
         return ChatState()
@@ -339,7 +361,7 @@ async def _handle_proposal(
 
 
 async def _run_command(
-    engine: CoachEngine, name: str, args: list[str], session: ChatSession
+    engine: CoachEngine, name: str, args: list[str], session: ChatSession, settings: Settings
 ) -> ChatState | None:
     if name == "help":
         console.print(HELP_TEXT, markup=False)
@@ -368,6 +390,14 @@ async def _run_command(
             session.history = []
             session.context = None
             session.notified.clear()
+        else:
+            session.seed(
+                engine.recent_history(
+                    settings.chat_history_turns,
+                    max_age_days=settings.chat_history_max_age_days,
+                ),
+                max_tokens=session.cap or engine.history_budget(),
+            )
         scope = "all history" if days is None else f"older than {days} days"
         console.print(f"Forgot {removed} messages ({scope}).")
         return None
@@ -395,7 +425,9 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
             )
     for stale_id, reason in engine.discard_stale_proposals():
-        console.print(f"[warn]Proposal #{stale_id} was approved with {reason}; discarded.[/warn]")
+        console.print(
+            f"[warn]Proposal #{stale_id} was approved with {escape(str(reason))}; discarded.[/warn]"
+        )
     unapplied = engine.unapplied_proposals()
     if unapplied:
         oldest = unapplied[0]
@@ -484,7 +516,7 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                         return
                     state = step
                 case Command(name=name, args=args):
-                    state = await _run_command(engine, name, args, session) or state
+                    state = await _run_command(engine, name, args, session, settings) or state
             _report_memory(engine, session)
         except InternalError:
             raise

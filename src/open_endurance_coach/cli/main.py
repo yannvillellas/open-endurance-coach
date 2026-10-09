@@ -5,7 +5,7 @@ import typer
 from pydantic import ValidationError
 
 from open_endurance_coach.chat.gate import RECOVERABLE_EXCEPTIONS
-from open_endurance_coach.cli.rendering import console, print_error
+from open_endurance_coach.cli.rendering import console, escape, print_error
 from open_endurance_coach.clients.intervals import IntervalsClient
 from open_endurance_coach.clients.llm import LlmClient, LlmProvider
 from open_endurance_coach.clients.providers import build_registry
@@ -44,7 +44,7 @@ async def _with_engine(
             "[error]error:[/error] configuration missing: is there a readable .env file"
             " in the current directory with all required keys?"
         )
-        console.print(f"[meta]{exc}[/meta]")
+        console.print(f"[meta]{escape(str(exc))}[/meta]")
         raise typer.Exit(code=1) from None
     settings = settings.with_llm_override(provider=provider, model=model)
     intervals: IntervalsClient | None = None

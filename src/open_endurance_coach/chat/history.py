@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from open_endurance_coach.clients.llm import LlmMessage
+from open_endurance_coach.sanitize import sanitize_text
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.records import Message
@@ -15,7 +16,7 @@ def assistant_turn(report: DecisionReport) -> LlmMessage:
     content = report.summary
     if report.findings:
         content += "\n" + "\n".join(f"- {finding}" for finding in report.findings)
-    return LlmMessage(role="assistant", content=content)
+    return LlmMessage(role="assistant", content=sanitize_text(content))
 
 
 def seed_turns(entries: list[Message]) -> list[LlmMessage]:

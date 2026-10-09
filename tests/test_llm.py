@@ -4,7 +4,13 @@ from typing import Any
 import httpx
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient, LlmCompletion, LlmError, LlmMessage
+from open_endurance_coach.clients.llm import (
+    LlmClient,
+    LlmCompletion,
+    LlmError,
+    LlmMessage,
+    _completion_diagnostics,
+)
 from open_endurance_coach.clients.providers import DeepSeekProvider, OvhProvider
 from open_endurance_coach.config import Settings
 from open_endurance_coach.tokens import estimate_text_tokens
@@ -1049,3 +1055,69 @@ async def test_provider_error_does_not_echo_the_response_body(settings: Settings
     message = str(excinfo.value)
     assert "bad request" in message
     assert "secret data" not in message
+
+
+async def test_provider_tolerates_multimodal_content_and_odd_usage(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": [{"type": "text", "text": "hello"}]},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": ["not-a-mapping"],
+            },
+        )
+
+    provider, _ = make_provider(settings, handler)
+    result = await provider.complete(
+        model="deepseek-flash",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=False,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert result.content == "hello"
+    assert result.usage == {}
+
+
+async def test_provider_non_json_error_is_a_single_line(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>\nforged line\x1b[2J")
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError) as excinfo:
+        await provider.complete(
+            model="deepseek-flash",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=False,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    message = str(excinfo.value)
+    assert "\n" not in message
+    assert "\x1b" not in message
+
+
+def test_completion_diagnostics_stay_on_one_line() -> None:
+    completion = LlmCompletion(
+        content="",
+        finish_reason="length\n2026-01-01 CRITICAL forged",
+        usage={"completion_tokens": "1\nforged\x1b[2J"},
+    )
+    text = _completion_diagnostics(completion)
+    assert "\n" not in text
+    assert "\x1b" not in text
+    assert "forged" in text
+
+
+def test_completion_diagnostics_tolerate_a_non_mapping_usage() -> None:
+    completion = LlmCompletion(content="", usage=["x"])  # type: ignore[arg-type]
+    assert "completion_tokens=unknown" in _completion_diagnostics(completion)

@@ -3,12 +3,19 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from open_endurance_coach.config import Settings
 
 from .http import error_detail, parse_retry_after
+
+
+def _path_segment(value: str) -> str:
+    """Quote an id for a URL path so it cannot escape its segment."""
+    return quote(str(value), safe="")
+
 
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -161,14 +168,18 @@ class IntervalsClient:
 
     async def get_activity(self, activity_id: str, intervals: bool = True) -> dict[str, Any]:
         params = {"intervals": str(intervals).lower()}
-        response = await self._request("GET", f"/activity/{activity_id}", params=params)
+        response = await self._request(
+            "GET", f"/activity/{_path_segment(activity_id)}", params=params
+        )
         return self._json_object(response, "activity")
 
     async def get_activity_streams(
         self, activity_id: str, types: Sequence[str]
     ) -> dict[str, list[Any]]:
         response = await self._request(
-            "GET", f"/activity/{activity_id}/streams", params={"types": ",".join(types)}
+            "GET",
+            f"/activity/{_path_segment(activity_id)}/streams",
+            params={"types": ",".join(types)},
         )
         streams: dict[str, list[Any]] = {}
         for row in self._json_list(response, "streams"):
@@ -199,7 +210,9 @@ class IntervalsClient:
         return self._json_list(response, "events")
 
     async def get_event(self, event_id: str) -> dict[str, Any]:
-        response = await self._request("GET", self._athlete_path(f"/events/{event_id}"))
+        response = await self._request(
+            "GET", self._athlete_path(f"/events/{_path_segment(event_id)}")
+        )
         return self._json_object(response, "event")
 
     async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -208,12 +221,12 @@ class IntervalsClient:
 
     async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._request(
-            "PUT", self._athlete_path(f"/events/{event_id}"), payload=payload
+            "PUT", self._athlete_path(f"/events/{_path_segment(event_id)}"), payload=payload
         )
         return self._json_object(response, "event")
 
     async def delete_event(self, event_id: str) -> None:
-        await self._request("DELETE", self._athlete_path(f"/events/{event_id}"))
+        await self._request("DELETE", self._athlete_path(f"/events/{_path_segment(event_id)}"))
 
     async def get_sport_settings(self) -> list[dict[str, Any]]:
         response = await self._request("GET", self._athlete_path("/sport-settings"))

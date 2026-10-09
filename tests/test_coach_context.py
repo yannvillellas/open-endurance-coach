@@ -152,7 +152,7 @@ def test_sections_match_the_prompt_payload() -> None:
     payload = json.loads(user[start:end])
     expected = {key: value for key, value in context.sections().items() if key != "focus"}
     assert payload == expected
-    assert "Current message:\nstatus check" in user
+    assert "<athlete_message>\nstatus check\n</athlete_message>" in user
     assert "Today's date (athlete local): 2024-02-01" in user
     assert "<athlete_data>" in user and "</athlete_data>" in user
 

@@ -14,6 +14,7 @@ from open_endurance_coach.engine.coach import (
     PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
+    ProposalChangedError,
     StaleProposalError,
     StateDriftError,
     _bad_race_number,
@@ -34,6 +35,7 @@ from open_endurance_coach.schemas.decisions import (
     DecisionReport,
     DeleteWorkout,
     UpdateWorkout,
+    mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
 from open_endurance_coach.store.db import CoachStore
@@ -185,7 +187,7 @@ async def test_resolve_event_dates_logs_expected_lookup_failure(
             CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
         )
     assert dates == {}
-    assert "could not resolve the date of event 999" in caplog.text
+    assert "could not resolve the date of event '999'" in caplog.text
 
 
 async def test_resolve_event_dates_logs_unexpected_lookup_failure(
@@ -208,7 +210,7 @@ async def test_resolve_event_dates_logs_unexpected_lookup_failure(
             CoachContext(focus="focus"), [DeleteWorkout(action="delete", event_id=999)]
         )
     assert dates == {}
-    assert "unexpected error resolving the date of event 999" in caplog.text
+    assert "unexpected error resolving the date of event '999'" in caplog.text
 
 
 async def test_analyze_marks_seen_only_after_success(settings: Settings, tmp_path: Path) -> None:
@@ -701,6 +703,51 @@ async def test_approve_keeps_only_the_selected_mutations(
     assert len(stored.report.mutations) == 2
 
 
+async def test_approve_rejects_a_plan_changed_since_display(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    expect = mutations_fingerprint(proposal.report)
+
+    changed = DecisionReport.model_validate(
+        json.loads(report_json(mutations=[{**CREATE_MUTATION, "name": "Other Session"}]))
+    )
+    store.update_proposal_report(proposal.id, report=changed, user_feedback="easier")
+
+    with pytest.raises(ProposalChangedError):
+        engine.approve(proposal.id, expect=expect)
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.PENDING
+    assert store.list_unapplied_proposals() == []
+
+
+async def test_approve_accepts_the_displayed_plan_when_unchanged(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider)
+    proposal = await engine.analyze("status check")
+    approved = engine.approve(proposal.id, expect=mutations_fingerprint(proposal.report))
+    assert approved.status is ProposalStatus.UNAPPLIED
+
+
+async def test_apply_refuses_a_pending_proposal(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine = make_engine(settings, store, provider, writer=CalendarWriter(calendar))
+    proposal = await engine.analyze("status check")
+    assert proposal.status is ProposalStatus.PENDING
+    with pytest.raises(ValueError, match="not approved"):
+        await engine.apply(proposal.id)
+    assert calendar.created == []
+
+
 async def test_approve_missing_proposal_raises(settings: Settings, tmp_path: Path) -> None:
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
     with pytest.raises(ValueError, match="not found"):
@@ -807,10 +854,11 @@ async def test_analyze_includes_history_in_the_prompt(settings: Settings, tmp_pa
         LlmMessage(role="assistant", content="past answer"),
     ]
     await engine.analyze("follow up", context=CoachContext(focus="f"), history=history)
-    prompt = provider.calls[0]["messages"][1].content
-    assert "Recent conversation:" in prompt
-    assert "user: past question" in prompt
-    assert "assistant: past answer" in prompt
+    messages = provider.calls[0]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1].content == "past question"
+    assert messages[2].content == "past answer"
+    assert "<athlete_message>\nf\n</athlete_message>" in messages[-1].content
 
 
 async def test_analyze_keeps_a_stable_prompt_prefix_between_turns(
@@ -825,9 +873,9 @@ async def test_analyze_keeps_a_stable_prompt_prefix_between_turns(
     await engine.analyze("second", context=moved, today=TODAY)
     first_prompt = provider.calls[0]["messages"][1].content
     second_prompt = provider.calls[1]["messages"][1].content
-    assert first_prompt.split("Current message:")[0] == second_prompt.split("Current message:")[0]
+    assert first_prompt.split("<athlete_message>")[0] == second_prompt.split("<athlete_message>")[0]
     assert '"focus"' not in first_prompt
-    assert "Current message:\nsecond" in second_prompt
+    assert "<athlete_message>\nsecond\n</athlete_message>" in second_prompt
 
 
 async def test_analyze_empty_content_raises_without_writes(
@@ -1287,10 +1335,11 @@ async def test_submit_feedback_includes_the_conversation_history(
         LlmMessage(role="assistant", content="noted"),
     ]
     await engine.submit_feedback(proposal.id, "make it easier", history=history)
-    prompt = provider.calls[1]["messages"][1].content
-    assert "Recent conversation:" in prompt
-    assert "I can train 4 days and prefer mornings" in prompt
-    assert "make it easier" in prompt
+    messages = provider.calls[1]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1].content == "I can train 4 days and prefer mornings"
+    assert messages[2].content == "noted"
+    assert "make it easier" in messages[-1].content
 
 
 async def test_history_is_trimmed_to_the_context_budget(settings: Settings, tmp_path: Path) -> None:

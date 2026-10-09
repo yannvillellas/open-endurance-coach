@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from open_endurance_coach.chat.history import ChatSession
 from open_endurance_coach.cli import chat as cli_chat
 from open_endurance_coach.cli import main as cli_main
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings, effective_input_budget
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
@@ -460,10 +460,19 @@ def test_chat_seeds_history_from_messages(patched: Any) -> None:
     store.add_message(MessageRole.ASSISTANT, "Reconsidered.", report=report)
     result = runner.invoke(cli_main.app, [], input="how was my week?\nand today?\n")
     assert result.exit_code == 0
-    prompt = provider.calls[1]["messages"][1].content
-    assert "Recent conversation:" in prompt
-    assert "legs heavy" in prompt
-    assert "Reconsidered." in prompt
+    messages = provider.calls[1]["messages"]
+    assert [message.role for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert messages[1].content == "legs heavy"
+    assert messages[2].content == "Reconsidered."
+    assert messages[3].content == "how was my week?"
+    assert "and today?" in messages[-1].content
 
 
 def test_chat_seed_passes_max_age_from_settings(
@@ -496,11 +505,19 @@ def test_chat_session_memory_appends_turns(patched: Any) -> None:
         cli_main.app, [], input="how was my week?\nfirst question\nsecond question\n"
     )
     assert result.exit_code == 0
-    prompt = provider.calls[2]["messages"][1].content
-    assert "Recent conversation:" in prompt
-    assert "user: how was my week?" in prompt
-    assert "user: first question" in prompt
-    assert "second question" in prompt
+    messages = provider.calls[2]["messages"]
+    assert [message.role for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert messages[1].content == "how was my week?"
+    assert messages[2].content == "Load stable.\n- Tempo block hit target."
+    assert messages[3].content == "first question"
+    assert "second question" in messages[-1].content
 
 
 def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> None:
@@ -518,10 +535,18 @@ def test_chat_gate_feedback_fallback_appends_session_memory(patched: Any) -> Non
         input="analyze my week\nmake it easier\nyes\nhow is it going?\n",
     )
     assert result.exit_code == 0
-    prompt = provider.calls[2]["messages"][1].content
-    assert "Recent conversation:" in prompt
-    assert "make it easier" in prompt
-    assert "Reconsidered." in prompt
+    messages = provider.calls[2]["messages"]
+    assert [message.role for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    contents = [message.content for message in messages]
+    assert "make it easier" in contents
+    assert any("Reconsidered." in content for content in contents)
 
 
 def test_chat_ctrl_c_during_confirmation_returns_to_conversing(
@@ -607,7 +632,7 @@ def test_chat_forget_clears_the_conversation_only(patched: Any) -> None:
     )
     assert result.exit_code == 0
     assert "Forgot" in result.output
-    assert "Recent conversation:" not in provider.calls[2]["messages"][1].content
+    assert [m.role for m in provider.calls[2]["messages"]] == ["system", "user"]
     proposals = store.list_proposals()
     assert len(proposals) == 3
     assert proposals[0].focus.startswith("third")
@@ -729,7 +754,7 @@ def test_chat_proposal_question_answer_includes_the_proposal(patched: Any) -> No
         cli_main.app, [], input="analyze my week\nwhat would this train exactly?\nno\n"
     )
     assert result.exit_code == 0
-    user_message = provider.calls[1]["messages"][1].content
+    user_message = provider.calls[1]["messages"][-1].content
     assert "current_proposal" in user_message
     assert "Tempo Session" in user_message
 
@@ -763,7 +788,7 @@ def test_chat_revision_sees_current_proposal(patched: Any) -> None:
         cli_main.app, [], input="analyze my week\nmake it 4 series instead\nno\n"
     )
     assert result.exit_code == 0
-    user_message = provider.calls[1]["messages"][1].content
+    user_message = provider.calls[1]["messages"][-1].content
     assert "current_proposal" in user_message
     assert "Tempo Session" in user_message
 
@@ -1237,8 +1262,8 @@ def test_chat_question_first_change_request_is_answered_and_gated(patched: Any) 
     )
     assert result.exit_code == 0
     assert len(provider.calls) == 2
-    prompt = provider.calls[1]["messages"][1].content
-    assert "Current message:\nhow about 45 minutes instead?" in prompt
+    prompt = provider.calls[1]["messages"][-1].content
+    assert "<athlete_message>\nhow about 45 minutes instead?\n</athlete_message>" in prompt
     assert result.output.count("Confirm? Reply exactly yes to apply") == 2
 
 
@@ -1656,7 +1681,12 @@ def test_chat_non_exact_yes_is_feedback_and_writes_nothing(patched: Any) -> None
     assert 'reply exactly "yes"' in result.output
     assert calendar.created == []
     assert len(provider.calls) == 2
-    assert "Recent conversation:" in provider.calls[1]["messages"][1].content
+    assert [m.role for m in provider.calls[1]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
 
 
 def test_chat_forget_rejects_invalid_day_counts(patched: Any) -> None:
@@ -1882,7 +1912,7 @@ def test_chat_forget_all_clears_the_session_history(patched: Any) -> None:
         cli_main.app, [], input="how was my week?\n/forget all\nyes\nand today?\n/exit\n"
     )
     assert result.exit_code == 0
-    assert "Recent conversation:" not in provider.calls[1]["messages"][1].content
+    assert [m.role for m in provider.calls[1]["messages"]] == ["system", "user"]
 
 
 def test_chat_forget_all_cancels_on_anything_else(patched: Any) -> None:
@@ -1934,3 +1964,41 @@ def test_chat_forget_all_rejects_extra_args(patched: Any) -> None:
     assert result.exit_code == 0
     assert "Usage: /forget" in result.output
     assert [row.content for row in store.list_messages()] == ["hello"]
+
+
+async def test_confirmation_redisplays_when_the_plan_changed(
+    patched: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calendar = FakeCalendarClient()
+    provider = FakeLlmProvider([completion(report_json(mutations=[CREATE_MUTATION]))])
+    engine, store = patched(provider, calendar=calendar)
+    proposal = await engine.analyze("plan my week")
+    state = await cli_chat._open_proposal(engine, proposal)
+
+    changed = DecisionReport.model_validate(
+        json.loads(report_json(mutations=[{**CREATE_MUTATION, "name": "Other Session"}]))
+    )
+    store.update_proposal_report(proposal.id, report=changed, user_feedback="easier")
+
+    result = await cli_chat._handle_proposal(engine, state, "yes", ChatSession())
+
+    out = capsys.readouterr().out
+    assert "changed since it was displayed" in out
+    assert calendar.created == []
+    assert isinstance(result, cli_chat.ChatState)
+    assert result.plan is not None
+    assert "Other Session" in result.plan.plan_text
+    stored = store.get_proposal(proposal.id)
+    assert stored is not None
+    assert stored.status is ProposalStatus.PENDING
+
+    await cli_chat._handle_proposal(engine, result, "yes", ChatSession())
+    assert len(calendar.created) == 1
+
+
+async def test_forget_days_reseeds_the_in_memory_history(patched: Any, settings: Settings) -> None:
+    engine, _ = patched(FakeLlmProvider())
+    session = ChatSession()
+    session.history = [LlmMessage(role="user", content="stale turn")]
+    await cli_chat._run_command(engine, "forget", ["365"], session, settings)
+    assert session.history == []

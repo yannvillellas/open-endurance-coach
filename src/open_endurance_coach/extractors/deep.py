@@ -33,6 +33,7 @@ from open_endurance_coach.schemas.intervals import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
+MAX_DEEP_LOOKBACK_DAYS = 3650
 REFERENCE_WINDOW_DAYS = 3
 SPLIT_COVERAGE_TOLERANCE = 0.02
 
@@ -99,7 +100,7 @@ def _warn_on_split_coverage(
         return
     covered = sum(split.distance_m for split in splits)
     if not splits or abs(covered - declared_m) / declared_m > SPLIT_COVERAGE_TOLERANCE:
-        logger.warning("splits for %s cover %.0f of %.0f m", activity_id, covered, declared_m)
+        logger.warning("splits for %r cover %.0f of %.0f m", activity_id, covered, declared_m)
 
 
 def _referenced_date(focus: str, today: date) -> date | None:
@@ -150,9 +151,11 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
         amount = int(duration.group(1))
         unit = duration.group(2).lower()
         lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
+    lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
     if stale_reference:
         assert reference is not None
         lookback = max(lookback, (current - reference).days + 7)
+        lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
     if _HEART_RATE_RE.search(focus):
         metric = "heart_rate"
     elif _HILL_RE.search(focus):
@@ -232,10 +235,10 @@ class DeepHistoricalExtractor:
                 detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
                 detail = Activity.model_validate(detail_raw)
             except (IntervalsApiError, ValueError) as exc:
-                logger.warning("could not read the detail of %s: %s", detail_source.id, exc)
+                logger.warning("could not read the detail of %r: %r", detail_source.id, exc)
                 return None, []
             except Exception:
-                logger.exception("unexpected error reading the detail of %s", detail_source.id)
+                logger.exception("unexpected error reading the detail of %r", detail_source.id)
                 return None, []
             try:
                 speed_based = detail.type in _RIDE_TYPES
@@ -247,11 +250,11 @@ class DeepHistoricalExtractor:
                 return detail, splits
             except (IntervalsApiError, ValueError) as exc:
                 logger.warning(
-                    "could not read the streams of %s; splits skipped: %s", detail_source.id, exc
+                    "could not read the streams of %r; splits skipped: %r", detail_source.id, exc
                 )
             except Exception:
                 logger.exception(
-                    "unexpected error reading the streams of %s; splits skipped", detail_source.id
+                    "unexpected error reading the streams of %r; splits skipped", detail_source.id
                 )
             return detail, []
 

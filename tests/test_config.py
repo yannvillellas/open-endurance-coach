@@ -283,3 +283,11 @@ def test_too_small_window_has_no_input_room() -> None:
     )
     with pytest.raises(ValueError, match="no input room"):
         effective_input_budget(settings)
+
+
+def test_settings_errors_do_not_echo_input_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INTERVALS_API_KEY", "FAKE-SECRET-VALUE")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "not-a-number")
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(_env_file=None)
+    assert "FAKE-SECRET-VALUE" not in str(excinfo.value)

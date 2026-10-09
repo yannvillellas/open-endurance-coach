@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from open_endurance_coach.config import Settings, describe_providers
+from open_endurance_coach.sanitize import single_line
 from open_endurance_coach.tokens import estimate_text_tokens
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,12 @@ class LlmCompletion:
 
 
 def _completion_diagnostics(completion: LlmCompletion) -> str:
-    usage = completion.usage or {}
+    usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+    finish_reason = single_line(str(completion.finish_reason or "unknown"))
+    completion_tokens = single_line(str(usage.get("completion_tokens", "unknown")))
     return (
-        f"finish_reason={completion.finish_reason or 'unknown'},"
-        f" completion_tokens={usage.get('completion_tokens', 'unknown')},"
+        f"finish_reason={finish_reason},"
+        f" completion_tokens={completion_tokens},"
         f" reasoning_content={'present' if completion.reasoning_content else 'absent'}"
     )
 
@@ -54,14 +57,15 @@ def _empty_content_error(completion: LlmCompletion) -> str:
 
 
 def _warn_on_token_estimate_drift(messages: list[LlmMessage], completion: LlmCompletion) -> None:
-    prompt_tokens = (completion.usage or {}).get("prompt_tokens")
+    usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+    prompt_tokens = usage.get("prompt_tokens")
     if not isinstance(prompt_tokens, int) or prompt_tokens <= 0:
         return
     estimated = sum(estimate_text_tokens(message.content) for message in messages)
     drift = abs(estimated - prompt_tokens) / prompt_tokens
     if drift > TOKEN_ESTIMATE_DRIFT_THRESHOLD:
         logger.warning(
-            "token estimate drift: estimated=%d actual=%d (%.0f%%) model=%s",
+            "token estimate drift: estimated=%d actual=%d (%.0f%%) model=%r",
             estimated,
             prompt_tokens,
             drift * 100,
@@ -155,9 +159,10 @@ class LlmClient:
                 else reasoning_effort
             ),
         )
-        cached = (completion.usage or {}).get("prompt_cache_hit_tokens")
+        usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+        cached = usage.get("prompt_cache_hit_tokens")
         if cached is not None:
-            logger.debug("prompt cache hit tokens: %s", cached)
+            logger.debug("prompt cache hit tokens: %r", cached)
         _warn_on_token_estimate_drift(messages, completion)
         return completion
 

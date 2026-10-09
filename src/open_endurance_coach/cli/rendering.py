@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 from rich.console import Console
-from rich.markup import escape
+from rich.markup import escape as rich_escape
 from rich.theme import Theme
 
 from open_endurance_coach.chat.gate import PlanItem
+from open_endurance_coach.sanitize import sanitize_text
 from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
@@ -35,6 +36,11 @@ THEME = Theme(
 )
 
 console = Console(theme=THEME, highlight=False)
+
+
+def escape(text: str) -> str:
+    """Escape rich markup after replacing characters a terminal could execute."""
+    return rich_escape(sanitize_text(text))
 
 
 def print_error(exc: Exception) -> None:
