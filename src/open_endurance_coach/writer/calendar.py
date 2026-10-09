@@ -301,7 +301,8 @@ class CalendarWriter:
             mutation.name, mutation.start_date_local
         )
         if existing is not None:
-            if existing.get("category") not in (None, WORKOUT_CATEGORY):
+            category = existing.get("category")
+            if category not in (None, WORKOUT_CATEGORY):
                 raise WriterError(
                     f"refusing to update non-WORKOUT event {existing.get('id')}"
                     f" (category: {existing.get('category')})"
@@ -313,13 +314,19 @@ class CalendarWriter:
                     event_id=existing["id"],
                     name=mutation.name,
                 )
-            await self._client.update_event(str(existing["id"]), payload)
-            return MutationOutcome(
-                action="create",
-                target="updated",
-                event_id=existing["id"],
-                name=mutation.name,
-                drift=await self._drift_after_write(existing["id"], mutation),
+            if category is None:
+                await self._client.update_event(str(existing["id"]), payload)
+                return MutationOutcome(
+                    action="create",
+                    target="updated",
+                    event_id=existing["id"],
+                    name=mutation.name,
+                    drift=await self._drift_after_write(existing["id"], mutation),
+                )
+            raise WriterError(
+                f"refusing to overwrite existing WORKOUT {existing['id']}:"
+                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+                " with different values; ask the coach for an update"
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
@@ -408,13 +415,19 @@ class CalendarWriter:
                     event_id=existing["id"],
                     name=mutation.name,
                 )
-            await self._client.update_event(str(existing["id"]), payload)
-            return MutationOutcome(
-                action="create_race",
-                target="updated",
-                event_id=existing["id"],
-                name=mutation.name,
-                drift=await self._drift_after_write(existing["id"], mutation),
+            if category is None:
+                await self._client.update_event(str(existing["id"]), payload)
+                return MutationOutcome(
+                    action="create_race",
+                    target="updated",
+                    event_id=existing["id"],
+                    name=mutation.name,
+                    drift=await self._drift_after_write(existing["id"], mutation),
+                )
+            raise WriterError(
+                f"refusing to overwrite existing RACE {existing['id']}:"
+                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+                " with different values; ask the coach for an update"
             )
         created = await self._client.create_event(payload)
         event_id = created.get("id")
