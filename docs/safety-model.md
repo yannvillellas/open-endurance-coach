@@ -63,10 +63,11 @@ silently change it.
 - **Terminal emulators.** OSC and other exotic sequences are neutralised by removing
   control characters, but behaviour differs across emulators and cannot be exhaustively
   verified.
-- **Gate phrase in the panel.** The literal confirmation phrase can appear as plain text
-  inside the plan panel; it cannot execute anything, and the real prompt sits outside it.
-- **CR display.** A CR in a hub description is displayed as a line break (normalised) but
-  stays escaped in the JSON payload.
+- **Display cosmetics.** The literal confirmation phrase can appear as plain text inside
+  the plan panel (it executes nothing; the real prompt sits outside it), and a CR in a hub
+  description shows as a line break while staying escaped in the payload.
+- **Concurrent applies.** Two sessions applying the same approved proposal at once can
+  still duplicate a create; tracked in #69.
 
 ## Provider adapter contract
 
