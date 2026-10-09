@@ -246,24 +246,19 @@ def _system_message(settings: Settings) -> str:
     return "".join(parts)
 
 
-def _user_message(context: CoachContext, history: list[LlmMessage] | None = None) -> str:
+def _user_message(context: CoachContext) -> str:
     data = context.sections()
     focus = str(data.pop("focus", ""))
     payload = _safe(json.dumps(_finite(data), indent=2, ensure_ascii=False))
     parts = [f"<athlete_data>\n{payload}\n</athlete_data>\n"]
-    if history:
-        transcript = "\n".join(f"{turn.role}: {_safe(turn.content)}" for turn in history)
-        parts.append(f"<conversation>\n{transcript}\n</conversation>\n")
     parts.append(f"<athlete_message>\n{_safe(focus)}\n</athlete_message>\n")
     parts.append("Respond per the contract.\n")
     return "".join(parts)
 
 
-def estimate_user_message_tokens(
-    context: CoachContext, history: list[LlmMessage] | None = None
-) -> int:
-    """Tokens of the exact user message the prompt builder will send."""
-    return estimate_text_tokens(_user_message(context, history))
+def estimate_user_message_tokens(context: CoachContext) -> int:
+    """Tokens of the exact final user message the prompt builder will send."""
+    return estimate_text_tokens(_user_message(context))
 
 
 def build_messages(
@@ -271,7 +266,11 @@ def build_messages(
     settings: Settings,
     history: list[LlmMessage] | None = None,
 ) -> list[LlmMessage]:
-    return [
-        LlmMessage(role="system", content=_system_message(settings)),
-        LlmMessage(role="user", content=_user_message(context, history)),
-    ]
+    messages = [LlmMessage(role="system", content=_system_message(settings))]
+    turns = list(history or [])
+    while turns and turns[0].role == "assistant":
+        turns.pop(0)
+    for turn in turns:
+        messages.append(LlmMessage(role=turn.role, content=sanitize_text(turn.content)))
+    messages.append(LlmMessage(role="user", content=_user_message(context)))
+    return messages

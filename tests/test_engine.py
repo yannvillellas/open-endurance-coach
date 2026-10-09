@@ -842,10 +842,11 @@ async def test_analyze_includes_history_in_the_prompt(settings: Settings, tmp_pa
         LlmMessage(role="assistant", content="past answer"),
     ]
     await engine.analyze("follow up", context=CoachContext(focus="f"), history=history)
-    prompt = provider.calls[0]["messages"][1].content
-    assert "<conversation>" in prompt
-    assert "user: past question" in prompt
-    assert "assistant: past answer" in prompt
+    messages = provider.calls[0]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1].content == "past question"
+    assert messages[2].content == "past answer"
+    assert "<athlete_message>\nf\n</athlete_message>" in messages[-1].content
 
 
 async def test_analyze_keeps_a_stable_prompt_prefix_between_turns(
@@ -1322,10 +1323,11 @@ async def test_submit_feedback_includes_the_conversation_history(
         LlmMessage(role="assistant", content="noted"),
     ]
     await engine.submit_feedback(proposal.id, "make it easier", history=history)
-    prompt = provider.calls[1]["messages"][1].content
-    assert "<conversation>" in prompt
-    assert "I can train 4 days and prefer mornings" in prompt
-    assert "make it easier" in prompt
+    messages = provider.calls[1]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1].content == "I can train 4 days and prefer mornings"
+    assert messages[2].content == "noted"
+    assert "make it easier" in messages[-1].content
 
 
 async def test_history_is_trimmed_to_the_context_budget(settings: Settings, tmp_path: Path) -> None:
