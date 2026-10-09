@@ -203,7 +203,9 @@ async def _retry_apply(engine: CoachEngine, session: ChatSession, text: str) -> 
     try:
         report = await engine.apply(session.pending_proposal_id)
     except (StaleProposalError, PlaceholderMutationError, StateDriftError) as exc:
-        console.print(f"[warn]Proposal #{session.pending_proposal_id} discarded: {exc}[/warn]")
+        console.print(
+            f"[warn]Proposal #{session.pending_proposal_id} discarded: {escape(str(exc))}[/warn]"
+        )
         engine.delete_proposal(session.pending_proposal_id)
         remaining = engine.unapplied_proposals()
         session.pending_proposal_id = remaining[0].id if remaining else None
@@ -395,7 +397,9 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
             )
     for stale_id, reason in engine.discard_stale_proposals():
-        console.print(f"[warn]Proposal #{stale_id} was approved with {reason}; discarded.[/warn]")
+        console.print(
+            f"[warn]Proposal #{stale_id} was approved with {escape(str(reason))}; discarded.[/warn]"
+        )
     unapplied = engine.unapplied_proposals()
     if unapplied:
         oldest = unapplied[0]

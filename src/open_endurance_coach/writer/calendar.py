@@ -211,7 +211,7 @@ class CalendarWriter:
         try:
             stored: Any = await self._client.get_event(str(event_id))
         except (IntervalsApiError, ValueError) as exc:
-            logger.warning("could not read event %s back; drift not checked: %s", event_id, exc)
+            logger.warning("could not read event %s back; drift not checked: %r", event_id, exc)
             return None
         if not isinstance(stored, dict):
             logger.warning(
@@ -324,7 +324,7 @@ class CalendarWriter:
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
-            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            logger.warning("create returned no id for %r; values were not verified", mutation.name)
             return MutationOutcome(
                 action="create",
                 target="created",
@@ -419,7 +419,7 @@ class CalendarWriter:
         created = await self._client.create_event(payload)
         event_id = created.get("id")
         if event_id is None:
-            logger.warning("create returned no id for %s; values were not verified", mutation.name)
+            logger.warning("create returned no id for %r; values were not verified", mutation.name)
             return MutationOutcome(
                 action="create_race",
                 target="created",

@@ -45,6 +45,14 @@ def test_assistant_turn_is_the_summary_with_findings() -> None:
     assert assistant_turn(report).content == "Summary.\n- Finding A1.\n- Finding A2."
 
 
+def test_assistant_turn_replaces_unpaired_surrogates() -> None:
+    report = DecisionReport(summary="Summary.", findings=["finding \udfff"])
+    content = assistant_turn(report).content
+    assert "\udfff" not in content
+    assert "\ufffd" in content
+    content.encode("utf-8")
+
+
 def test_trim_history_under_budget_keeps_everything() -> None:
     turns = [LlmMessage(role="user", content="short"), LlmMessage(role="assistant", content="ok")]
     assert trim_history(turns, 100) == turns

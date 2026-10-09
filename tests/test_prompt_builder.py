@@ -490,3 +490,49 @@ def test_user_message_renders_activity_splits() -> None:
 def test_contract_forbids_no_op_race_updates() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "Never re-propose a race mutation whose fields already match goal_races" in system
+
+
+def test_prompt_replaces_surrogates_so_the_message_is_encodable() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "review",
+            "recent_activities": [
+                {
+                    "id": "fx-s",
+                    "start_date_local": "2024-01-20T08:00:00",
+                    "type": "Ride",
+                    "name": "bad \ud800 name",
+                }
+            ],
+        }
+    )
+    history = [LlmMessage(role="user", content="history \udfff")]
+    messages = build_messages(context, make_settings(athlete_profile="profile \ud800"), history)
+    for message in messages:
+        message.content.encode("utf-8")
+    assert "\ud800" not in messages[0].content
+    assert "\ud800" not in messages[1].content
+    assert "\udfff" not in messages[1].content
+    assert "\ufffd" in messages[0].content
+    assert "\ufffd" in messages[1].content
+
+
+def test_prompt_replaces_terminal_controls_from_untrusted_text() -> None:
+    context = CoachContext.model_validate({"focus": "hello\x1b[2Jworld"})
+    user = build_messages(context, make_settings())[1].content
+    assert "\x1b" not in user
+    assert "hello\ufffd[2Jworld" in user
+
+
+def test_prompt_never_renders_non_finite_numbers() -> None:
+    context = CoachContext.model_validate(
+        {
+            "focus": "review",
+            "wellness": [{"id": "2024-01-19", "hrv": float("nan"), "ctl": float("inf")}],
+        }
+    )
+    user = build_messages(context, make_settings())[1].content
+    body = user.split("<athlete_data>\n", 1)[1].split("\n</athlete_data>", 1)[0]
+    assert "NaN" not in body
+    assert "Infinity" not in body
+    assert json.loads(body)["wellness"][0]["hrv"] is None
