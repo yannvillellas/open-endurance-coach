@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from open_endurance_coach.chat.history import ChatSession
 from open_endurance_coach.cli import chat as cli_chat
 from open_endurance_coach.cli import main as cli_main
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings, effective_input_budget
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
@@ -1994,3 +1994,11 @@ async def test_confirmation_redisplays_when_the_plan_changed(
 
     await cli_chat._handle_proposal(engine, result, "yes", ChatSession())
     assert len(calendar.created) == 1
+
+
+async def test_forget_days_reseeds_the_in_memory_history(patched: Any, settings: Settings) -> None:
+    engine, _ = patched(FakeLlmProvider())
+    session = ChatSession()
+    session.history = [LlmMessage(role="user", content="stale turn")]
+    await cli_chat._run_command(engine, "forget", ["365"], session, settings)
+    assert session.history == []

@@ -1049,3 +1049,52 @@ async def test_provider_error_does_not_echo_the_response_body(settings: Settings
     message = str(excinfo.value)
     assert "bad request" in message
     assert "secret data" not in message
+
+
+async def test_provider_tolerates_multimodal_content_and_odd_usage(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": [{"type": "text", "text": "hello"}]},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": ["not-a-mapping"],
+            },
+        )
+
+    provider, _ = make_provider(settings, handler)
+    result = await provider.complete(
+        model="deepseek-flash",
+        messages=[LlmMessage(role="user", content="hi")],
+        thinking=False,
+        json_mode=False,
+        max_tokens=100,
+        temperature=None,
+        reasoning_effort=None,
+    )
+    assert result.content == "hello"
+    assert result.usage == {}
+
+
+async def test_provider_non_json_error_is_a_single_line(settings: Settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>\nforged line\x1b[2J")
+
+    provider, _ = make_provider(settings, handler)
+    with pytest.raises(LlmError) as excinfo:
+        await provider.complete(
+            model="deepseek-flash",
+            messages=[LlmMessage(role="user", content="hi")],
+            thinking=False,
+            json_mode=False,
+            max_tokens=100,
+            temperature=None,
+            reasoning_effort=None,
+        )
+    message = str(excinfo.value)
+    assert "\n" not in message
+    assert "\x1b" not in message

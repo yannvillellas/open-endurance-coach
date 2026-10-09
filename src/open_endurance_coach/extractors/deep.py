@@ -33,6 +33,7 @@ from open_endurance_coach.schemas.intervals import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
+MAX_DEEP_LOOKBACK_DAYS = 3650
 REFERENCE_WINDOW_DAYS = 3
 SPLIT_COVERAGE_TOLERANCE = 0.02
 
@@ -150,9 +151,11 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
         amount = int(duration.group(1))
         unit = duration.group(2).lower()
         lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
+    lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
     if stale_reference:
         assert reference is not None
         lookback = max(lookback, (current - reference).days + 7)
+        lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
     if _HEART_RATE_RE.search(focus):
         metric = "heart_rate"
     elif _HILL_RE.search(focus):

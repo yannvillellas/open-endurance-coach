@@ -54,7 +54,8 @@ def _empty_content_error(completion: LlmCompletion) -> str:
 
 
 def _warn_on_token_estimate_drift(messages: list[LlmMessage], completion: LlmCompletion) -> None:
-    prompt_tokens = (completion.usage or {}).get("prompt_tokens")
+    usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+    prompt_tokens = usage.get("prompt_tokens")
     if not isinstance(prompt_tokens, int) or prompt_tokens <= 0:
         return
     estimated = sum(estimate_text_tokens(message.content) for message in messages)
@@ -155,7 +156,8 @@ class LlmClient:
                 else reasoning_effort
             ),
         )
-        cached = (completion.usage or {}).get("prompt_cache_hit_tokens")
+        usage = completion.usage if isinstance(completion.usage, Mapping) else {}
+        cached = usage.get("prompt_cache_hit_tokens")
         if cached is not None:
             logger.debug("prompt cache hit tokens: %r", cached)
         _warn_on_token_estimate_drift(messages, completion)

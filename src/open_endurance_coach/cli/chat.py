@@ -361,7 +361,7 @@ async def _handle_proposal(
 
 
 async def _run_command(
-    engine: CoachEngine, name: str, args: list[str], session: ChatSession
+    engine: CoachEngine, name: str, args: list[str], session: ChatSession, settings: Settings
 ) -> ChatState | None:
     if name == "help":
         console.print(HELP_TEXT, markup=False)
@@ -390,6 +390,14 @@ async def _run_command(
             session.history = []
             session.context = None
             session.notified.clear()
+        else:
+            session.seed(
+                engine.recent_history(
+                    settings.chat_history_turns,
+                    max_age_days=settings.chat_history_max_age_days,
+                ),
+                max_tokens=session.cap or engine.history_budget(),
+            )
         scope = "all history" if days is None else f"older than {days} days"
         console.print(f"Forgot {removed} messages ({scope}).")
         return None
@@ -508,7 +516,7 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                         return
                     state = step
                 case Command(name=name, args=args):
-                    state = await _run_command(engine, name, args, session) or state
+                    state = await _run_command(engine, name, args, session, settings) or state
             _report_memory(engine, session)
         except InternalError:
             raise

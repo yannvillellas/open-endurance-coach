@@ -9,6 +9,7 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.deep import (
+    MAX_DEEP_LOOKBACK_DAYS,
     DeepHistoricalExtractor,
     _warn_on_split_coverage,
     detect_deep_query,
@@ -1107,3 +1108,9 @@ def test_bare_relative_year_keeps_the_generic_lookback() -> None:
     query = detect_deep_query("what did I do last year", today=date(2026, 9, 16))
     assert query is not None
     assert query.reference == date(2025, 9, 16)
+
+
+def test_deep_query_clamps_an_absurd_duration() -> None:
+    query = detect_deep_query("trend in heart rate over the last 3000000 weeks", today=TODAY)
+    assert query is not None
+    assert query.lookback_days == MAX_DEEP_LOOKBACK_DAYS
