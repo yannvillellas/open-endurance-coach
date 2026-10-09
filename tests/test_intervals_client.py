@@ -185,6 +185,22 @@ async def test_get_activity_with_intervals(settings: Settings) -> None:
     await client.aclose()
 
 
+async def test_activity_ids_cannot_escape_the_request_path(settings: Settings) -> None:
+    client, captured = make_client(settings, [httpx.Response(200, json={"id": "i5"})])
+    await client.get_activity("../../athlete/i999/events")
+    raw = captured[0].url.raw_path.split(b"?")[0]
+    assert raw == b"/api/v1/activity/..%2F..%2Fathlete%2Fi999%2Fevents"
+    await client.aclose()
+
+
+async def test_event_ids_cannot_escape_the_request_path(settings: Settings) -> None:
+    client, captured = make_client(settings, [httpx.Response(200, json={})])
+    await client.get_event("../../athlete/i999/events")
+    raw = captured[0].url.raw_path.split(b"?")[0]
+    assert raw == b"/api/v1/athlete/12345/events/..%2F..%2Fathlete%2Fi999%2Fevents"
+    await client.aclose()
+
+
 async def test_get_activity_streams_path_params_and_parsing(settings: Settings) -> None:
     payload = [
         {"type": "time", "data": [0, 1, 2]},
