@@ -71,13 +71,13 @@ All settings come from environment variables or a `.env` file (see `.env.example
 | `LLM_MAX_OUTPUT_TOKENS`            | provider default | Override the model's output cap (only needed for a model the app does not know)                                                  |
 | `LLM_TIMEOUT_SECONDS`              | `180`            | Per-call timeout                                                                                                                 |
 | `APP_TIMEZONE`                     | `Europe/Paris`   | Training-day boundaries; must match the Intervals.icu account timezone                                                           |
-| `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (proposals, messages, seen activities)                                                                                 |
+| `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (proposals, messages, seen activities)                                                                        |
 | `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`        | HTTP retry policy                                                                                                                |
 | `REQUESTS_PER_SECOND`              | `8`              | Intervals.icu rate-limit throttle                                                                                                |
 | `ATHLETE_PROFILE` / `COACH_TONE`   | configurable     | Persona injected into every prompt                                                                                               |
 | `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                                                                       |
-| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for messages loaded as chat memory (>= 1)                                                                        |
-| `HISTORY_DAYS`                     | `180`            | Stored history kept (messages, proposals, seen activities); 0 = keep forever (>= 0)                                      |
+| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for messages loaded as chat memory (>= 1)                                                                             |
+| `HISTORY_DAYS`                     | `180`            | Stored history kept (messages, proposals, seen activities); 0 = keep forever (>= 0)                                              |
 
 To use DeepSeek instead, either set `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` in `.env`, or override a single run without editing anything: `coach -p deepseek` (`-p` for short; the matching default model is selected automatically; add `--model`/`-m` to force one). DeepSeek's model is `deepseek-flash` (DeepSeek-V4.1-Flash, the default); selecting any other model requires `LLM_CONTEXT_WINDOW`. Inside the chat, the active provider and model are printed on startup and `/provider [name]` / `/model [name]` switch them mid-session. A provider can only be selected when it is usable: an unknown name (e.g. `ova`) lists the available providers with their credential status, and DeepSeek without a key reports `No API key for provider 'deepseek'; set DEEPSEEK_API_KEY` immediately.
 
@@ -91,6 +91,8 @@ Available providers:
 ## Safety model
 
 Changes reach Intervals.icu only after: strict schema validation (`extra="forbid"`), a pending-only approval, and a proposal gate restating the exact plan that requires a literal `yes`. The writer resolves creates by name+date (no duplicates; race matches span any `RACE_*` priority) and refuses to update or delete anything outside the mutation's own family (workout → `WORKOUT` only, race → `RACE_*` only). No personal data is ever committed: `ATHLETE_PROFILE` lives only in `.env`, and no personal details belong in public docs, code, fixtures or issues.
+
+Untrusted content (hub data, the athlete's message, the stored conversation, model output) is neutralised at the boundaries where it is consumed: prompt blocks are tag-escaped, the conversation is sent as native role messages, dangerous characters are replaced with U+FFFD, and write payloads are validated so the displayed plan matches what is written. Details and accepted residuals: [`docs/safety-model.md`](docs/safety-model.md).
 
 ## Coaching Methodology
 
