@@ -10,7 +10,7 @@ from open_endurance_coach.schemas.decisions import DecisionReport
 
 from .records import Message, MessageRole, Proposal, ProposalStatus
 
-_SCHEMA = """
+_BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_activities (
     activity_id TEXT PRIMARY KEY,
     seen_at TEXT NOT NULL
@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 """
 
+SCHEMA_VERSION = 1
+
+MIGRATIONS: dict[int, str] = {
+    1: _BASE_SCHEMA
+    + """
+DELETE FROM proposals WHERE status = 'rejected';
+""",
+}
+
 
 logger = logging.getLogger(__name__)
 _SQL_VARIABLE_BATCH = 900
@@ -57,9 +66,30 @@ class CoachStore:
         self._connection.row_factory = sqlite3.Row
         self._restrict_permissions()
         self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.executescript(_SCHEMA)
-        self._connection.executescript("DELETE FROM proposals WHERE status = 'rejected';")
-        self._connection.commit()
+        try:
+            self._migrate()
+        except BaseException:
+            self._connection.close()
+            raise
+
+    @property
+    def schema_version(self) -> int:
+        row = self._connection.execute("PRAGMA user_version").fetchone()
+        return int(row[0])
+
+    def _migrate(self) -> None:
+        version = self.schema_version
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"database schema version {version} is newer than supported {SCHEMA_VERSION}"
+            )
+        for target in range(version + 1, SCHEMA_VERSION + 1):
+            script = f"BEGIN;\n{MIGRATIONS[target]}\nPRAGMA user_version = {target};\nCOMMIT;"
+            try:
+                self._connection.executescript(script)
+            except sqlite3.Error:
+                self._connection.rollback()
+                raise
 
     def delete_proposal(self, proposal_id: int) -> None:
         self._connection.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))

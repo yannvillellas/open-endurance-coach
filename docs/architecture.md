@@ -45,6 +45,18 @@ optionally a subset. The approval is bound to a fingerprint of the displayed pla
 plan changed by another session is refused and re-displayed instead of applied. The
 gate behaviour is documented in [chat.md](chat.md).
 
+## Store & schema
+
+State lives in one local SQLite file (`store/db.py`): `proposals`, `messages` and
+`seen_activities`. The schema is versioned with `PRAGMA user_version`. At init
+`CoachStore` applies the ordered, idempotent migrations from the file's recorded version
+up to `SCHEMA_VERSION` (version 1 is the base schema); each step runs in a transaction
+that commits its DDL and the new version together, so a failed migration rolls back
+whole. A fresh database and an existing one converge on the same schema; a database
+newer than the code is refused instead of being silently mis-read. A schema change is a
+new numbered entry in `MIGRATIONS`, not an ad-hoc `ALTER TABLE`. The version is readable
+via `CoachStore.schema_version`.
+
 ## Calendar writer
 
 Approved proposals are applied by `writer/calendar.py`:
