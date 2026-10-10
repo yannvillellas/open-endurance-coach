@@ -35,12 +35,18 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MIGRATIONS: dict[int, str] = {
     1: _BASE_SCHEMA
     + """
 DELETE FROM proposals WHERE status = 'rejected';
+""",
+    2: """
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_created_at ON proposals(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_seen_activities_seen_at ON seen_activities(seen_at);
 """,
 }
 

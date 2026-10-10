@@ -55,7 +55,9 @@ that commits its DDL and the new version together, so a failed migration rolls b
 whole. A fresh database and an existing one converge on the same schema; a database
 newer than the code is refused instead of being silently mis-read. A schema change is a
 new numbered entry in `MIGRATIONS`, not an ad-hoc `ALTER TABLE`. The version is readable
-via `CoachStore.schema_version`.
+via `CoachStore.schema_version`. Migration 2 adds the indexes for the filtered reads
+(`proposals.status`, `proposals.created_at`, `messages.created_at`,
+`seen_activities.seen_at`).
 
 ## Calendar writer
 

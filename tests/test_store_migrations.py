@@ -41,6 +41,23 @@ def _column_names(path: Path, table: str) -> set[str]:
         connection.close()
 
 
+def _index_names(path: Path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
+    finally:
+        connection.close()
+    return {row[0] for row in rows}
+
+
+QUERY_INDEXES = {
+    "idx_proposals_status",
+    "idx_proposals_created_at",
+    "idx_messages_created_at",
+    "idx_seen_activities_seen_at",
+}
+
+
 def test_fresh_database_records_the_current_version(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     store = CoachStore(path)
@@ -178,3 +195,27 @@ def test_failed_migration_rolls_back_and_keeps_the_version(
         CoachStore(path)
     assert _user_version(path) == SCHEMA_VERSION
     assert "partial" not in _table_names(path)
+
+
+def test_fresh_database_has_the_query_indexes(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+    assert _index_names(path).issuperset(QUERY_INDEXES)
+
+
+def test_an_existing_versioned_database_gains_the_indexes(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+    connection = sqlite3.connect(path)
+    try:
+        for name in QUERY_INDEXES:
+            connection.execute(f"DROP INDEX IF EXISTS {name}")
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION - 1}")
+        connection.commit()
+    finally:
+        connection.close()
+
+    reopened = CoachStore(path)
+    assert reopened.schema_version == SCHEMA_VERSION
+    reopened.close()
+    assert _index_names(path).issuperset(QUERY_INDEXES)
