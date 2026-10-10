@@ -417,13 +417,19 @@ def _report_memory(engine: CoachEngine, session: ChatSession) -> None:
 async def run_chat(engine: CoachEngine, settings: Settings) -> None:
     cap = engine.history_budget()
     session = ChatSession(cap=cap)
-    if settings.history_days > 0:
-        removed = engine.prune_history(settings.history_days)
-        total = sum(removed.values())
-        if total:
-            console.print(
-                f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
-            )
+    removed = engine.prune_conversation(settings.chat_history_max_age_days)
+    if removed:
+        noun = "message" if removed == 1 else "messages"
+        console.print(
+            f"[meta]Pruned {removed} old {noun}"
+            f" (keeping {settings.chat_history_max_age_days} days).[/meta]"
+        )
+    markers = engine.prune_seen_activities()
+    if markers:
+        noun = "marker" if markers == 1 else "markers"
+        console.print(
+            f"[meta]Pruned {markers} old seen-activity {noun} (older than the fetch window).[/meta]"
+        )
     for proposal_id in engine.discard_pending_proposals():
         console.print(f"[warn]Proposal #{proposal_id} was never answered; discarded.[/warn]")
     for stale_id, reason in engine.discard_stale_proposals():

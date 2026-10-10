@@ -584,19 +584,36 @@ def test_chat_ctrl_c_while_conversing_exits(patched: Any, monkeypatch: pytest.Mo
     assert "Cancelled" not in result.output
 
 
-def test_chat_startup_keeps_history_when_window_is_zero(
-    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
-) -> None:
+def test_chat_startup_prunes_messages_older_than_the_seeding_window(patched: Any) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     _, store = patched(provider)
     store.add_message(MessageRole.USER, "legs heavy")
-    monkeypatch.setattr(
-        cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 0})
-    )
+    old_stamp = (datetime.now(UTC) - timedelta(days=200)).isoformat()
+    store._connection.execute("UPDATE messages SET created_at = ?", (old_stamp,))
+    store._connection.commit()
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "Pruned" not in result.output
-    assert "legs heavy" in provider.calls[0]["messages"][1].content
+    assert "Pruned 1 old message (keeping 90 days)." in result.output
+    assert all(row.content != "legs heavy" for row in store.list_messages())
+
+
+def test_chat_startup_prunes_unfetchable_seen_markers(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    store.mark_activities_seen(["fx-ancient", "fx-recent"])
+    old_stamp = (datetime.now(UTC) - timedelta(days=4000)).isoformat()
+    store._connection.execute(
+        "UPDATE seen_activities SET seen_at = ? WHERE activity_id = ?",
+        (old_stamp, "fx-ancient"),
+    )
+    store._connection.commit()
+
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
+
+    assert result.exit_code == 0
+    assert "Pruned 1 old seen-activity marker (older than the fetch window)." in result.output
+    assert store.is_activity_seen("fx-ancient") is False
+    assert store.is_activity_seen("fx-recent") is True
 
 
 def test_chat_does_not_announce_seeded_memory(patched: Any) -> None:
@@ -1173,18 +1190,15 @@ def test_chat_forget_with_days_keeps_recent_history(patched: Any) -> None:
     assert "legs heavy" in provider.calls[0]["messages"][1].content
 
 
-def test_chat_startup_reports_pruned_records(
-    patched: Any, monkeypatch: pytest.MonkeyPatch, settings: Settings
+def test_chat_startup_reports_pruned_messages(
+    patched: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     engine, _ = patched(provider)
-    monkeypatch.setattr(engine, "prune_history", lambda days=None, **kwargs: {"proposals": 2})
-    monkeypatch.setattr(
-        cli_main, "get_settings", lambda: settings.model_copy(update={"history_days": 180})
-    )
+    monkeypatch.setattr(engine, "prune_conversation", lambda days=None, **kwargs: 2)
     result = runner.invoke(cli_main.app, [], input="how was my week?\n")
     assert result.exit_code == 0
-    assert "Pruned 2 old records" in result.output
+    assert "Pruned 2 old messages" in result.output
 
 
 def test_chat_negated_assume_does_not_override_needs_input(patched: Any) -> None:

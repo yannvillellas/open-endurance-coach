@@ -15,7 +15,11 @@ from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings, effective_input_budget, resolved_input_room
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
+from open_endurance_coach.extractors.deep import (
+    MAX_DEEP_LOOKBACK_DAYS,
+    DeepHistoricalExtractor,
+    detect_deep_query,
+)
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
 from open_endurance_coach.prompts.prompts import (
     CHAT_ONLY_FALLBACK,
@@ -483,13 +487,9 @@ class CoachEngine:
         self._settings = self._llm_client.select(provider=provider, model=model)
         return self.llm_selection()
 
-    def prune_history(
-        self, days: int | None = None, *, now: datetime | None = None
-    ) -> dict[str, int]:
-        cutoff = now or datetime.now(UTC)
-        if days is not None:
-            cutoff = cutoff - timedelta(days=days)
-        return self._store.prune_before(cutoff)
+    def prune_seen_activities(self, *, now: datetime | None = None) -> int:
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=MAX_DEEP_LOOKBACK_DAYS)
+        return self._store.prune_seen_activities(cutoff)
 
     def wipe_local_state(self) -> dict[str, int]:
         return self._store.delete_all_local()

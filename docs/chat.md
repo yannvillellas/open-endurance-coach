@@ -51,8 +51,9 @@ and, at 80%, drops the oldest exchanges (keeping the newest) and reports the new
 context size. With the default model-window budgets those thresholds sit far above a
 normal session, so they matter mainly when `LLM_INPUT_BUDGET` is set lower; the cap
 assumes the full athlete-data reserve and no current message, so a very large message
-can trim slightly before the notice. Stored history is pruned automatically to
-`HISTORY_DAYS` (default 180) at startup.
+can trim slightly before the notice. At startup, messages older than
+`CHAT_HISTORY_MAX_AGE_DAYS` (default 90) are pruned and seen-activity markers older
+than the widest fetch window are deleted; proposals are never pruned by age.
 
 `/forget` deletes the conversation (the `messages` log) now, `/forget N` deletes only
 the messages older than N days, and `/forget all` deletes all local state
