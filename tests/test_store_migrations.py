@@ -24,6 +24,17 @@ def _set_user_version(path: Path, version: int) -> None:
         connection.close()
 
 
+def _build_version(path: Path, version: int) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        for target in range(1, version + 1):
+            connection.executescript(store_db.MIGRATIONS[target])
+        connection.execute(f"PRAGMA user_version = {version}")
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def _table_names(path: Path) -> set[str]:
     connection = sqlite3.connect(path)
     try:
@@ -205,17 +216,29 @@ def test_fresh_database_has_the_query_indexes(tmp_path: Path) -> None:
 
 def test_an_existing_versioned_database_gains_the_indexes(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
-    CoachStore(path).close()
-    connection = sqlite3.connect(path)
-    try:
-        for name in QUERY_INDEXES:
-            connection.execute(f"DROP INDEX IF EXISTS {name}")
-        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION - 1}")
-        connection.commit()
-    finally:
-        connection.close()
+    _build_version(path, 1)
+    assert not (QUERY_INDEXES & _index_names(path))
 
     reopened = CoachStore(path)
     assert reopened.schema_version == SCHEMA_VERSION
     reopened.close()
     assert _index_names(path).issuperset(QUERY_INDEXES)
+
+
+def test_a_negative_database_version_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+    _set_user_version(path, -1)
+
+    with pytest.raises(RuntimeError, match="invalid"):
+        CoachStore(path)
+
+
+def test_a_missing_migration_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+
+    monkeypatch.setattr(store_db, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
+
+    with pytest.raises(RuntimeError, match="missing"):
+        CoachStore(path)

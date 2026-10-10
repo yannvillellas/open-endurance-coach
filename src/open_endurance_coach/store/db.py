@@ -89,6 +89,11 @@ class CoachStore:
             raise RuntimeError(
                 f"database schema version {version} is newer than supported {SCHEMA_VERSION}"
             )
+        if version < 0:
+            raise RuntimeError(f"database schema version {version} is invalid")
+        missing = [target for target in range(1, SCHEMA_VERSION + 1) if target not in MIGRATIONS]
+        if missing:
+            raise RuntimeError(f"missing migrations for schema version(s): {missing}")
         for target in range(version + 1, SCHEMA_VERSION + 1):
             script = f"BEGIN;\n{MIGRATIONS[target]}\nPRAGMA user_version = {target};\nCOMMIT;"
             try:
