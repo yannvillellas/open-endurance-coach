@@ -26,6 +26,7 @@ from open_endurance_coach.schemas.intervals import (
 
 from .fakes import (
     TODAY,
+    FakeIntervalsClient,
     make_activity,
     make_event,
     make_intervals_client,
@@ -50,14 +51,51 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     client = make_intervals_client()
     extractor = StandardExtractor(settings, client)
     await extractor.extract("status check", user_feedback="felt tired", today=TODAY)
-    assert client.calls == [
+    calls = [call for call in client.calls if call[0] != "events"]
+    assert calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("events", "2024-01-18", "2024-02-15", None),
-        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
         ("athlete_summary", "2023-11-03", "2024-02-01"),
         ("sport_settings",),
     ]
+
+
+async def test_fake_list_events_filters_by_window_and_category() -> None:
+    client = FakeIntervalsClient(
+        activities=[],
+        wellness=[],
+        sport_settings=[],
+        events=[
+            make_event(1, "2024-01-17", name="Too old"),
+            make_event(2, "2024-01-18", name="Oldest inside"),
+            make_event(3, "2024-02-15", name="Newest inside"),
+            make_event(4, "2024-02-16", name="Too new"),
+            make_event(5, "2024-01-20", name="Race inside", category="RACE_A"),
+        ],
+    )
+    workouts = await client.list_events("2024-01-18", "2024-02-15", category="WORKOUT")
+    assert [row["name"] for row in workouts] == ["Oldest inside", "Newest inside"]
+    everything = await client.list_events("2024-01-18", "2024-02-15")
+    assert [row["name"] for row in everything] == [
+        "Oldest inside",
+        "Newest inside",
+        "Race inside",
+    ]
+
+
+async def test_standard_extraction_drops_events_outside_the_window(settings: Settings) -> None:
+    client = make_intervals_client(
+        events=[
+            make_event(1, (TODAY - timedelta(days=15)).isoformat(), name="Too old"),
+            make_event(2, (TODAY - timedelta(days=14)).isoformat(), name="Oldest inside"),
+            make_event(3, (TODAY + timedelta(days=14)).isoformat(), name="Newest inside"),
+            make_event(4, (TODAY + timedelta(days=15)).isoformat(), name="Too new"),
+        ]
+    )
+    extractor = StandardExtractor(settings, client)
+    context = await extractor.extract("status check", today=TODAY)
+    names = [event.name for event in context.recent_events + context.upcoming_events]
+    assert names == ["Oldest inside", "Newest inside"]
 
 
 async def test_standard_extraction_splits_past_and_upcoming_events(settings: Settings) -> None:
@@ -91,7 +129,6 @@ async def test_deep_extraction_splits_past_and_upcoming_events(settings: Setting
     focus = "how did my heart rate improve on hills in the last 3 months"
     extractor = DeepHistoricalExtractor(settings, client)
     context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
-    assert ("events", "2024-01-18", "2024-02-15", None) in client.calls
     assert [event.name for event in context.recent_events] == ["Past session"]
     assert [event.name for event in context.upcoming_events] == ["Future session"]
 
@@ -963,8 +1000,6 @@ async def test_deep_extraction_carries_goal_races_and_rollup(settings: Settings)
     context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
     assert [race.name for race in context.goal_races] == ["Trail Race"]
     assert len(context.training_rollup) == 2
-    race_call = next(call for call in client.calls if call[0] == "events" and call[3] is not None)
-    assert race_call[1:] == ("2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C")
     summary_call = next(call for call in client.calls if call[0] == "athlete_summary")
     assert summary_call[1:] == ("2023-11-03", "2024-02-01")
 
