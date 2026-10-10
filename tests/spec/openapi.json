@@ -1874,45 +1874,6 @@
         }
       }
     },
-    "/api/v1/athlete/{athleteId}/sport-settings/{id}/apply": {
-      "put": {
-        "tags": [
-          "Sports"
-        ],
-        "summary": "Apply sport settings to matching activities (updates zones), done asynchronously",
-        "operationId": "applyToActivities",
-        "parameters": [
-          {
-            "name": "athleteId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "*/*": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/athlete/{athleteId}/sport-settings/{id}": {
       "get": {
         "tags": [
@@ -6729,6 +6690,24 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "oldest",
+            "in": "query",
+            "description": "Local ISO-8601 date or date and time e.g. 2019-07-22T16:18:49 or 2019-07-22, defaults to all",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "newest",
+            "in": "query",
+            "description": "Local ISO-8601 date or date and time, defaults to all",
+            "required": false,
             "schema": {
               "type": "string"
             }
