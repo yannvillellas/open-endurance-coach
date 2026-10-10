@@ -76,7 +76,8 @@ class FakeIntervalsClient:
         return [
             dict(event)
             for event in self.events
-            if allowed is None or event.get("category") in allowed
+            if (allowed is None or event.get("category") in allowed)
+            and oldest <= str(event.get("start_date_local", ""))[:10] <= newest
         ]
 
     async def get_event(self, event_id: str) -> dict[str, Any]:
