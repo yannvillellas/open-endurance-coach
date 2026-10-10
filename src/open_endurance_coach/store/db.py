@@ -106,6 +106,19 @@ class CoachStore:
         self._connection.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))
         self._connection.commit()
 
+    def delete_pending_proposals(self) -> list[int]:
+        rows = self._connection.execute(
+            "SELECT id FROM proposals WHERE status = ? ORDER BY id",
+            (ProposalStatus.PENDING.value,),
+        ).fetchall()
+        ids = [int(row["id"]) for row in rows]
+        if ids:
+            self._connection.execute(
+                "DELETE FROM proposals WHERE status = ?", (ProposalStatus.PENDING.value,)
+            )
+            self._connection.commit()
+        return ids
+
     def _restrict_permissions(self) -> None:
         if str(self._path) == ":memory:":
             return
@@ -114,25 +127,19 @@ class CoachStore:
         except OSError:
             logger.warning("could not restrict permissions on %s", self._path)
 
-    def prune_before(self, cutoff: datetime) -> dict[str, int]:
-        stamp = cutoff.isoformat()
-        statements = {
-            "messages": "DELETE FROM messages WHERE created_at < ?",
-            "proposals": "DELETE FROM proposals WHERE created_at < ?",
-            "seen_activities": "DELETE FROM seen_activities WHERE seen_at < ?",
-        }
-        counts: dict[str, int] = {}
+    def prune_seen_activities(self, cutoff: datetime) -> int:
         try:
-            for name, statement in statements.items():
-                cursor = self._connection.execute(statement, (stamp,))
-                counts[name] = cursor.rowcount
+            cursor = self._connection.execute(
+                "DELETE FROM seen_activities WHERE seen_at < ?", (cutoff.isoformat(),)
+            )
             self._connection.commit()
-        except sqlite3.Error:
+        except BaseException:
             self._connection.rollback()
             raise
-        if sum(counts.values()) >= _VACUUM_MIN_ROWS:
-            self._connection.execute("VACUUM")
-        return counts
+        removed = cursor.rowcount
+        if removed >= _VACUUM_MIN_ROWS:
+            _vacuum_best_effort(self._connection)
+        return removed
 
     def delete_all_local(self) -> dict[str, int]:
         statements = {

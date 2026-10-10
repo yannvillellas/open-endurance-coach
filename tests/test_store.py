@@ -374,47 +374,17 @@ def test_recent_messages_cutoff_filters_old_rows(tmp_path: Path) -> None:
     assert [row.content for row in unfiltered] == ["recent row", "old row"]
 
 
-def test_prune_before_deletes_old_rows_and_keeps_recent(tmp_path: Path) -> None:
-    from tests.fakes import FakeClock
-
-    clock = FakeClock(NOW)
-    store = CoachStore(tmp_path / "coach.db", clock=clock)
-    old_proposal = store.save_proposal(focus="old", report=make_report(), context=make_context())
-    store.add_message(MessageRole.USER, "old feedback")
-    store.mark_activities_seen(["fx-old"])
-    store.approve_proposal(old_proposal)
-
-    clock.now = NOW + timedelta(days=200)
-    store.save_proposal(focus="recent", report=make_report(), context=make_context())
-    store.add_message(MessageRole.USER, "recent feedback")
-    store.mark_activities_seen(["fx-recent"])
-
-    counts = store.prune_before(NOW + timedelta(days=100))
-
-    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
-    assert [proposal.focus for proposal in store.list_proposals()] == ["recent"]
-    assert [row.content for row in store.recent_messages(10)] == ["recent feedback"]
-    assert store.list_unapplied_proposals() == []
-    assert store.unseen_activity_ids(["fx-old", "fx-recent"]) == {"fx-old"}
-
-
-def test_prune_before_keeps_messages_newer_than_the_cutoff(tmp_path: Path) -> None:
-    from tests.fakes import FakeClock
-
-    clock = FakeClock(NOW)
-    store = CoachStore(tmp_path / "coach.db", clock=clock)
-    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
-
-    clock.now = NOW + timedelta(days=200)
-    store.add_message(MessageRole.USER, "late feedback")
-    store.approve_proposal(proposal_id)
-
-    counts = store.prune_before(NOW + timedelta(days=100))
-
-    assert counts == {"messages": 0, "proposals": 1, "seen_activities": 0}
-    assert [row.content for row in store.list_messages()] == ["late feedback"]
-    assert store.list_proposals() == []
-    assert store.list_unapplied_proposals() == []
+def test_prune_messages_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.add_message(MessageRole.USER, "old message")
+    old_stamp = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+    store._connection.execute("UPDATE messages SET created_at = ?", (old_stamp,))
+    store._connection.commit()
+    traced: list[str] = []
+    store._connection.set_trace_callback(lambda statement: traced.append(statement.upper()))
+    removed = store.prune_messages(datetime.now(UTC) - timedelta(days=100))
+    assert removed == 1
+    assert not any(statement.startswith("VACUUM") for statement in traced)
 
 
 def test_database_file_is_owner_only(tmp_path: Path) -> None:
@@ -443,19 +413,22 @@ def test_reject_proposal_deletes_it_and_keeps_messages(tmp_path: Path) -> None:
         store.reject_proposal(proposal_id)
 
 
-def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
+def test_delete_pending_proposals_keeps_unapplied(tmp_path: Path) -> None:
     store = make_store(tmp_path)
-    proposal_id = store.save_proposal(focus="old", report=make_report(), context=make_context())
-    old_stamp = (datetime.now(UTC) - timedelta(days=400)).isoformat()
-    store._connection.execute(
-        "UPDATE proposals SET created_at = ? WHERE id = ?", (old_stamp, proposal_id)
+    pending_id = store.save_proposal(focus="pending", report=make_report(), context=make_context())
+    unapplied_id = store.save_proposal(
+        focus="unapplied", report=make_report(), context=make_context()
     )
-    store._connection.commit()
-    traced: list[str] = []
-    store._connection.set_trace_callback(lambda statement: traced.append(statement.upper()))
-    counts = store.prune_before(datetime.now(UTC) - timedelta(days=100))
-    assert counts["proposals"] == 1
-    assert not any(statement.startswith("VACUUM") for statement in traced)
+    store.approve_proposal(unapplied_id)
+
+    discarded = store.delete_pending_proposals()
+
+    assert discarded == [pending_id]
+    assert store.get_proposal(pending_id) is None
+    remaining = store.list_proposals()
+    assert [proposal.id for proposal in remaining] == [unapplied_id]
+    assert remaining[0].status is ProposalStatus.UNAPPLIED
+    assert store.delete_pending_proposals() == []
 
 
 def test_prune_messages_deletes_messages_only(tmp_path: Path) -> None:
@@ -478,6 +451,22 @@ def test_prune_messages_deletes_messages_only(tmp_path: Path) -> None:
     assert store.get_proposal(proposal_id) is not None
     assert store.is_activity_seen("fx-old")
     assert store.is_activity_seen("fx-recent")
+
+
+def test_prune_seen_activities_deletes_only_unfetchable_markers(tmp_path: Path) -> None:
+    from tests.fakes import FakeClock
+
+    clock = FakeClock(NOW)
+    store = CoachStore(tmp_path / "coach.db", clock=clock)
+    store.mark_activities_seen(["fx-ancient"])
+    clock.now = NOW + timedelta(days=4000)
+    store.mark_activities_seen(["fx-recent"])
+
+    removed = store.prune_seen_activities(NOW + timedelta(days=3650))
+
+    assert removed == 1
+    assert store.is_activity_seen("fx-ancient") is False
+    assert store.is_activity_seen("fx-recent") is True
 
 
 def test_delete_all_local_wipes_messages_proposals_and_seen(tmp_path: Path) -> None:

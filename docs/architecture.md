@@ -59,6 +59,19 @@ via `CoachStore.schema_version`. Migration 2 adds the indexes for the filtered r
 (`proposals.status`, `proposals.created_at`, `messages.created_at`,
 `seen_activities.seen_at`).
 
+Retention follows purpose, not a single age knob. Messages are pruned at startup to
+`CHAT_HISTORY_MAX_AGE_DAYS` — the maximum age at which a stored turn can still be
+seeded into a session — so one setting defines both what is read and what is kept.
+Proposals are lifecycle-bound and never pruned by age: apply and reject delete the row,
+orphaned `pending` drafts are discarded at startup, an invalid `unapplied` is discarded
+on drift or staleness, and a valid one is deliberately re-offered until resolved.
+`seen_activities` markers are pruned to the widest fetch window
+(`MAX_DEEP_LOOKBACK_DAYS`): a marker is deleted only once its activity can no longer be
+returned by any `list_activities` call, so it never causes a false "New activities
+since last review" and is never kept once it cannot be read again. The tests pin the
+boundaries: old messages and unfetchable markers are pruned while proposals and
+still-fetchable markers survive (`tests/test_store.py`).
+
 ## Calendar writer
 
 Approved proposals are applied by `writer/calendar.py`:

@@ -25,8 +25,7 @@ limit and the options (wait, set `OVH_API_KEY`, or select another provider with
 | `REQUESTS_PER_SECOND`              | `8`              | Intervals.icu rate-limit throttle                                                                                                |
 | `ATHLETE_PROFILE` / `COACH_TONE`   | configurable     | Persona injected into every prompt                                                                                               |
 | `CHAT_HISTORY_TURNS`               | `10`             | Feedback rows loaded as chat memory (>= 1)                                                                                       |
-| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for messages loaded as chat memory (>= 1)                                                                             |
-| `HISTORY_DAYS`                     | `180`            | Stored history kept (messages, proposals, seen activities); 0 = keep forever (>= 0)                                              |
+| `CHAT_HISTORY_MAX_AGE_DAYS`        | `90`             | Cutoff age for messages loaded as chat memory and kept on disk (>= 1)                                                            |
 
 To use DeepSeek instead, either set `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` in
 `.env`, or override a single run without editing anything: `coach -p deepseek` (`-p`

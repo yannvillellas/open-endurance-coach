@@ -74,9 +74,9 @@ Applied:
 - **Writer** — applied changes are idempotent by name+date and family-scoped (workouts
   touch only `WORKOUT`, races only `RACE_*`); a create that would overwrite a different
   existing event is refused.
-- **Memory** — sessions keep recent exchanges under the model's input budget; stored
-  history is pruned after `HISTORY_DAYS` (default 180). `/forget`, `/forget N` and
-  `/forget all` work in chat.
+- **Memory** — sessions keep recent exchanges under the model's input budget; messages
+  older than `CHAT_HISTORY_MAX_AGE_DAYS` (default 90) are pruned at startup.
+  `/forget`, `/forget N` and `/forget all` work in chat.
 
 ## Safety
 
