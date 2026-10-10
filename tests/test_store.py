@@ -458,6 +458,24 @@ def test_prune_does_not_vacuum_for_a_single_row(tmp_path: Path) -> None:
     assert not any(statement.startswith("VACUUM") for statement in traced)
 
 
+def test_delete_pending_proposals_keeps_unapplied(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    pending_id = store.save_proposal(focus="pending", report=make_report(), context=make_context())
+    unapplied_id = store.save_proposal(
+        focus="unapplied", report=make_report(), context=make_context()
+    )
+    store.approve_proposal(unapplied_id)
+
+    discarded = store.delete_pending_proposals()
+
+    assert discarded == [pending_id]
+    assert store.get_proposal(pending_id) is None
+    remaining = store.list_proposals()
+    assert [proposal.id for proposal in remaining] == [unapplied_id]
+    assert remaining[0].status is ProposalStatus.UNAPPLIED
+    assert store.delete_pending_proposals() == []
+
+
 def test_prune_messages_deletes_messages_only(tmp_path: Path) -> None:
     from tests.fakes import FakeClock
 

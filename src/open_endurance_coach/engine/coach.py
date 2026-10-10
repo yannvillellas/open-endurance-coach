@@ -596,6 +596,9 @@ class CoachEngine:
     def delete_proposal(self, proposal_id: int) -> None:
         self._store.delete_proposal(proposal_id)
 
+    def discard_pending_proposals(self) -> list[int]:
+        return self._store.delete_pending_proposals()
+
     def discard_stale_proposals(self) -> list[tuple[int, str]]:
         discarded: list[tuple[int, str]] = []
         today = self.today()

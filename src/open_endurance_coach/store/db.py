@@ -106,6 +106,19 @@ class CoachStore:
         self._connection.execute("DELETE FROM proposals WHERE id = ?", (proposal_id,))
         self._connection.commit()
 
+    def delete_pending_proposals(self) -> list[int]:
+        rows = self._connection.execute(
+            "SELECT id FROM proposals WHERE status = ? ORDER BY id",
+            (ProposalStatus.PENDING.value,),
+        ).fetchall()
+        ids = [int(row["id"]) for row in rows]
+        if ids:
+            self._connection.execute(
+                "DELETE FROM proposals WHERE status = ?", (ProposalStatus.PENDING.value,)
+            )
+            self._connection.commit()
+        return ids
+
     def _restrict_permissions(self) -> None:
         if str(self._path) == ":memory:":
             return

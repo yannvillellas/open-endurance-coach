@@ -424,6 +424,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
             console.print(
                 f"[meta]Pruned {total} old records (keeping {settings.history_days} days).[/meta]"
             )
+    for proposal_id in engine.discard_pending_proposals():
+        console.print(f"[warn]Proposal #{proposal_id} was never answered; discarded.[/warn]")
     for stale_id, reason in engine.discard_stale_proposals():
         console.print(
             f"[warn]Proposal #{stale_id} was approved with {escape(str(reason))}; discarded.[/warn]"

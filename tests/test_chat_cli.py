@@ -1549,6 +1549,39 @@ def test_chat_race_needs_input_blocks_the_proposal(patched: Any) -> None:
     assert calendar.created == []
 
 
+def test_chat_startup_discards_an_orphaned_pending_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    report = DecisionReport.model_validate(json.loads(report_json()))
+    proposal_id = store.save_proposal(
+        focus="abandoned", report=report, context=CoachContext(focus="abandoned")
+    )
+
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
+
+    assert result.exit_code == 0
+    assert f"Proposal #{proposal_id} was never answered; discarded." in result.output
+    assert store.get_proposal(proposal_id) is None
+
+
+def test_chat_startup_keeps_an_unapplied_proposal(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    _, store = patched(provider)
+    report = DecisionReport.model_validate(json.loads(report_json()))
+    proposal_id = store.save_proposal(
+        focus="approved", report=report, context=CoachContext(focus="approved")
+    )
+    store.approve_proposal(proposal_id)
+
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
+
+    assert result.exit_code == 0
+    assert f"Proposal #{proposal_id}" in result.output
+    assert "was recorded but never applied" in result.output
+    assert "was never answered" not in result.output
+    assert store.get_proposal(proposal_id) is not None
+
+
 def test_chat_startup_discards_a_stale_approved_proposal(patched: Any) -> None:
     calendar = FakeCalendarClient()
     provider = FakeLlmProvider()
@@ -1889,11 +1922,12 @@ async def test_read_input_uses_the_prompt_session_on_a_tty(
 def test_chat_forget_all_wipes_local_state_on_yes(patched: Any) -> None:
     provider = FakeLlmProvider()
     _, store = patched(provider)
-    store.save_proposal(
+    proposal_id = store.save_proposal(
         focus="f",
         report=DecisionReport.model_validate(json.loads(report_json())),
         context=CoachContext(focus="f"),
     )
+    store.approve_proposal(proposal_id)
     store.add_message(MessageRole.USER, "hello")
     store.mark_activities_seen(["fx-1"])
 
