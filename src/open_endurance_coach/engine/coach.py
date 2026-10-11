@@ -32,12 +32,14 @@ from open_endurance_coach.schemas.decisions import (
     CreateRace,
     CreateWorkout,
     DecisionReport,
+    MemoryOp,
     Mutation,
     UpdateRace,
     UpdateWorkout,
     mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Event
+from open_endurance_coach.schemas.memory import MemoryAction
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
     Message,
@@ -63,6 +65,7 @@ class FeedbackOutcome:
 
     proposal: Proposal
     report: DecisionReport
+    memory_notices: tuple[str, ...] = ()
 
 
 def _today(context: CoachContext, settings: Settings) -> date:
@@ -399,6 +402,7 @@ class CoachEngine:
         today: date | None = None,
         context: CoachContext | None = None,
         history: list[LlmMessage] | None = None,
+        memory_notices: list[str] | None = None,
     ) -> Proposal:
         self.check_focus(focus)
         if context is None:
@@ -408,7 +412,10 @@ class CoachEngine:
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
         self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
-        self._store.add_message(MessageRole.USER, focus)
+        message_id = self._store.add_message(MessageRole.USER, focus)
+        notices = self.apply_memory_ops(report.memory, source_message_id=message_id)
+        if memory_notices is not None:
+            memory_notices.extend(notices)
         self._store.add_message(
             MessageRole.ASSISTANT, assistant_turn(report).content, report=report
         )
@@ -576,19 +583,20 @@ class CoachEngine:
         message_id = self._store.add_message(MessageRole.USER, feedback)
         report = await self._run_llm(context, history=history)
         self._store.set_message_report(message_id, report)
+        notices = tuple(self.apply_memory_ops(report.memory, source_message_id=message_id))
         self._store.add_message(
             MessageRole.ASSISTANT, assistant_turn(report).content, report=report
         )
         if report.intent != "plan" or (report.needs_input and not assume):
             # Conversational turn or a plan still blocked on material questions:
             # keep the pending proposal and only carry the report for display.
-            return FeedbackOutcome(proposal=proposal, report=report)
+            return FeedbackOutcome(proposal=proposal, report=report, memory_notices=notices)
         self._store.update_proposal_report(
             proposal_id, report=report, user_feedback=feedback, context=context
         )
         updated = self._store.get_proposal(proposal_id)
         assert updated is not None
-        return FeedbackOutcome(proposal=updated, report=report)
+        return FeedbackOutcome(proposal=updated, report=report, memory_notices=notices)
 
     def _assert_current_dates(self, report: DecisionReport) -> None:
         _assert_valid_mutations(report, today=self.today())
@@ -598,6 +606,57 @@ class CoachEngine:
 
     def discard_pending_proposals(self) -> list[int]:
         return self._store.delete_pending_proposals()
+
+    def expire_memory(self, *, today: date | None = None) -> list[tuple[int, str]]:
+        return self._store.expire_facts(today=today or self.today())
+
+    def apply_memory_ops(
+        self, ops: Sequence[MemoryOp], *, source_message_id: int | None = None
+    ) -> list[str]:
+        """Apply memory operations outside the approval gate; one notice per applied op."""
+        notices: list[str] = []
+        for op in ops:
+            try:
+                notices.append(self._apply_memory_op(op, source_message_id=source_message_id))
+            except ValueError as exc:
+                logger.warning("memory operation skipped: %s", exc)
+        return notices
+
+    def _apply_memory_op(self, op: MemoryOp, *, source_message_id: int | None) -> str:
+        if op.action is MemoryAction.REMEMBER:
+            assert op.category is not None and op.origin is not None and op.text is not None
+            fact_id = self._store.remember_fact(
+                op.category,
+                op.origin,
+                op.text,
+                expires_on=op.expires_on,
+                trigger_keywords=op.trigger_keywords,
+                trigger_on=op.trigger_on,
+                source_message_id=source_message_id,
+            )
+            logger.info("remembered memory fact %s", fact_id)
+            return f"Remembered: [{op.category.value}] {op.text}"
+        assert op.id is not None
+        fact = self._store.get_fact(op.id)
+        if fact is None:
+            raise ValueError(f"memory fact not found: {op.id}")
+        if op.action is MemoryAction.UPDATE:
+            assert op.text is not None
+            self._store.update_fact(
+                op.id,
+                op.text,
+                expires_on=op.expires_on,
+                trigger_keywords=op.trigger_keywords,
+                trigger_on=op.trigger_on,
+            )
+            return f"Updated: [{fact.category.value}] {op.text}"
+        if op.action is MemoryAction.CLOSE:
+            outcome = self._store.close_fact(op.id)
+            if outcome == "resolved":
+                return f"Closed: [{fact.category.value}] {fact.text} (kept as history)"
+            return f"Closed: [{fact.category.value}] {fact.text}"
+        self._store.forget_fact(op.id)
+        return f"Forgotten: [{fact.category.value}] {fact.text}"
 
     def discard_stale_proposals(self) -> list[tuple[int, str]]:
         discarded: list[tuple[int, str]] = []

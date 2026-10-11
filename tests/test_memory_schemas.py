@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import pytest
@@ -30,13 +31,20 @@ def test_remember_op_round_trips() -> None:
     assert op.trigger_on == date(2026, 10, 1)
 
 
-def test_update_op_accepts_a_single_field_change() -> None:
-    op = MemoryOp.model_validate({"action": "update", "id": 12, "expires_on": "2026-10-20"})
+def test_update_op_requires_id_and_text() -> None:
+    op = MemoryOp.model_validate(
+        {
+            "action": "update",
+            "id": 12,
+            "text": "Pas de vélo jusqu'au 20/10",
+            "expires_on": "2026-10-20",
+        }
+    )
 
     assert op.action is MemoryAction.UPDATE
     assert op.id == 12
+    assert op.text == "Pas de vélo jusqu'au 20/10"
     assert op.expires_on == date(2026, 10, 20)
-    assert "text" not in op.model_fields_set
 
 
 def test_close_and_forget_require_only_an_id() -> None:
@@ -64,7 +72,7 @@ def test_close_and_forget_require_only_an_id() -> None:
             "id",
         ),
         ({"action": "update", "text": "x"}, "id"),
-        ({"action": "update", "id": 3}, "change"),
+        ({"action": "update", "id": 3}, "text"),
         ({"action": "close"}, "id"),
         ({"action": "forget", "id": 3, "text": "x"}, "content"),
         ({"action": "close", "id": 3, "category": "injury_niggle"}, "category"),
@@ -115,6 +123,34 @@ def test_decision_report_parses_memory_ops() -> None:
 def test_decision_report_without_memory_stays_valid() -> None:
     report = DecisionReport.model_validate({"summary": "No facts"})
     assert report.memory == []
+
+
+def test_memory_ops_survive_a_json_round_trip() -> None:
+    report = DecisionReport.model_validate(
+        {
+            "summary": "Noted",
+            "memory": [
+                {
+                    "action": "remember",
+                    "category": "injury_niggle",
+                    "origin": "declared",
+                    "text": "Genou gauche",
+                },
+                {
+                    "action": "update",
+                    "id": 1,
+                    "text": "Genou gauche, revu",
+                    "expires_on": "2026-10-20",
+                },
+                {"action": "close", "id": 2},
+                {"action": "forget", "id": 3},
+            ],
+        }
+    )
+
+    reloaded = DecisionReport.model_validate(json.loads(report.model_dump_json()))
+
+    assert reloaded.memory == report.memory
 
 
 def test_context_renders_the_memory_sections() -> None:

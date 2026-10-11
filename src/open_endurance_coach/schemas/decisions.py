@@ -201,14 +201,8 @@ class MemoryOp(BaseModel):
         if self.category is not None or self.origin is not None:
             raise ValueError(f"{self.action.value} must not carry category or origin")
         if self.action is MemoryAction.UPDATE:
-            changes = self.model_fields_set & {
-                "text",
-                "expires_on",
-                "trigger_keywords",
-                "trigger_on",
-            }
-            if not changes:
-                raise ValueError("update requires at least one change")
+            if self.text is None:
+                raise ValueError("update requires text")
             return self
         if (
             self.text is not None

@@ -17,6 +17,7 @@ from open_endurance_coach.config import Settings, effective_input_budget
 from open_endurance_coach.engine.coach import CoachEngine
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.memory import MemoryCategory, MemoryOrigin
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import MessageRole, ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN
@@ -614,6 +615,57 @@ def test_chat_startup_prunes_unfetchable_seen_markers(patched: Any) -> None:
     assert "Pruned 1 old seen-activity marker (older than the fetch window)." in result.output
     assert store.is_activity_seen("fx-ancient") is False
     assert store.is_activity_seen("fx-recent") is True
+
+
+def test_chat_startup_closes_expired_memory(patched: Any) -> None:
+    provider = FakeLlmProvider()
+    engine, store = patched(provider)
+    expired_on = engine.today() - timedelta(days=10)
+    store.remember_fact(
+        MemoryCategory.INJURY_NIGGLE,
+        MemoryOrigin.DECLARED,
+        "Vieille blessure",
+        expires_on=expired_on,
+    )
+    store.remember_fact(
+        MemoryCategory.TRAINING_CONSTRAINTS,
+        MemoryOrigin.DECLARED,
+        "Vieille contrainte",
+        expires_on=expired_on,
+    )
+
+    result = runner.invoke(cli_main.app, [], input="/exit\n")
+
+    assert result.exit_code == 0
+    assert "Memory: closed 2 expired facts (1 kept, 1 deleted)." in result.output
+    assert store.get_fact(1) is not None
+    assert store.get_fact(2) is None
+
+
+def test_chat_announces_a_remembered_fact(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    memory=[
+                        {
+                            "action": "remember",
+                            "category": "training_constraints",
+                            "origin": "declared",
+                            "text": "Pas de vélo jusqu'au 20/10",
+                        }
+                    ]
+                )
+            )
+        ]
+    )
+    _, store = patched(provider)
+
+    result = runner.invoke(cli_main.app, [], input="no bike until the 20th\n/exit\n")
+
+    assert result.exit_code == 0
+    assert "Remembered: [training_constraints] Pas de vélo jusqu'au 20/10" in result.output
+    assert len(store.list_active_facts()) == 1
 
 
 def test_chat_does_not_announce_seeded_memory(patched: Any) -> None:

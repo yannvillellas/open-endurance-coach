@@ -91,6 +91,8 @@ async def respond(
                     history=history,
                 )
             render_report(outcome.report)
+            for notice in outcome.memory_notices:
+                console.print(f"[meta]{escape(notice)}[/meta]")
             if on_feedback is not None and await on_feedback(feedback, outcome):
                 return Done()
             plan_text, items, fingerprint = await restate(outcome.proposal)
