@@ -201,8 +201,6 @@ class MemoryOp(BaseModel):
         if self.category is not None or self.origin is not None:
             raise ValueError(f"{self.action.value} must not carry category or origin")
         if self.action is MemoryAction.UPDATE:
-            if self.text is None:
-                raise ValueError("update requires text")
             return self
         if (
             self.text is not None

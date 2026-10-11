@@ -31,20 +31,13 @@ def test_remember_op_round_trips() -> None:
     assert op.trigger_on == date(2026, 10, 1)
 
 
-def test_update_op_requires_id_and_text() -> None:
-    op = MemoryOp.model_validate(
-        {
-            "action": "update",
-            "id": 12,
-            "text": "Pas de vélo jusqu'au 20/10",
-            "expires_on": "2026-10-20",
-        }
-    )
+def test_update_op_carries_only_the_changed_fields() -> None:
+    op = MemoryOp.model_validate({"action": "update", "id": 12, "expires_on": "2026-10-20"})
 
     assert op.action is MemoryAction.UPDATE
     assert op.id == 12
-    assert op.text == "Pas de vélo jusqu'au 20/10"
     assert op.expires_on == date(2026, 10, 20)
+    assert op.text is None
 
 
 def test_close_and_forget_require_only_an_id() -> None:
@@ -72,7 +65,7 @@ def test_close_and_forget_require_only_an_id() -> None:
             "id",
         ),
         ({"action": "update", "text": "x"}, "id"),
-        ({"action": "update", "id": 3}, "text"),
+        ({"action": "update", "id": 3, "category": "injury_niggle"}, "category"),
         ({"action": "close"}, "id"),
         ({"action": "forget", "id": 3, "text": "x"}, "content"),
         ({"action": "close", "id": 3, "category": "injury_niggle"}, "category"),

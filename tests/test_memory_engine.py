@@ -53,7 +53,7 @@ async def test_memory_is_applied_even_when_the_plan_is_blocked(
     assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
 
 
-async def test_update_replaces_the_payload_in_place(settings: Settings, tmp_path: Path) -> None:
+async def test_update_merges_only_the_provided_fields(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider(
         [
             completion(report_json(memory=[memory_op(expires_on="2099-01-01")])),
@@ -62,18 +62,7 @@ async def test_update_replaces_the_payload_in_place(settings: Settings, tmp_path
                     memory=[{"action": "update", "id": 1, "text": "Pas de vélo jusqu'au 21/10"}]
                 )
             ),
-            completion(
-                report_json(
-                    memory=[
-                        {
-                            "action": "update",
-                            "id": 1,
-                            "text": "Pas de vélo jusqu'au 22/10",
-                            "expires_on": "2099-02-01",
-                        }
-                    ]
-                )
-            ),
+            completion(report_json(memory=[{"action": "update", "id": 1, "expires_on": None}])),
         ]
     )
     engine, store = make_engine(settings, tmp_path, provider)
@@ -84,13 +73,34 @@ async def test_update_replaces_the_payload_in_place(settings: Settings, tmp_path
     fact = store.list_active_facts()[0]
     assert fact.id == 1
     assert fact.text == "Pas de vélo jusqu'au 21/10"
-    assert fact.expires_on is None
+    assert fact.expires_on == date(2099, 1, 1)
 
     await engine.analyze("third", memory_notices=[])
 
     fact = store.list_active_facts()[0]
-    assert fact.text == "Pas de vélo jusqu'au 22/10"
-    assert fact.expires_on == date(2099, 2, 1)
+    assert fact.text == "Pas de vélo jusqu'au 21/10"
+    assert fact.expires_on is None
+
+
+async def test_an_update_without_a_change_is_skipped(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(report_json(memory=[memory_op()])),
+            completion(report_json(memory=[{"action": "update", "id": 1}])),
+        ]
+    )
+    engine, store = make_engine(settings, tmp_path, provider)
+    notices: list[str] = []
+
+    await engine.analyze("first", memory_notices=[])
+    with caplog.at_level(logging.WARNING):
+        await engine.analyze("second", memory_notices=notices)
+
+    assert notices == []
+    assert "update carries no change" in caplog.text
+    assert store.list_active_facts()[0].text == "Pas de vélo jusqu'au 20/10"
 
 
 async def test_close_keeps_a_history_fact_and_deletes_a_constraint(

@@ -641,15 +641,30 @@ class CoachEngine:
         if fact is None:
             raise ValueError(f"memory fact not found: {op.id}")
         if op.action is MemoryAction.UPDATE:
-            assert op.text is not None
+            touched = op.model_fields_set & {
+                "text",
+                "expires_on",
+                "trigger_keywords",
+                "trigger_on",
+            }
+            if not touched or (touched == {"text"} and op.text is None):
+                raise ValueError(f"update carries no change: {op.id}")
+            text = op.text if op.text is not None else fact.text
+            expires_on = op.expires_on if "expires_on" in op.model_fields_set else fact.expires_on
+            keywords = (
+                tuple(op.trigger_keywords)
+                if "trigger_keywords" in op.model_fields_set
+                else fact.trigger_keywords
+            )
+            trigger_on = op.trigger_on if "trigger_on" in op.model_fields_set else fact.trigger_on
             self._store.update_fact(
                 op.id,
-                op.text,
-                expires_on=op.expires_on,
-                trigger_keywords=op.trigger_keywords,
-                trigger_on=op.trigger_on,
+                text,
+                expires_on=expires_on,
+                trigger_keywords=keywords,
+                trigger_on=trigger_on,
             )
-            return f"Updated: [{fact.category.value}] {op.text}"
+            return f"Updated: [{fact.category.value}] {text}"
         if op.action is MemoryAction.CLOSE:
             outcome = self._store.close_fact(op.id)
             if outcome == "resolved":

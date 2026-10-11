@@ -162,9 +162,9 @@ MEMORY_POLICY = (
     "asking, and never ask again what an active fact already answers.\n"
     "Record durable facts in memory on every turn without waiting for approval: "
     '"remember" (new fact: category, origin declared or observed, text), "update" '
-    "(id plus the full replacement: text and the fields that stay, such as a new "
-    'date), "close" (id: the fact is no longer true) and "forget" (id: the fact was '
-    "wrong). Reconcile before "
+    "(id plus only the fields that change, such as a new date; an explicit null "
+    'clears one), "close" (id: the fact is no longer true) and "forget" (id: the '
+    "fact was wrong). Reconcile before "
     "writing: no duplicate of an active fact, a changed detail updates it, a "
     "contradiction updates or closes it. Use only ids from coach_memory or "
     "coach_memory_index. One self-contained fact per line. When a stated fact misses "
