@@ -407,6 +407,30 @@ async def test_the_index_is_bounded_by_its_own_allowance(
     assert context.coach_memory_index == []
 
 
+async def test_an_update_on_an_expired_fact_is_skipped(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    fact_id = remember(
+        store, MemoryCategory.TRAINING_CONSTRAINTS, "Pas de vélo", expires_on=date(2020, 1, 1)
+    )
+    report = DecisionReport.model_validate(
+        {
+            "summary": "Prolongé",
+            "memory": [{"action": "update", "id": fact_id, "text": "Pas de vélo, prolongé"}],
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        notices = engine.apply_memory_ops(report.memory)
+
+    assert notices == []
+    assert "has expired" in caplog.text
+    fact = store.get_fact(fact_id)
+    assert fact is not None
+    assert fact.text == "Pas de vélo"
+
+
 async def test_an_update_on_a_missing_id_is_skipped(
     settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

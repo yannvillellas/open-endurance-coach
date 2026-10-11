@@ -169,7 +169,7 @@ def test_facts_as_of_honours_expires_on(tmp_path: Path) -> None:
     assert store.facts_as_of(date(2026, 9, 20)) == []
 
 
-def test_facts_as_of_honours_an_early_resolution(tmp_path: Path) -> None:
+def test_facts_as_of_locks_the_early_resolution_bound(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     fact_id = store.remember_fact(
         MemoryCategory.INJURY_NIGGLE,
@@ -184,7 +184,7 @@ def test_facts_as_of_honours_an_early_resolution(tmp_path: Path) -> None:
     assert store.facts_as_of(date(2026, 9, 15)) == []
 
 
-def test_facts_as_of_after_the_expiry_sweep(tmp_path: Path) -> None:
+def test_facts_as_of_locks_the_sweep_deletion(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     store.remember_fact(
         MemoryCategory.TRAINING_CONSTRAINTS,
@@ -215,6 +215,23 @@ def test_update_and_close_require_an_active_fact(tmp_path: Path) -> None:
     assert fact is not None
     assert fact.status is MemoryStatus.RESOLVED
     assert fact.valid_to == date(2026, 9, 10)
+
+
+def test_update_and_close_reject_an_expired_fact(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    fact_id = store.remember_fact(
+        MemoryCategory.TRAINING_CONSTRAINTS,
+        MemoryOrigin.DECLARED,
+        "Pas de vélo",
+        expires_on=date(2026, 9, 10),
+    )
+
+    with pytest.raises(ValueError, match="expired"):
+        store.update_fact(fact_id, "Pas de vélo, prolongé")
+    with pytest.raises(ValueError, match="expired"):
+        store.close_fact(fact_id)
+
+    assert store.get_fact(fact_id) is not None
 
 
 def test_close_fact_unknown_id_raises(tmp_path: Path) -> None:

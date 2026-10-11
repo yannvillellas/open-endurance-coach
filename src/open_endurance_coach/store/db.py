@@ -223,6 +223,8 @@ class CoachStore:
             raise ValueError(f"memory fact not found: {fact_id}")
         if fact.status is not MemoryStatus.ACTIVE:
             raise ValueError(f"memory fact {fact_id} is not active")
+        if fact.expires_on is not None and fact.expires_on < self._clock().date():
+            raise ValueError(f"memory fact {fact_id} has expired")
         self._connection.execute(
             """
             UPDATE coach_memory
@@ -248,8 +250,10 @@ class CoachStore:
             raise ValueError(f"memory fact not found: {fact_id}")
         if fact.status is not MemoryStatus.ACTIVE:
             raise ValueError(f"memory fact {fact_id} is not active")
+        closure = today or self._clock().date()
+        if fact.expires_on is not None and fact.expires_on < closure:
+            raise ValueError(f"memory fact {fact_id} has expired")
         if fact.category in HISTORY_CATEGORIES:
-            closure = today or self._clock().date()
             self._connection.execute(
                 "UPDATE coach_memory SET status = ?, valid_to = ?, updated_at = ? WHERE id = ?",
                 (
