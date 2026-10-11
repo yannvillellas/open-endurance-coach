@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 
 from open_endurance_coach.config import Settings
-from open_endurance_coach.schemas.memory import MemoryStatus
+from open_endurance_coach.engine import coach as coach_module
+from open_endurance_coach.schemas.memory import MemoryCategory, MemoryOrigin, MemoryStatus
 
 from .fakes import FakeLlmProvider, completion, make_engine, report_json
 
@@ -240,3 +241,100 @@ async def test_expire_memory_is_empty_without_expired_facts(
     provider = FakeLlmProvider([completion(report_json())])
     engine, _ = make_engine(settings, tmp_path, provider)
     assert engine.expire_memory() == []
+
+
+def remember(store: Any, category: MemoryCategory, text: str, **overrides: Any) -> int:
+    return store.remember_fact(category, MemoryOrigin.DECLARED, text, **overrides)
+
+
+async def test_memory_is_injected_into_the_next_prompt(settings: Settings, tmp_path: Path) -> None:
+    provider = FakeLlmProvider(
+        [
+            completion(
+                report_json(
+                    memory=[memory_op(category="injury_niggle", text="Tendinite genou gauche")]
+                )
+            ),
+            completion(report_json()),
+        ]
+    )
+    engine, _ = make_engine(settings, tmp_path, provider)
+
+    await engine.analyze("first", memory_notices=[])
+    await engine.analyze("second", memory_notices=[])
+
+    second_prompt = provider.calls[1]["messages"][1].content
+    assert "coach_memory" in second_prompt
+    assert "Tendinite genou gauche" in second_prompt
+
+
+async def test_memory_injection_orders_by_priority_and_caps(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    for index in range(3):
+        remember(store, MemoryCategory.OBSERVED_PATTERNS, f"Pattern {index}")
+    remember(store, MemoryCategory.HEALTH_MEDICAL, "Asthme d'effort")
+    monkeypatch.setattr(coach_module, "MEMORY_MAX_FACTS", 2)
+
+    context = await engine.build_context("status check")
+
+    assert [item.category for item in context.coach_memory] == [
+        MemoryCategory.HEALTH_MEDICAL,
+        MemoryCategory.OBSERVED_PATTERNS,
+    ]
+    assert len(context.coach_memory_index) == 2
+    assert {entry.category for entry in context.coach_memory_index} == {
+        MemoryCategory.OBSERVED_PATTERNS
+    }
+
+
+async def test_a_triggered_fact_ranks_before_the_priority_order(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    remember(store, MemoryCategory.HEALTH_MEDICAL, "Asthme d'effort")
+    remember(
+        store,
+        MemoryCategory.OBSERVED_PATTERNS,
+        "Perd la tenue de FC dans les côtes",
+        trigger_keywords=["hills"],
+    )
+    monkeypatch.setattr(coach_module, "MEMORY_MAX_FACTS", 1)
+
+    context = await engine.build_context("review my hills session")
+
+    assert [item.category for item in context.coach_memory] == [MemoryCategory.OBSERVED_PATTERNS]
+
+
+async def test_injected_facts_are_marked_as_surfaced(settings: Settings, tmp_path: Path) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    fact_id = remember(store, MemoryCategory.ATHLETE_PROFILE, "42 ans, 10 ans de vélo")
+
+    await engine.build_context("status check")
+
+    fact = store.get_fact(fact_id)
+    assert fact is not None
+    assert fact.last_surfaced_at is not None
+
+
+async def test_a_long_fact_never_breaks_the_context_budget(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    remember(store, MemoryCategory.ATHLETE_PROFILE, "x" * 20000)
+    monkeypatch.setattr(coach_module, "MEMORY_RESERVE_TOKENS", 100000)
+
+    context = await engine.build_context("status check")
+
+    assert context.data_tokens() <= context.max_tokens
+
+
+async def test_refocus_context_keeps_the_memory(settings: Settings, tmp_path: Path) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    remember(store, MemoryCategory.INJURY_NIGGLE, "Tendinite genou gauche")
+
+    context = await engine.build_context("status check")
+    refocused = engine.refocus_context(context, "plan next week")
+
+    assert [item.text for item in refocused.coach_memory] == ["Tendinite genou gauche"]

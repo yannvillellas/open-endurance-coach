@@ -72,6 +72,21 @@ since last review" and is never kept once it cannot be read again. The tests pin
 boundaries: old messages and unfetchable markers are pruned while proposals and
 still-fetchable markers survive (`tests/test_store.py`).
 
+### Coach memory
+
+`coach_memory` holds durable athlete facts across two provenance classes (declared,
+observed) and seven categories. The model writes them on every turn through the
+report's `memory` operations — `remember`, `update` (only the changed fields; an
+explicit null clears one), `close` and `forget` — outside the calendar approval gate.
+Closure follows the category in code: `injury_niggle` and `health_medical` are kept as
+`resolved` history (with `valid_to`), everything else is deleted, and a passed
+`expires_on` is swept at startup. Memory is never pruned by age; `/forget all` erases
+it. Injection happens in the engine after extraction: active facts are ranked by
+trigger (focus keywords or reached date), then category priority (health, injury,
+constraints, profile, goals, preferences, observed), then least recently surfaced;
+full facts fit a ~350-token allowance (25 max), the rest appear as a compact
+id/category/label index (~150 tokens), and injected facts get `last_surfaced_at`.
+
 ## Calendar writer
 
 Approved proposals are applied by `writer/calendar.py`:

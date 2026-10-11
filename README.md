@@ -75,8 +75,10 @@ Applied:
   touch only `WORKOUT`, races only `RACE_*`); a create that would overwrite a different
   existing event is refused.
 - **Memory** — sessions keep recent exchanges under the model's input budget; messages
-  older than `CHAT_HISTORY_MAX_AGE_DAYS` (default 90) are pruned at startup.
-  `/forget`, `/forget N` and `/forget all` work in chat.
+  older than `CHAT_HISTORY_MAX_AGE_DAYS` (default 90) are pruned at startup, while a
+  durable coach memory (profile, injuries, constraints, preferences, observed
+  patterns) persists and is consulted before asking. `/forget`, `/forget N` and
+  `/forget all` work in chat; `/forget all` also erases the coach memory.
 
 ## Safety
 

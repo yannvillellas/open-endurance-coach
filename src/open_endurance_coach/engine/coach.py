@@ -39,9 +39,15 @@ from open_endurance_coach.schemas.decisions import (
     mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Event
-from open_endurance_coach.schemas.memory import MemoryAction
+from open_endurance_coach.schemas.memory import (
+    MemoryAction,
+    MemoryCategory,
+    MemoryIndexEntry,
+    MemoryItem,
+)
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import (
+    MemoryFact,
     Message,
     MessageRole,
     Proposal,
@@ -89,6 +95,47 @@ MAX_PLANNING_DAYS = 400
 
 # Slack in the message cap for the prompt boilerplate around the data payload.
 PROMPT_OVERHEAD_TOKENS = 256
+
+# Coach memory injection: full facts fit in the first allowance, the compact index
+# (id, category, short label) in the second, and the rest is simply not shown.
+MEMORY_RESERVE_TOKENS = 350
+MEMORY_INDEX_RESERVE_TOKENS = 150
+MEMORY_MAX_FACTS = 25
+
+_MEMORY_CATEGORY_RANK = {
+    MemoryCategory.HEALTH_MEDICAL: 0,
+    MemoryCategory.INJURY_NIGGLE: 1,
+    MemoryCategory.TRAINING_CONSTRAINTS: 2,
+    MemoryCategory.ATHLETE_PROFILE: 3,
+    MemoryCategory.GOALS_MOTIVATION: 4,
+    MemoryCategory.PREFERENCES_TOLERANCE: 5,
+    MemoryCategory.OBSERVED_PATTERNS: 6,
+}
+
+
+def _memory_triggered(fact: MemoryFact, focus: str, today: date) -> bool:
+    if fact.trigger_on is not None and fact.trigger_on <= today:
+        return True
+    folded = focus.casefold()
+    return any(keyword.casefold() in folded for keyword in fact.trigger_keywords if keyword)
+
+
+def _rank_memory_facts(facts: Sequence[MemoryFact], focus: str, today: date) -> list[MemoryFact]:
+    def sort_key(fact: MemoryFact) -> tuple[int, int, float, int]:
+        surfaced = fact.last_surfaced_at.timestamp() if fact.last_surfaced_at else 0.0
+        return (
+            0 if _memory_triggered(fact, focus, today) else 1,
+            _MEMORY_CATEGORY_RANK[fact.category],
+            surfaced,
+            fact.id,
+        )
+
+    return sorted(facts, key=sort_key)
+
+
+def _memory_label(text: str) -> str:
+    label = " ".join(text.split()[:8])[:60]
+    return label if label == text else f"{label}..."
 
 
 class StaleProposalError(ValueError):
@@ -354,9 +401,58 @@ class CoachEngine:
         user_feedback: str | None = None,
         today: date | None = None,
     ) -> CoachContext:
-        return self._surface_unseen(
+        context = self._surface_unseen(
             await self._extract(focus, user_feedback=user_feedback, today=today)
         )
+        return self._with_memory(context, focus)
+
+    def _with_memory(self, context: CoachContext, focus: str) -> CoachContext:
+        """Inject the active coach memory after extraction, within its allowances."""
+        today = context.today or self.today()
+        facts = self._store.list_active_facts(today=today)
+        if not facts:
+            return context
+        ranked = _rank_memory_facts(facts, focus, today)
+        base_tokens = context.data_tokens()
+        room = max(0, context.max_tokens - base_tokens)
+        full_budget = min(MEMORY_RESERVE_TOKENS, room)
+        selected: list[MemoryItem] = []
+        for fact in ranked:
+            if len(selected) >= MEMORY_MAX_FACTS:
+                break
+            item = MemoryItem(
+                id=fact.id,
+                category=fact.category,
+                origin=fact.origin,
+                text=fact.text,
+                valid_from=fact.valid_from,
+                expires_on=fact.expires_on,
+            )
+            trial = context.model_copy(update={"coach_memory": [*selected, item]})
+            if trial.data_tokens() - base_tokens > full_budget:
+                continue
+            selected.append(item)
+        surfaced = {item.id for item in selected}
+        used = context.model_copy(update={"coach_memory": selected}).data_tokens() - base_tokens
+        index_budget = min(MEMORY_INDEX_RESERVE_TOKENS, max(0, room - used))
+        index: list[MemoryIndexEntry] = []
+        for fact in ranked:
+            if fact.id in surfaced:
+                continue
+            entry = MemoryIndexEntry(
+                id=fact.id, category=fact.category, label=_memory_label(fact.text)
+            )
+            trial = context.model_copy(
+                update={"coach_memory": selected, "coach_memory_index": [*index, entry]}
+            )
+            if trial.data_tokens() - base_tokens - used > index_budget:
+                continue
+            index.append(entry)
+        if not selected and not index:
+            return context
+        if surfaced:
+            self._store.mark_facts_surfaced(sorted(surfaced))
+        return context.model_copy(update={"coach_memory": selected, "coach_memory_index": index})
 
     async def resolve_event_dates(
         self, context: CoachContext, mutations: Sequence[Mutation]
@@ -519,7 +615,7 @@ class CoachEngine:
         user_feedback: str | None,
         today: date,
     ) -> CoachContext:
-        return build_within_budget(
+        built = build_within_budget(
             focus,
             base.recent_activities,
             base.wellness,
@@ -535,6 +631,7 @@ class CoachEngine:
             max_tokens=base.max_tokens,
             today=today,
         )
+        return self._with_memory(built, focus)
 
     def refocus_context(
         self, base: CoachContext, focus: str, *, today: date | None = None
