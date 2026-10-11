@@ -1996,13 +1996,16 @@ def test_chat_forget_all_wipes_local_state_on_yes(patched: Any) -> None:
     store.approve_proposal(proposal_id)
     store.add_message(MessageRole.USER, "hello")
     store.mark_activities_seen(["fx-1"])
+    store.remember_fact(MemoryCategory.ATHLETE_PROFILE, MemoryOrigin.DECLARED, "42 ans")
 
     result = runner.invoke(cli_main.app, [], input="/forget all\nyes\n/exit\n")
     assert result.exit_code == 0
-    assert "Deleted 1 messages, 1 proposals and 1 seen activities." in result.output
+    assert "coach memory" in result.output
+    assert "Deleted 1 messages, 1 proposals, 1 seen activities and 1 memory fact." in result.output
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.is_activity_seen("fx-1") is False
+    assert store.list_active_facts() == []
 
 
 def test_chat_forget_all_clears_the_session_history(patched: Any) -> None:

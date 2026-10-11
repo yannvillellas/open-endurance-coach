@@ -155,6 +155,59 @@ def test_facts_as_of_uses_the_validity_window(tmp_path: Path) -> None:
     assert [fact.id for fact in store.facts_as_of(date(2026, 9, 1))] == [fact_id]
 
 
+def test_facts_as_of_honours_expires_on(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    fact_id = store.remember_fact(
+        MemoryCategory.TRAINING_CONSTRAINTS,
+        MemoryOrigin.DECLARED,
+        "Pas de vélo",
+        expires_on=date(2026, 9, 10),
+        valid_from=date(2026, 9, 1),
+    )
+
+    assert [fact.id for fact in store.facts_as_of(date(2026, 9, 5))] == [fact_id]
+    assert store.facts_as_of(date(2026, 9, 20)) == []
+
+
+def test_facts_as_of_honours_an_early_resolution(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    fact_id = store.remember_fact(
+        MemoryCategory.INJURY_NIGGLE,
+        MemoryOrigin.DECLARED,
+        "Douleur genou",
+        expires_on=date(2026, 9, 30),
+        valid_from=date(2026, 9, 1),
+    )
+    store.close_fact(fact_id, today=date(2026, 9, 10))
+
+    assert [fact.id for fact in store.facts_as_of(date(2026, 9, 5))] == [fact_id]
+    assert store.facts_as_of(date(2026, 9, 15)) == []
+
+
+def test_update_and_close_require_an_active_fact(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    fact_id = store.remember_fact(
+        MemoryCategory.INJURY_NIGGLE, MemoryOrigin.DECLARED, "Douleur genou"
+    )
+    store.close_fact(fact_id, today=date(2026, 9, 10))
+
+    with pytest.raises(ValueError, match="active"):
+        store.update_fact(fact_id, "Douleur genou, revue")
+    with pytest.raises(ValueError, match="active"):
+        store.close_fact(fact_id)
+
+    fact = store.get_fact(fact_id)
+    assert fact is not None
+    assert fact.status is MemoryStatus.RESOLVED
+    assert fact.valid_to == date(2026, 9, 10)
+
+
+def test_close_fact_unknown_id_raises(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    with pytest.raises(ValueError, match="not found"):
+        store.close_fact(999)
+
+
 def test_expire_facts_applies_the_category_policy(tmp_path: Path) -> None:
     clock = FakeClock(NOW)
     store = make_store(tmp_path, clock)

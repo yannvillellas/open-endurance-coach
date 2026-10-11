@@ -218,8 +218,11 @@ class CoachStore:
         trigger_keywords: Sequence[str] = (),
         trigger_on: date | None = None,
     ) -> None:
-        if self.get_fact(fact_id) is None:
+        fact = self.get_fact(fact_id)
+        if fact is None:
             raise ValueError(f"memory fact not found: {fact_id}")
+        if fact.status is not MemoryStatus.ACTIVE:
+            raise ValueError(f"memory fact {fact_id} is not active")
         self._connection.execute(
             """
             UPDATE coach_memory
@@ -243,6 +246,8 @@ class CoachStore:
         fact = self.get_fact(fact_id)
         if fact is None:
             raise ValueError(f"memory fact not found: {fact_id}")
+        if fact.status is not MemoryStatus.ACTIVE:
+            raise ValueError(f"memory fact {fact_id} is not active")
         if fact.category in HISTORY_CATEGORIES:
             closure = today or self._clock().date()
             self._connection.execute(
@@ -290,9 +295,10 @@ class CoachStore:
             """
             SELECT * FROM coach_memory
              WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
+               AND (expires_on IS NULL OR expires_on >= ?)
              ORDER BY id
             """,
-            (stamp, stamp),
+            (stamp, stamp, stamp),
         ).fetchall()
         return [self._fact_from_row(row) for row in rows]
 
