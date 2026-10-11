@@ -7,6 +7,8 @@ import pytest
 
 from open_endurance_coach.config import Settings
 from open_endurance_coach.engine import coach as coach_module
+from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.memory import MemoryCategory, MemoryOrigin, MemoryStatus
 
 from .fakes import FakeLlmProvider, completion, make_engine, report_json
@@ -338,3 +340,84 @@ async def test_refocus_context_keeps_the_memory(settings: Settings, tmp_path: Pa
     refocused = engine.refocus_context(context, "plan next week")
 
     assert [item.text for item in refocused.coach_memory] == ["Tendinite genou gauche"]
+
+
+async def test_a_reloaded_report_replays_the_same_memory_ops(
+    settings: Settings, tmp_path: Path
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    fact_id = remember(
+        store, MemoryCategory.TRAINING_CONSTRAINTS, "Pas de vélo", expires_on=date(2099, 1, 1)
+    )
+    report = DecisionReport.model_validate(
+        {"summary": "Note", "memory": [{"action": "update", "id": fact_id}]}
+    )
+    proposal_id = store.save_proposal(focus="f", report=report, context=CoachContext(focus="f"))
+
+    reloaded = store.get_proposal(proposal_id)
+
+    assert reloaded is not None
+    assert engine.apply_memory_ops(reloaded.report.memory) == []
+    fact = store.get_fact(fact_id)
+    assert fact is not None
+    assert fact.expires_on == date(2099, 1, 1)
+
+
+async def test_memory_ops_apply_from_the_chat_only_fallback(
+    settings: Settings, tmp_path: Path
+) -> None:
+    bad = completion('{"hallucinated": true}')
+    chat = completion(report_json(intent="chat", memory=[memory_op()]))
+    provider = FakeLlmProvider([bad, bad, bad, bad, chat])
+    engine, store = make_engine(settings, tmp_path, provider)
+    notices: list[str] = []
+
+    await engine.analyze("no bike", memory_notices=notices)
+
+    assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
+    assert len(store.list_active_facts()) == 1
+
+
+async def test_memory_injection_when_there_is_no_room(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    remember(store, MemoryCategory.ATHLETE_PROFILE, "42 ans")
+    monkeypatch.setattr(coach_module, "MEMORY_RESERVE_TOKENS", 0)
+    monkeypatch.setattr(coach_module, "MEMORY_INDEX_RESERVE_TOKENS", 0)
+
+    context = await engine.build_context("status check")
+
+    assert context.coach_memory == []
+    assert context.coach_memory_index == []
+
+
+async def test_the_index_is_bounded_by_its_own_allowance(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
+    remember(store, MemoryCategory.ATHLETE_PROFILE, "42 ans")
+    remember(store, MemoryCategory.ATHLETE_PROFILE, "10 ans de vélo")
+    monkeypatch.setattr(coach_module, "MEMORY_MAX_FACTS", 1)
+    monkeypatch.setattr(coach_module, "MEMORY_INDEX_RESERVE_TOKENS", 0)
+
+    context = await engine.build_context("status check")
+
+    assert len(context.coach_memory) == 1
+    assert context.coach_memory_index == []
+
+
+async def test_an_update_on_a_missing_id_is_skipped(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json(memory=[{"action": "update", "id": 999, "text": "x"}]))]
+    )
+    engine, _ = make_engine(settings, tmp_path, provider)
+    notices: list[str] = []
+
+    with caplog.at_level(logging.WARNING):
+        await engine.analyze("first", memory_notices=notices)
+
+    assert notices == []
+    assert "memory fact not found: 999" in caplog.text

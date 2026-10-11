@@ -164,7 +164,10 @@ MEMORY_POLICY = (
     '"remember" (new fact: category, origin declared or observed, text), "update" '
     "(id plus only the fields that change, such as a new date; an explicit null "
     'clears one), "close" (id: the fact is no longer true) and "forget" (id: the '
-    "fact was wrong). Reconcile before "
+    "fact was wrong). When a fact has a known end set expires_on (a date) so it "
+    "closes itself; when it matters only in some contexts add trigger_keywords "
+    "(matched against the athlete's message) or trigger_on (the date it should "
+    "resurface). Reconcile before "
     "writing: no duplicate of an active fact, a changed detail updates it, a "
     "contradiction updates or closes it. Use only ids from coach_memory or "
     "coach_memory_index. One self-contained fact per line. When a stated fact misses "

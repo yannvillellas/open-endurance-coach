@@ -449,7 +449,7 @@ class CoachStore:
                 focus,
                 user_feedback,
                 json.dumps(context.model_dump(mode="json")),
-                json.dumps(report.model_dump(mode="json")),
+                json.dumps(report.model_dump(mode="json", exclude_unset=True)),
             ),
         )
         self._connection.commit()
@@ -519,7 +519,7 @@ class CoachStore:
                 "UPDATE proposals SET report_json = ?, user_feedback = ?, context_json = ?"
                 " WHERE id = ?",
                 (
-                    json.dumps(report.model_dump(mode="json")),
+                    json.dumps(report.model_dump(mode="json", exclude_unset=True)),
                     user_feedback,
                     json.dumps(context.model_dump(mode="json")),
                     proposal_id,
@@ -528,7 +528,11 @@ class CoachStore:
         else:
             self._connection.execute(
                 "UPDATE proposals SET report_json = ?, user_feedback = ? WHERE id = ?",
-                (json.dumps(report.model_dump(mode="json")), user_feedback, proposal_id),
+                (
+                    json.dumps(report.model_dump(mode="json", exclude_unset=True)),
+                    user_feedback,
+                    proposal_id,
+                ),
             )
         self._connection.commit()
 
@@ -545,7 +549,9 @@ class CoachStore:
                 self._clock().isoformat(),
                 role.value,
                 content,
-                json.dumps(report.model_dump(mode="json")) if report is not None else None,
+                json.dumps(report.model_dump(mode="json", exclude_unset=True))
+                if report is not None
+                else None,
             ),
         )
         self._connection.commit()
@@ -556,7 +562,7 @@ class CoachStore:
     def set_message_report(self, message_id: int, report: DecisionReport) -> None:
         self._connection.execute(
             "UPDATE messages SET report_json = ? WHERE id = ?",
-            (json.dumps(report.model_dump(mode="json")), message_id),
+            (json.dumps(report.model_dump(mode="json", exclude_unset=True)), message_id),
         )
         self._connection.commit()
 
@@ -611,7 +617,7 @@ class CoachStore:
                 " WHERE id = ? AND status = ?",
                 (
                     ProposalStatus.UNAPPLIED.value,
-                    json.dumps(approved.model_dump(mode="json")),
+                    json.dumps(approved.model_dump(mode="json", exclude_unset=True)),
                     decided_at.isoformat(),
                     proposal_id,
                     ProposalStatus.PENDING.value,

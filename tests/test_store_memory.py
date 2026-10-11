@@ -184,6 +184,21 @@ def test_facts_as_of_honours_an_early_resolution(tmp_path: Path) -> None:
     assert store.facts_as_of(date(2026, 9, 15)) == []
 
 
+def test_facts_as_of_after_the_expiry_sweep(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    store.remember_fact(
+        MemoryCategory.TRAINING_CONSTRAINTS,
+        MemoryOrigin.DECLARED,
+        "Pas de vélo",
+        expires_on=date(2026, 9, 10),
+        valid_from=date(2026, 9, 1),
+    )
+
+    store.expire_facts(today=date(2026, 9, 20))
+
+    assert store.facts_as_of(date(2026, 9, 5)) == []
+
+
 def test_update_and_close_require_an_active_fact(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     fact_id = store.remember_fact(

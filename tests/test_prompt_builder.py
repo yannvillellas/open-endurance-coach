@@ -24,7 +24,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
-SYSTEM_PROMPT_TOKEN_BUDGET = 3550
+SYSTEM_PROMPT_TOKEN_BUDGET = 3600
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -249,6 +249,8 @@ def test_contract_documents_memory_operations() -> None:
     assert "Reconcile before writing" in system
     assert "Categories: athlete_profile" in system
     assert "the answer updates the fact" in system
+    assert "expires_on" in system
+    assert "trigger_keywords" in system
 
 
 def test_memory_example_validates_against_the_contract() -> None:
