@@ -232,6 +232,8 @@ def test_section_tokens_reports_per_section() -> None:
         "training_rollup",
         "sport_settings",
         "user_feedback",
+        "coach_memory",
+        "coach_memory_index",
     }
     assert sections["recent_activities"] > 0
     assert sections["wellness"] > 0

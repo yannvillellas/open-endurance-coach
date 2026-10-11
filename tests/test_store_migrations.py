@@ -66,6 +66,8 @@ QUERY_INDEXES = {
     "idx_proposals_created_at",
     "idx_messages_created_at",
     "idx_seen_activities_seen_at",
+    "idx_coach_memory_status",
+    "idx_coach_memory_expires_on",
 }
 
 
@@ -80,7 +82,7 @@ def test_fresh_database_records_the_current_version(tmp_path: Path) -> None:
 def test_fresh_database_creates_the_current_schema(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     CoachStore(path).close()
-    assert {"proposals", "messages", "seen_activities"} <= _table_names(path)
+    assert {"proposals", "messages", "seen_activities", "coach_memory"} <= _table_names(path)
 
 
 def test_unversioned_database_is_stamped_to_the_current_version(tmp_path: Path) -> None:

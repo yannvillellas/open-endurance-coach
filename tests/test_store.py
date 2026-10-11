@@ -477,7 +477,12 @@ def test_delete_all_local_wipes_messages_proposals_and_seen(tmp_path: Path) -> N
 
     counts = store.delete_all_local()
 
-    assert counts == {"messages": 1, "proposals": 1, "seen_activities": 1}
+    assert counts == {
+        "messages": 1,
+        "proposals": 1,
+        "seen_activities": 1,
+        "coach_memory": 0,
+    }
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.is_activity_seen("fx-1") is False

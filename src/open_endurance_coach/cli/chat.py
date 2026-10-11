@@ -61,7 +61,7 @@ HELP_TEXT = (
     "/provider [name]       show or switch the LLM provider\n"
     "/model [name]          show or switch the LLM model\n"
     "/forget [days]         forget the conversation (all, or older than N days)\n"
-    "/forget all            delete all local state (conversation, proposals, dedup)\n"
+    "/forget all            delete all local state (conversation, proposals, seen, memory)\n"
     "/help                  show this help\n"
     "/exit, /quit           leave the chat\n"
 )
@@ -151,12 +151,16 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
     else:
         cached = None
     async with thinking():
+        notices: list[str] = []
         proposal = await engine.analyze(
             focus,
             context=cached,
             history=session.history,
             today=today if cached is None else None,
+            memory_notices=notices,
         )
+    for notice in notices:
+        console.print(f"[meta]{escape(notice)}[/meta]")
     report = proposal.report
     if report.needs_input:
         blocking = {question.strip().casefold() for question in report.needs_input}
@@ -369,9 +373,9 @@ async def _run_command(
     if name == "forget":
         if len(args) == 1 and args[0].casefold() == "all":
             console.print(
-                "[warn]This deletes the conversation, the pending or unapplied proposals and the"
-                " seen-activity markers. The plan already applied and your races stay in"
-                " Intervals.icu. Reply exactly yes to confirm.[/warn]"
+                "[warn]This deletes the conversation, the pending or unapplied proposals, the"
+                " seen-activity markers and the coach memory. The plan already applied and your"
+                " races stay in Intervals.icu. Reply exactly yes to confirm.[/warn]"
             )
             return ChatState(wipe_pending=True)
         days: int | None = None
@@ -429,6 +433,14 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         noun = "marker" if markers == 1 else "markers"
         console.print(
             f"[meta]Pruned {markers} old seen-activity {noun} (older than the fetch window).[/meta]"
+        )
+    expired = engine.expire_memory()
+    if expired:
+        kept = sum(1 for _, outcome in expired if outcome == "resolved")
+        noun = "fact" if len(expired) == 1 else "facts"
+        console.print(
+            f"[meta]Memory: closed {len(expired)} expired {noun}"
+            f" ({kept} kept, {len(expired) - kept} deleted).[/meta]"
         )
     for proposal_id in engine.discard_pending_proposals():
         console.print(f"[warn]Proposal #{proposal_id} was never answered; discarded.[/warn]")
@@ -490,9 +502,11 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                 session.context = None
                 session.notified.clear()
                 session.pending_proposal_id = None
+                facts_noun = "fact" if counts["coach_memory"] == 1 else "facts"
                 console.print(
-                    f"Deleted {counts['messages']} messages, {counts['proposals']} proposals"
-                    f" and {counts['seen_activities']} seen activities."
+                    f"Deleted {counts['messages']} messages, {counts['proposals']} proposals,"
+                    f" {counts['seen_activities']} seen activities and"
+                    f" {counts['coach_memory']} memory {facts_noun}."
                 )
                 state = ChatState()
                 continue

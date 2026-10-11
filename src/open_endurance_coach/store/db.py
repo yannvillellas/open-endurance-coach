@@ -1,14 +1,24 @@
 import json
 import logging
 import sqlite3
-from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterable, Sequence
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.memory import HISTORY_CATEGORIES
 
-from .records import Message, MessageRole, Proposal, ProposalStatus
+from .records import (
+    MemoryCategory,
+    MemoryFact,
+    MemoryOrigin,
+    MemoryStatus,
+    Message,
+    MessageRole,
+    Proposal,
+    ProposalStatus,
+)
 
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_activities (
@@ -35,7 +45,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MIGRATIONS: dict[int, str] = {
     1: _BASE_SCHEMA
@@ -47,6 +57,26 @@ CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
 CREATE INDEX IF NOT EXISTS idx_proposals_created_at ON proposals(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_seen_activities_seen_at ON seen_activities(seen_at);
+""",
+    3: """
+CREATE TABLE IF NOT EXISTS coach_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    category TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,
+    expires_on TEXT,
+    trigger_keywords TEXT NOT NULL DEFAULT '[]',
+    trigger_on TEXT,
+    last_surfaced_at TEXT,
+    source_message_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_coach_memory_status ON coach_memory(status);
+CREATE INDEX IF NOT EXISTS idx_coach_memory_expires_on ON coach_memory(expires_on);
 """,
 }
 
@@ -141,11 +171,206 @@ class CoachStore:
             _vacuum_best_effort(self._connection)
         return removed
 
+    def remember_fact(
+        self,
+        category: MemoryCategory,
+        origin: MemoryOrigin,
+        text: str,
+        *,
+        expires_on: date | None = None,
+        trigger_keywords: Sequence[str] = (),
+        trigger_on: date | None = None,
+        valid_from: date | None = None,
+        source_message_id: int | None = None,
+    ) -> int:
+        now = self._clock()
+        cursor = self._connection.execute(
+            """
+            INSERT INTO coach_memory (
+                created_at, updated_at, category, origin, text, status, valid_from,
+                valid_to, expires_on, trigger_keywords, trigger_on, last_surfaced_at,
+                source_message_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?)
+            """,
+            (
+                now.isoformat(),
+                now.isoformat(),
+                category.value,
+                origin.value,
+                text,
+                MemoryStatus.ACTIVE.value,
+                (valid_from or now.date()).isoformat(),
+                expires_on.isoformat() if expires_on else None,
+                json.dumps(list(trigger_keywords)),
+                trigger_on.isoformat() if trigger_on else None,
+                source_message_id,
+            ),
+        )
+        self._connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def update_fact(
+        self,
+        fact_id: int,
+        text: str,
+        *,
+        expires_on: date | None = None,
+        trigger_keywords: Sequence[str] = (),
+        trigger_on: date | None = None,
+    ) -> None:
+        fact = self.get_fact(fact_id)
+        if fact is None:
+            raise ValueError(f"memory fact not found: {fact_id}")
+        if fact.status is not MemoryStatus.ACTIVE:
+            raise ValueError(f"memory fact {fact_id} is not active")
+        if fact.expires_on is not None and fact.expires_on < self._clock().date():
+            raise ValueError(f"memory fact {fact_id} has expired")
+        self._connection.execute(
+            """
+            UPDATE coach_memory
+               SET text = ?, updated_at = ?, expires_on = ?, trigger_keywords = ?,
+                   trigger_on = ?
+             WHERE id = ?
+            """,
+            (
+                text,
+                self._clock().isoformat(),
+                expires_on.isoformat() if expires_on else None,
+                json.dumps(list(trigger_keywords)),
+                trigger_on.isoformat() if trigger_on else None,
+                fact_id,
+            ),
+        )
+        self._connection.commit()
+
+    def close_fact(self, fact_id: int, *, today: date | None = None) -> str:
+        """End a fact; history categories are kept as resolved, the others are deleted."""
+        fact = self.get_fact(fact_id)
+        if fact is None:
+            raise ValueError(f"memory fact not found: {fact_id}")
+        if fact.status is not MemoryStatus.ACTIVE:
+            raise ValueError(f"memory fact {fact_id} is not active")
+        closure = today or self._clock().date()
+        if fact.expires_on is not None and fact.expires_on < closure:
+            raise ValueError(f"memory fact {fact_id} has expired")
+        if fact.category in HISTORY_CATEGORIES:
+            self._connection.execute(
+                "UPDATE coach_memory SET status = ?, valid_to = ?, updated_at = ? WHERE id = ?",
+                (
+                    MemoryStatus.RESOLVED.value,
+                    closure.isoformat(),
+                    self._clock().isoformat(),
+                    fact_id,
+                ),
+            )
+            self._connection.commit()
+            return "resolved"
+        self._connection.execute("DELETE FROM coach_memory WHERE id = ?", (fact_id,))
+        self._connection.commit()
+        return "deleted"
+
+    def forget_fact(self, fact_id: int) -> None:
+        cursor = self._connection.execute("DELETE FROM coach_memory WHERE id = ?", (fact_id,))
+        self._connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError(f"memory fact not found: {fact_id}")
+
+    def get_fact(self, fact_id: int) -> MemoryFact | None:
+        row = self._connection.execute(
+            "SELECT * FROM coach_memory WHERE id = ?", (fact_id,)
+        ).fetchone()
+        return self._fact_from_row(row) if row else None
+
+    def list_active_facts(self, *, today: date | None = None) -> list[MemoryFact]:
+        day = (today or self._clock().date()).isoformat()
+        rows = self._connection.execute(
+            """
+            SELECT * FROM coach_memory
+             WHERE status = ? AND (expires_on IS NULL OR expires_on >= ?)
+             ORDER BY id
+            """,
+            (MemoryStatus.ACTIVE.value, day),
+        ).fetchall()
+        return [self._fact_from_row(row) for row in rows]
+
+    def facts_as_of(self, day: date) -> list[MemoryFact]:
+        stamp = day.isoformat()
+        rows = self._connection.execute(
+            """
+            SELECT * FROM coach_memory
+             WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
+               AND (expires_on IS NULL OR expires_on >= ?)
+             ORDER BY id
+            """,
+            (stamp, stamp, stamp),
+        ).fetchall()
+        return [self._fact_from_row(row) for row in rows]
+
+    def expire_facts(self, *, today: date | None = None) -> list[tuple[int, str]]:
+        day = today or self._clock().date()
+        rows = self._connection.execute(
+            """
+            SELECT id, expires_on FROM coach_memory
+             WHERE status = ? AND expires_on IS NOT NULL AND expires_on < ?
+             ORDER BY id
+            """,
+            (MemoryStatus.ACTIVE.value, day.isoformat()),
+        ).fetchall()
+        return [
+            (
+                int(row["id"]),
+                self.close_fact(int(row["id"]), today=date.fromisoformat(row["expires_on"])),
+            )
+            for row in rows
+        ]
+
+    def mark_facts_surfaced(self, fact_ids: Sequence[int], *, at: datetime | None = None) -> int:
+        ids = list(fact_ids)
+        if not ids:
+            return 0
+        stamp = (at or self._clock()).isoformat()
+        updated = 0
+        for start in range(0, len(ids), _SQL_VARIABLE_BATCH):
+            batch = ids[start : start + _SQL_VARIABLE_BATCH]
+            placeholders = ",".join("?" for _ in batch)
+            cursor = self._connection.execute(
+                f"UPDATE coach_memory SET last_surfaced_at = ? WHERE id IN ({placeholders})",
+                (stamp, *batch),
+            )
+            updated += cursor.rowcount
+        self._connection.commit()
+        return updated
+
+    def _fact_from_row(self, row: sqlite3.Row) -> MemoryFact:
+        valid_to = row["valid_to"]
+        expires_on = row["expires_on"]
+        trigger_on = row["trigger_on"]
+        last_surfaced_at = row["last_surfaced_at"]
+        return MemoryFact(
+            id=int(row["id"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            category=MemoryCategory(row["category"]),
+            origin=MemoryOrigin(row["origin"]),
+            text=row["text"],
+            status=MemoryStatus(row["status"]),
+            valid_from=date.fromisoformat(row["valid_from"]),
+            valid_to=date.fromisoformat(valid_to) if valid_to else None,
+            expires_on=date.fromisoformat(expires_on) if expires_on else None,
+            trigger_keywords=tuple(json.loads(row["trigger_keywords"])),
+            trigger_on=date.fromisoformat(trigger_on) if trigger_on else None,
+            last_surfaced_at=(
+                datetime.fromisoformat(last_surfaced_at) if last_surfaced_at else None
+            ),
+            source_message_id=row["source_message_id"],
+        )
+
     def delete_all_local(self) -> dict[str, int]:
         statements = {
             "messages": "DELETE FROM messages",
             "proposals": "DELETE FROM proposals",
             "seen_activities": "DELETE FROM seen_activities",
+            "coach_memory": "DELETE FROM coach_memory",
         }
         counts: dict[str, int] = {}
         try:
@@ -228,7 +453,7 @@ class CoachStore:
                 focus,
                 user_feedback,
                 json.dumps(context.model_dump(mode="json")),
-                json.dumps(report.model_dump(mode="json")),
+                json.dumps(report.model_dump(mode="json", exclude_unset=True)),
             ),
         )
         self._connection.commit()
@@ -298,7 +523,7 @@ class CoachStore:
                 "UPDATE proposals SET report_json = ?, user_feedback = ?, context_json = ?"
                 " WHERE id = ?",
                 (
-                    json.dumps(report.model_dump(mode="json")),
+                    json.dumps(report.model_dump(mode="json", exclude_unset=True)),
                     user_feedback,
                     json.dumps(context.model_dump(mode="json")),
                     proposal_id,
@@ -307,7 +532,11 @@ class CoachStore:
         else:
             self._connection.execute(
                 "UPDATE proposals SET report_json = ?, user_feedback = ? WHERE id = ?",
-                (json.dumps(report.model_dump(mode="json")), user_feedback, proposal_id),
+                (
+                    json.dumps(report.model_dump(mode="json", exclude_unset=True)),
+                    user_feedback,
+                    proposal_id,
+                ),
             )
         self._connection.commit()
 
@@ -324,7 +553,9 @@ class CoachStore:
                 self._clock().isoformat(),
                 role.value,
                 content,
-                json.dumps(report.model_dump(mode="json")) if report is not None else None,
+                json.dumps(report.model_dump(mode="json", exclude_unset=True))
+                if report is not None
+                else None,
             ),
         )
         self._connection.commit()
@@ -335,7 +566,7 @@ class CoachStore:
     def set_message_report(self, message_id: int, report: DecisionReport) -> None:
         self._connection.execute(
             "UPDATE messages SET report_json = ? WHERE id = ?",
-            (json.dumps(report.model_dump(mode="json")), message_id),
+            (json.dumps(report.model_dump(mode="json", exclude_unset=True)), message_id),
         )
         self._connection.commit()
 
@@ -390,7 +621,7 @@ class CoachStore:
                 " WHERE id = ? AND status = ?",
                 (
                     ProposalStatus.UNAPPLIED.value,
-                    json.dumps(approved.model_dump(mode="json")),
+                    json.dumps(approved.model_dump(mode="json", exclude_unset=True)),
                     decided_at.isoformat(),
                     proposal_id,
                     ProposalStatus.PENDING.value,
