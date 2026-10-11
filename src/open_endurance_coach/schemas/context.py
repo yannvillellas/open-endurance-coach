@@ -11,6 +11,7 @@ from open_endurance_coach.schemas.intervals import (
     SportSettings,
     Wellness,
 )
+from open_endurance_coach.schemas.memory import MemoryIndexEntry, MemoryItem
 from open_endurance_coach.tokens import estimate_payload_tokens, estimate_text_tokens
 
 MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
@@ -36,6 +37,8 @@ _SECTION_KEYS = (
     "today",
     "current_proposal",
     "user_feedback",
+    "coach_memory",
+    "coach_memory_index",
 )
 
 # Events are projected to the fields the model needs: ``workout_doc`` and the plan
@@ -66,6 +69,8 @@ _MODEL_LIST_KEYS = frozenset(
         "training_rollup",
         "sport_settings",
         "activity_splits",
+        "coach_memory",
+        "coach_memory_index",
     }
 )
 
@@ -139,6 +144,8 @@ class CoachContext(BaseModel):
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
+    coach_memory: list[MemoryItem] = Field(default_factory=list)
+    coach_memory_index: list[MemoryIndexEntry] = Field(default_factory=list)
     max_tokens: int = Field(default=16384, gt=0)
 
     def _raw_sections(self) -> dict[str, Any]:
@@ -161,6 +168,10 @@ class CoachContext(BaseModel):
             raw["current_proposal"] = self.current_proposal
         if self.user_feedback:
             raw["user_feedback"] = self.user_feedback
+        if self.coach_memory:
+            raw["coach_memory"] = self.coach_memory
+        if self.coach_memory_index:
+            raw["coach_memory_index"] = self.coach_memory_index
         return raw
 
     def sections(self) -> dict[str, Any]:

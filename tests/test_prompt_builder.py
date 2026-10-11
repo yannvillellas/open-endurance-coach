@@ -7,6 +7,7 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.prompts.prompts import (
     DISCUSSION_EXAMPLE,
     INTAKE_EXAMPLE,
+    MEMORY_EXAMPLE,
     OUTPUT_EXAMPLE,
     RACE_EXAMPLE,
     build_messages,
@@ -23,7 +24,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
-SYSTEM_PROMPT_TOKEN_BUDGET = 2944
+SYSTEM_PROMPT_TOKEN_BUDGET = 3550
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -239,6 +240,32 @@ def test_examples_declare_intent() -> None:
     assert OUTPUT_EXAMPLE["intent"] == "plan"
     assert OUTPUT_EXAMPLE["mutations"]
     assert DecisionReport(summary="x").intent == "analysis"
+
+
+def test_contract_documents_memory_operations() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "coach_memory" in system
+    assert "never ask again what an active fact already answers" in system
+    assert "Reconcile before writing" in system
+    assert "Categories: athlete_profile" in system
+    assert "the answer updates the fact" in system
+
+
+def test_memory_example_validates_against_the_contract() -> None:
+    report = DecisionReport.model_validate(MEMORY_EXAMPLE)
+    assert [op.action.value for op in report.memory] == ["remember"]
+    assert "2024-" not in json.dumps(MEMORY_EXAMPLE)
+
+
+def test_all_examples_carry_the_memory_field() -> None:
+    for example in (
+        OUTPUT_EXAMPLE,
+        DISCUSSION_EXAMPLE,
+        INTAKE_EXAMPLE,
+        RACE_EXAMPLE,
+        MEMORY_EXAMPLE,
+    ):
+        assert "memory" in example, example.get("intent")
 
 
 def test_contract_blocks_proposals_on_material_questions() -> None:

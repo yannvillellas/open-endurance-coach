@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.memory import MemoryCategory, MemoryOrigin, MemoryStatus
 
 
 class ProposalStatus(StrEnum):
@@ -14,29 +15,6 @@ class ProposalStatus(StrEnum):
 class MessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
-
-
-class MemoryCategory(StrEnum):
-    ATHLETE_PROFILE = "athlete_profile"
-    GOALS_MOTIVATION = "goals_motivation"
-    HEALTH_MEDICAL = "health_medical"
-    INJURY_NIGGLE = "injury_niggle"
-    TRAINING_CONSTRAINTS = "training_constraints"
-    PREFERENCES_TOLERANCE = "preferences_tolerance"
-    OBSERVED_PATTERNS = "observed_patterns"
-
-
-HISTORY_CATEGORIES = frozenset({MemoryCategory.HEALTH_MEDICAL, MemoryCategory.INJURY_NIGGLE})
-
-
-class MemoryOrigin(StrEnum):
-    DECLARED = "declared"
-    OBSERVED = "observed"
-
-
-class MemoryStatus(StrEnum):
-    ACTIVE = "active"
-    RESOLVED = "resolved"
 
 
 @dataclass(frozen=True)

@@ -7,9 +7,9 @@ from pathlib import Path
 
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
+from open_endurance_coach.schemas.memory import HISTORY_CATEGORIES
 
 from .records import (
-    HISTORY_CATEGORIES,
     MemoryCategory,
     MemoryFact,
     MemoryOrigin,

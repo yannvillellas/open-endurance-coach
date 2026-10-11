@@ -29,6 +29,7 @@ OUTPUT_EXAMPLE: dict[str, Any] = {
         {"action": "update", "event_id": "EVENT_ID", "moving_time": 0},
         {"action": "delete", "event_id": "EVENT_ID"},
     ],
+    "memory": [],
 }
 
 DISCUSSION_EXAMPLE: dict[str, Any] = {
@@ -38,6 +39,7 @@ DISCUSSION_EXAMPLE: dict[str, Any] = {
     "questions": ["<follow-up question for the athlete>"],
     "needs_input": [],
     "mutations": [],
+    "memory": [],
 }
 
 INTAKE_EXAMPLE: dict[str, Any] = {
@@ -47,6 +49,24 @@ INTAKE_EXAMPLE: dict[str, Any] = {
     "questions": [],
     "needs_input": ["<the fact you need before a plan is possible>"],
     "mutations": [],
+    "memory": [],
+}
+
+MEMORY_EXAMPLE: dict[str, Any] = {
+    "intent": "chat",
+    "summary": "<what you understood, without inventing the missing detail>",
+    "findings": [],
+    "questions": ["<the missing detail, for example the end date>"],
+    "needs_input": [],
+    "mutations": [],
+    "memory": [
+        {
+            "action": "remember",
+            "category": "training_constraints",
+            "origin": "declared",
+            "text": "<the fact exactly as stated, one line>",
+        }
+    ],
 }
 
 RACE_EXAMPLE: dict[str, Any] = {
@@ -76,6 +96,7 @@ RACE_EXAMPLE: dict[str, Any] = {
             "icu_training_load": 0,
         },
     ],
+    "memory": [],
 }
 
 PROPOSAL_POLICY = (
@@ -135,6 +156,24 @@ PROPOSAL_POLICY = (
     "and needs_input.\n"
 )
 
+MEMORY_POLICY = (
+    "coach_memory lists the active facts you must use, and coach_memory_index the "
+    "active facts not shown in full (id, category, short label): consult both before "
+    "asking, and never ask again what an active fact already answers.\n"
+    "Record durable facts in memory on every turn without waiting for approval: "
+    '"remember" (new fact: category, origin declared or observed, text), "update" '
+    '(id plus only the fields that change, such as a missing date), "close" (id: the '
+    'fact is no longer true) and "forget" (id: the fact was wrong). Reconcile before '
+    "writing: no duplicate of an active fact, a changed detail updates it, a "
+    "contradiction updates or closes it. Use only ids from coach_memory or "
+    "coach_memory_index. One self-contained fact per line. When a stated fact misses "
+    "a detail, remember it as stated and ask the detail in the same turn: the answer "
+    "updates the fact.\n"
+    "Categories: athlete_profile, goals_motivation, health_medical, injury_niggle, "
+    "training_constraints, preferences_tolerance, observed_patterns (repeated "
+    "patterns inferred from the athlete's data only).\n"
+)
+
 # Native Intervals.icu workout text, as documented by the Intervals.icu workout builder
 # (forum topic 1163), the workout builder syntax quick guide (123701), distance-based
 # workouts (9973) and absolute pace (115846). Only the Warmup/Cooldown label lines, the
@@ -190,6 +229,7 @@ def _json_contract() -> str:
         "Respond with a single json object and nothing else, matching this exact "
         "schema. The word json in this instruction is required for strict JSON mode.\n"
         f"{PROPOSAL_POLICY}"
+        f"{MEMORY_POLICY}"
         "If current_proposal is present in the athlete data, revise that proposal "
         "minimally to satisfy the user feedback - do not redesign from scratch.\n"
         f"{WORKOUT_TEXT_FORMAT}"
@@ -201,6 +241,9 @@ def _json_contract() -> str:
         f"{json.dumps(OUTPUT_EXAMPLE, indent=2)}\n"
         "Example json (a goal race is in the athlete data - plan backwards from it):\n"
         f"{json.dumps(RACE_EXAMPLE, indent=2)}\n"
+        "Example json (a durable fact is stated - remember it and ask the missing "
+        "detail in the same turn):\n"
+        f"{json.dumps(MEMORY_EXAMPLE, indent=2)}\n"
     )
 
 

@@ -7,6 +7,7 @@ from typing import Annotated, Literal, Self, get_args
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from open_endurance_coach.sanitize import sanitize_text
+from open_endurance_coach.schemas.memory import MemoryAction, MemoryCategory, MemoryOrigin
 
 _EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -159,6 +160,66 @@ Mutation = Annotated[
 ]
 
 
+def _validate_memory_text(value: str) -> str:
+    if "\n" in value or "\t" in value or sanitize_text(value) != value:
+        raise ValueError("memory text must be a single line without control characters")
+    text = value.strip()
+    if not text:
+        raise ValueError("memory text must not be blank")
+    return text
+
+
+MemoryText = Annotated[str, AfterValidator(_validate_memory_text)]
+
+
+class MemoryOp(BaseModel):
+    """One coach-memory operation, applied outside the calendar approval gate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: MemoryAction
+    id: int | None = None
+    category: MemoryCategory | None = None
+    origin: MemoryOrigin | None = None
+    text: MemoryText | None = None
+    expires_on: date | None = None
+    trigger_keywords: list[str] = Field(default_factory=list)
+    trigger_on: date | None = None
+
+    @model_validator(mode="after")
+    def _check_action_fields(self) -> Self:
+        if self.action is MemoryAction.REMEMBER:
+            if self.id is not None:
+                raise ValueError("remember must not carry an id")
+            if self.category is None or self.origin is None:
+                raise ValueError("remember requires category and origin")
+            if self.text is None:
+                raise ValueError("remember requires text")
+            return self
+        if self.id is None:
+            raise ValueError(f"{self.action.value} requires an id")
+        if self.category is not None or self.origin is not None:
+            raise ValueError(f"{self.action.value} must not carry category or origin")
+        if self.action is MemoryAction.UPDATE:
+            changes = self.model_fields_set & {
+                "text",
+                "expires_on",
+                "trigger_keywords",
+                "trigger_on",
+            }
+            if not changes:
+                raise ValueError("update requires at least one change")
+            return self
+        if (
+            self.text is not None
+            or self.expires_on is not None
+            or self.trigger_keywords
+            or self.trigger_on is not None
+        ):
+            raise ValueError(f"{self.action.value} must not carry fact content")
+        return self
+
+
 class DecisionReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +229,7 @@ class DecisionReport(BaseModel):
     questions: list[str] = Field(default_factory=list)
     needs_input: list[str] = Field(default_factory=list)
     mutations: list[Mutation] = Field(default_factory=list)
+    memory: list[MemoryOp] = Field(default_factory=list)
 
 
 def mutations_fingerprint(report: DecisionReport) -> str:
