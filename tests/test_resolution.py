@@ -93,7 +93,7 @@ async def test_long_windows_are_capped_and_announced(settings: Settings) -> None
     assert resolution.plan.events == DateRange(
         TODAY - timedelta(days=365), TODAY + timedelta(days=14)
     )
-    assert any("365" in notice for notice in resolution.notices)
+    assert any("366 dates" in notice for notice in resolution.notices)
 
 
 async def test_an_invalid_window_falls_back_to_standard(settings: Settings) -> None:
@@ -133,7 +133,12 @@ async def test_a_dated_detail_pins_the_window_end(settings: Settings) -> None:
     ("sport", "expected"),
     [
         ("GravelRide", RIDE_TYPES),
+        ("Ride", RIDE_TYPES),
+        ("cycling", RIDE_TYPES),
+        ("bike", RIDE_TYPES),
         ("Run", frozenset({"Run"})),
+        ("running", frozenset({"Run"})),
+        ("swimming", frozenset({"Swim"})),
     ],
 )
 async def test_the_sport_ranks_activities_without_filtering(
@@ -144,3 +149,21 @@ async def test_the_sport_ranks_activities_without_filtering(
     resolution = await resolve_context_plan(client, "the question", today=TODAY)
 
     assert resolution.plan.activity_types == expected
+
+
+async def test_the_resolution_request_carries_the_focus_and_the_detail_anchor(
+    settings: Settings,
+) -> None:
+    provider = FakeLlmProvider(resolutions=['{"window": null}'])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+
+    await resolve_context_plan(client, "the splits of my ride on 2024-01-30", today=TODAY)
+
+    request = provider.resolution_calls[0]
+    assert request["json_mode"] is True
+    assert "the splits of my ride on 2024-01-30" in request["messages"][1].content
+    assert "the window end must be that activity's date" in request["messages"][0].content

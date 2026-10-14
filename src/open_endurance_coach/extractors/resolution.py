@@ -29,8 +29,29 @@ _RESOLUTION_PROMPT = (
     "- sport: set it only when the question names a sport (Ride, Run, Swim, ...).\n"
     "- metric: set it only when the question is about heart rate or elevation.\n"
     "- detail: true only when the question asks to inspect one specific activity "
-    "(splits, per kilometre, a cited session)."
+    "(splits, per kilometre, a cited session); when true, the window end must be that "
+    "activity's date."
 )
+
+_RIDE_TYPES_FOLDED = {family.casefold() for family in RIDE_TYPES}
+
+_SPORT_ALIASES = {
+    "bike": "Ride",
+    "biking": "Ride",
+    "cycling": "Ride",
+    "ride": "Ride",
+    "run": "Run",
+    "running": "Run",
+    "jog": "Run",
+    "swim": "Swim",
+    "swimming": "Swim",
+    "walk": "Walk",
+    "walking": "Walk",
+    "hike": "Hike",
+    "hiking": "Hike",
+    "row": "Rowing",
+    "rowing": "Rowing",
+}
 
 
 class ResolvedWindow(BaseModel):
@@ -70,10 +91,11 @@ def _validate_resolved(payload: object) -> None:
 def _sport_types(sport: str | None) -> frozenset[str]:
     if not sport:
         return frozenset()
-    value = sport.strip()
-    if value.casefold() in {family.casefold() for family in RIDE_TYPES}:
+    folded = sport.strip().casefold()
+    canonical = _SPORT_ALIASES.get(folded, sport.strip())
+    if canonical.casefold() in _RIDE_TYPES_FOLDED:
         return RIDE_TYPES
-    return frozenset({value})
+    return frozenset({canonical})
 
 
 def _overlaps(first: DateRange, second: DateRange) -> bool:
@@ -133,10 +155,13 @@ def _plan_from_resolution(
     ).with_windows(wellness=wellness, events=events)
     notices = [_announcement(f"{start.isoformat()} → {end.isoformat()}", resolved)]
     if activities != scope:
-        notices.append(f"Window clipped: activities keep the last {MAX_ACTIVITY_WINDOW_DAYS} days.")
+        notices.append(
+            f"Window clipped: activities keep up to {MAX_ACTIVITY_WINDOW_DAYS + 1} dates."
+        )
     if wellness != scope or events_scope != scope:
         notices.append(
-            f"Window clipped: wellness and events keep the last {MAX_WELLNESS_WINDOW_DAYS} days."
+            "Window clipped: wellness and past events keep up to "
+            f"{MAX_WELLNESS_WINDOW_DAYS + 1} dates."
         )
     return PlanResolution(plan, tuple(notices))
 

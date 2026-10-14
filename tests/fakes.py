@@ -265,6 +265,7 @@ class FakeLlmProvider:
     ) -> None:
         self.responses = list(responses or [])
         self.resolutions = list(resolutions or [])
+        self.scripted_resolutions = len(self.resolutions)
         self.calls: list[dict[str, Any]] = []
         self.resolution_calls: list[dict[str, Any]] = []
 
@@ -290,8 +291,11 @@ class FakeLlmProvider:
         }
         if any(RESOLUTION_MARKER in str(message.content) for message in messages):
             self.resolution_calls.append(record)
-            payload = self.resolutions.pop(0) if self.resolutions else '{"window": null}'
-            return completion(payload)
+            if self.resolutions:
+                return completion(self.resolutions.pop(0))
+            if self.scripted_resolutions:
+                raise AssertionError("FakeLlmProvider: extra resolution call")
+            return completion('{"window": null}')
         self.calls.append(record)
         if not self.responses:
             raise AssertionError("FakeLlmProvider: no responses left")

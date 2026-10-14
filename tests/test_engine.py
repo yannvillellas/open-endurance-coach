@@ -297,6 +297,9 @@ async def test_analyze_resolves_the_window_with_the_model(
     assert proposal.context.activity_detail.id == "fx-a"
     assert any(notice.startswith("Fetch: 2024-01-01") for notice in notices)
     assert len(provider.resolution_calls) == 1
+    resolution_call = provider.resolution_calls[0]
+    assert "whatever" in resolution_call["messages"][1].content
+    assert resolution_call["json_mode"] is True
 
 
 async def test_analyze_falls_back_to_standard_windows_when_resolution_fails(

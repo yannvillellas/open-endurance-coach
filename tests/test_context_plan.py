@@ -176,3 +176,79 @@ async def test_a_named_sport_ranks_first_without_dropping() -> None:
     context = await gather_context(client, plan, "my rides", today=TODAY)
 
     assert [activity.id for activity in context.recent_activities] == ["fx-ride", "fx-run"]
+
+
+async def test_the_detail_pin_prefers_the_named_sport_then_the_nearest() -> None:
+    client = make_intervals_client(
+        activities=[
+            make_activity("fx-run", 20, activity_type="Run"),
+            make_activity("fx-ride", 18),
+        ]
+    )
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 15), date(2024, 1, 23)),
+        reference=date(2024, 1, 20),
+        activity_types=frozenset({"Ride"}),
+        detail=True,
+    )
+
+    context = await gather_context(client, plan, "the ride", today=TODAY)
+
+    assert context.activity_detail is not None
+    assert context.activity_detail.id == "fx-ride"
+
+
+async def test_the_detail_pin_falls_back_to_any_sport() -> None:
+    client = make_intervals_client(activities=[make_activity("fx-run", 20, activity_type="Run")])
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 15), date(2024, 1, 23)),
+        reference=date(2024, 1, 20),
+        activity_types=frozenset({"Ride"}),
+        detail=True,
+    )
+
+    context = await gather_context(client, plan, "the ride", today=TODAY)
+
+    assert context.activity_detail is not None
+    assert context.activity_detail.id == "fx-run"
+
+
+async def test_a_detail_failure_keeps_the_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = make_intervals_client()
+
+    async def boom(activity_id: str, intervals: bool = True) -> dict:
+        raise IntervalsApiError(500, "boom")
+
+    monkeypatch.setattr(client, "get_activity", boom)
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        reference=date(2024, 1, 20),
+        detail=True,
+    )
+
+    context = await gather_context(client, plan, "the detail", today=TODAY)
+
+    assert context.activity_detail is None
+    assert context.activity_splits == []
+
+
+@pytest.mark.parametrize("error", [ValueError("bad streams"), RuntimeError("unexpected")])
+async def test_unexpected_stream_errors_keep_the_detail(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    client = make_intervals_client()
+
+    async def boom(activity_id: str, types: object) -> dict[str, list]:
+        raise error
+
+    monkeypatch.setattr(client, "get_activity_streams", boom)
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        reference=date(2024, 1, 20),
+        detail=True,
+    )
+
+    context = await gather_context(client, plan, "the detail", today=TODAY)
+
+    assert context.activity_detail is not None
+    assert context.activity_splits == []
