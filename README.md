@@ -57,10 +57,11 @@ Applied:
 
 ## How it works
 
-- **Snapshot** — each session extracts what the question needs from Intervals.icu
-  (recent activities, a ±14-day calendar window, wellness, sport settings, goal races,
-  a 90-day rollup), budgeted to the model's token limit; trend questions pull a wider,
-  pinned window. See [docs/architecture.md](docs/architecture.md).
+- **Snapshot** — each session resolves the question's window with the model (a small
+  JSON call), announces what it read (`Fetch: …`) and gathers only what is needed from
+  Intervals.icu (recent activities, the calendar, wellness, sport settings, goal races,
+  a weekly rollup), budgeted to the model's token limit; an explicit past window is
+  read exactly, with per-source caps. See [docs/architecture.md](docs/architecture.md).
 - **Analysis** — the model answers through a strict JSON schema (invalid output is
   retried, then rejected) using periodization and power analytics, comparing planned
   against executed and current readiness (CTL/ATL, HRV, sleep).
