@@ -107,11 +107,12 @@ async def fetch_goal_races(
     client: IntervalsReadClient,
     current: date,
     *,
-    horizon_days: int = RACE_HORIZON_DAYS,
+    start: date,
+    end: date,
 ) -> list[GoalRace]:
     rows = await client.list_events(
-        current.isoformat(),
-        (current + timedelta(days=horizon_days)).isoformat(),
+        start.isoformat(),
+        end.isoformat(),
         category=RACE_CATEGORY_FILTER,
     )
     return sorted(
@@ -128,12 +129,10 @@ async def fetch_training_rollup(
     client: IntervalsReadClient,
     current: date,
     *,
-    lookback_days: int = ROLLUP_LOOKBACK_DAYS,
+    start: date,
+    end: date,
 ) -> list[TrainingWeek]:
-    rows = await client.get_athlete_summary(
-        start=(current - timedelta(days=lookback_days)).isoformat(),
-        end=current.isoformat(),
-    )
+    rows = await client.get_athlete_summary(start=start.isoformat(), end=end.isoformat())
     try:
         return training_rollup(rows, today=current)
     except ValueError as exc:

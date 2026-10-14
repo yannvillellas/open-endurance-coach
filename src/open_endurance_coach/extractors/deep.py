@@ -5,15 +5,31 @@ from zoneinfo import ZoneInfo
 
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
-from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, gather_context
+from open_endurance_coach.extractors.context import (
+    REFERENCE_WINDOW_DAYS,
+    RIDE_TYPES,
+    ContextPlan,
+    DateRange,
+    gather_context,
+)
 from open_endurance_coach.extractors.standard import ACTIVITY_LOOKBACK_DAYS
 from open_endurance_coach.schemas.context import CoachContext
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
 MAX_DEEP_LOOKBACK_DAYS = 3650
+MAX_WELLNESS_WINDOW_DAYS = 365
+MAX_EVENT_WINDOW_DAYS = 365
 
-_TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
+_TREND_RE = re.compile(
+    r"\b(trend|improve|progress|evolution|tendance|évolution|progression|amélioration)\b",
+    re.IGNORECASE,
+)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
+_DURATION_FR_RE = re.compile(
+    r"\b(\d+)\s+(?:derniers?|dernières?)\s+(jours?|semaines?|mois)\b", re.IGNORECASE
+)
+_AGO_RE = re.compile(r"\b(\d+)\s+(days?|weeks?|months?)\s+ago\b", re.IGNORECASE)
+_AGO_FR_RE = re.compile(r"\bil y a\s+(\d+)\s+(jours?|semaines?|mois)\b", re.IGNORECASE)
 _HILL_RE = re.compile(r"\b(hills?|hilly|climbs?|elevation)\b", re.IGNORECASE)
 _HEART_RATE_RE = re.compile(r"\b(heart ?rate|hr)\b", re.IGNORECASE)
 _RIDE_RE = re.compile(
@@ -85,29 +101,72 @@ def _referenced_date(focus: str, today: date) -> date | None:
 
 @dataclass(frozen=True)
 class DeepQuery:
-    lookback_days: int
+    window: DateRange
+    focus_window: DateRange | None = None
     metric_focus: str | None = None
     activity_types: frozenset[str] = frozenset()
     reference: date | None = None
 
 
+def _unit_days(unit: str) -> int:
+    lowered = unit.lower()
+    if lowered.startswith(("day", "jour")):
+        return 1
+    if lowered.startswith(("week", "semaine")):
+        return 7
+    return 30
+
+
+def _week_window(weeks_ago: int, today: date) -> DateRange:
+    monday = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks_ago)
+    return DateRange(monday, monday + timedelta(days=6))
+
+
 def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | None:
     current = today or date.today()
-    reference = _referenced_date(focus, current)
-    stale_reference = reference is not None and (current - reference).days >= ACTIVITY_LOOKBACK_DAYS
-    if not _TREND_RE.search(focus) and not stale_reference:
+    cited = _referenced_date(focus, current)
+    stale_reference = cited is not None and (current - cited).days >= ACTIVITY_LOOKBACK_DAYS
+    ago = _AGO_RE.search(focus) or _AGO_FR_RE.search(focus)
+    duration = _DURATION_RE.search(focus) or _DURATION_FR_RE.search(focus)
+    if not (_TREND_RE.search(focus) or stale_reference or ago or duration):
         return None
-    lookback = DEFAULT_DEEP_LOOKBACK_DAYS
-    duration = _DURATION_RE.search(focus)
-    if duration:
-        amount = int(duration.group(1))
-        unit = duration.group(2).lower()
-        lookback = amount * (7 if unit == "week" else 30 if unit == "month" else 1)
-    lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
-    if stale_reference:
-        assert reference is not None
-        lookback = max(lookback, (current - reference).days + 7)
-        lookback = min(lookback, MAX_DEEP_LOOKBACK_DAYS)
+
+    point: date | None = None
+    weeks_ago: int | None = None
+    if ago is not None:
+        amount = int(ago.group(1))
+        if _unit_days(ago.group(2)) == 7:
+            weeks_ago = amount
+        else:
+            point = current - timedelta(days=amount * _unit_days(ago.group(2)))
+    elif stale_reference:
+        point = cited
+
+    focus_window: DateRange | None
+    if weeks_ago is not None:
+        window = _week_window(weeks_ago, current)
+        focus_window = window
+    else:
+        if duration is not None:
+            span = int(duration.group(1)) * _unit_days(duration.group(2))
+        elif point is not None:
+            span = DEFAULT_DEEP_LOOKBACK_DAYS
+        else:
+            span = DEFAULT_DEEP_LOOKBACK_DAYS
+        if point is not None:
+            span = max(span, (current - point).days + 7)
+        span = min(span, MAX_DEEP_LOOKBACK_DAYS)
+        window = DateRange(current - timedelta(days=span), current + timedelta(days=1))
+        if point is not None:
+            focus_window = DateRange(
+                point - timedelta(days=REFERENCE_WINDOW_DAYS),
+                point + timedelta(days=REFERENCE_WINDOW_DAYS),
+            )
+        elif duration is not None:
+            focus_window = window
+        else:
+            focus_window = None
+
     if _HEART_RATE_RE.search(focus):
         metric = "heart_rate"
     elif _HILL_RE.search(focus):
@@ -116,10 +175,11 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
         metric = None
     activity_types = RIDE_TYPES if metric is not None and _RIDE_RE.search(focus) else frozenset()
     return DeepQuery(
-        lookback_days=lookback,
+        window=window,
+        focus_window=focus_window,
         metric_focus=metric,
         activity_types=activity_types,
-        reference=reference,
+        reference=point,
     )
 
 
@@ -142,18 +202,25 @@ class DeepHistoricalExtractor:
     ) -> CoachContext:
         if query is None:
             raise ValueError(f"focus is not a deep query: {focus!r}")
-        plan = ContextPlan.standard().for_activities(
-            days=query.lookback_days,
+        current = self._today(today)
+        standard = ContextPlan.standard(current)
+        plan = standard.for_activities(
+            window=query.window,
             activity_types=query.activity_types,
             metric_focus=query.metric_focus,
             reference=query.reference,
             detail=True,
         )
+        if query.focus_window is not None:
+            plan = plan.with_windows(
+                wellness=query.focus_window.clamped(MAX_WELLNESS_WINDOW_DAYS),
+                events=query.focus_window.clamped(MAX_EVENT_WINDOW_DAYS).union(standard.events),
+            )
         return await gather_context(
             self._client,
             plan,
             focus,
             user_feedback=user_feedback,
             max_tokens=max_tokens,
-            today=self._today(today),
+            today=current,
         )

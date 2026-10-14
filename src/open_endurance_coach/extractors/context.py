@@ -52,6 +52,23 @@ RIDE_TYPES = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class DateRange:
+    """Inclusive date window."""
+
+    start: date
+    end: date
+
+    def clamped(self, max_days: int) -> "DateRange":
+        """Keep only the most recent max_days of the window."""
+        if (self.end - self.start).days <= max_days:
+            return self
+        return DateRange(start=self.end - timedelta(days=max_days), end=self.end)
+
+    def union(self, other: "DateRange") -> "DateRange":
+        return DateRange(start=min(self.start, other.start), end=max(self.end, other.end))
+
+
 def _warn_on_split_coverage(
     activity_id: str, declared_m: float | None, splits: list[ActivitySplit]
 ) -> None:
@@ -67,32 +84,37 @@ def _warn_on_split_coverage(
 class ContextPlan:
     """Windows and activity selection for one gather."""
 
-    activities_days: int
-    wellness_days: int
-    event_past_days: int
-    event_future_days: int
-    race_horizon_days: int
-    rollup_days: int
+    activities: DateRange
+    wellness: DateRange
+    events: DateRange
+    races: DateRange
+    rollup: DateRange
     activity_types: frozenset[str] = frozenset()
     metric_focus: str | None = None
     reference: date | None = None
     detail: bool = False
 
     @classmethod
-    def standard(cls) -> "ContextPlan":
+    def standard(cls, today: date) -> "ContextPlan":
         return cls(
-            activities_days=ACTIVITY_LOOKBACK_DAYS,
-            wellness_days=WELLNESS_LOOKBACK_DAYS,
-            event_past_days=RECENT_EVENT_DAYS,
-            event_future_days=UPCOMING_DAYS,
-            race_horizon_days=RACE_HORIZON_DAYS,
-            rollup_days=ROLLUP_LOOKBACK_DAYS,
+            activities=DateRange(
+                today - timedelta(days=ACTIVITY_LOOKBACK_DAYS), today + timedelta(days=1)
+            ),
+            wellness=DateRange(
+                today - timedelta(days=WELLNESS_LOOKBACK_DAYS), today + timedelta(days=1)
+            ),
+            events=DateRange(
+                today - timedelta(days=RECENT_EVENT_DAYS),
+                today + timedelta(days=UPCOMING_DAYS),
+            ),
+            races=DateRange(today, today + timedelta(days=RACE_HORIZON_DAYS)),
+            rollup=DateRange(today - timedelta(days=ROLLUP_LOOKBACK_DAYS), today),
         )
 
     def for_activities(
         self,
         *,
-        days: int,
+        window: DateRange,
         activity_types: frozenset[str] = frozenset(),
         metric_focus: str | None = None,
         reference: date | None = None,
@@ -100,11 +122,20 @@ class ContextPlan:
     ) -> "ContextPlan":
         return replace(
             self,
-            activities_days=days,
+            activities=window,
             activity_types=activity_types,
             metric_focus=metric_focus,
             reference=reference,
             detail=detail,
+        )
+
+    def with_windows(
+        self, *, wellness: DateRange | None = None, events: DateRange | None = None
+    ) -> "ContextPlan":
+        return replace(
+            self,
+            wellness=wellness if wellness is not None else self.wellness,
+            events=events if events is not None else self.events,
         )
 
 
@@ -154,9 +185,8 @@ async def gather_context(
     max_tokens: int | None = None,
     today: date,
 ) -> CoachContext:
-    newest = (today + timedelta(days=1)).isoformat()
     activities_raw = await client.list_activities(
-        (today - timedelta(days=plan.activities_days)).isoformat(), newest
+        plan.activities.start.isoformat(), plan.activities.end.isoformat()
     )
     activities = [Activity.model_validate(item) for item in activities_raw]
     if plan.activity_types:
@@ -198,13 +228,10 @@ async def gather_context(
         settings_raw,
     ) = await asyncio.gather(
         load_detail(),
-        client.list_wellness((today - timedelta(days=plan.wellness_days)).isoformat(), newest),
-        client.list_events(
-            (today - timedelta(days=plan.event_past_days)).isoformat(),
-            (today + timedelta(days=plan.event_future_days)).isoformat(),
-        ),
-        fetch_goal_races(client, today, horizon_days=plan.race_horizon_days),
-        fetch_training_rollup(client, today, lookback_days=plan.rollup_days),
+        client.list_wellness(plan.wellness.start.isoformat(), plan.wellness.end.isoformat()),
+        client.list_events(plan.events.start.isoformat(), plan.events.end.isoformat()),
+        fetch_goal_races(client, today, start=plan.races.start, end=plan.races.end),
+        fetch_training_rollup(client, today, start=plan.rollup.start, end=plan.rollup.end),
         client.get_sport_settings(),
     )
     activity_detail, activity_splits = detail_result
@@ -252,11 +279,12 @@ class StandardExtractor:
         max_tokens: int | None = None,
         today: date | None = None,
     ) -> CoachContext:
+        current = self._today(today)
         return await gather_context(
             self._client,
-            ContextPlan.standard(),
+            ContextPlan.standard(current),
             focus,
             user_feedback=user_feedback,
             max_tokens=max_tokens,
-            today=self._today(today),
+            today=current,
         )

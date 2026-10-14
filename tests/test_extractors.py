@@ -523,9 +523,10 @@ def test_split_coverage_warning_stays_on_one_line(caplog: pytest.LogCaptureFixtu
     ],
 )
 def test_detect_deep_query_parses_focus(focus: str, lookback: int, metric: str) -> None:
-    query = detect_deep_query(focus)
+    query = detect_deep_query(focus, today=TODAY)
     assert query is not None
-    assert query.lookback_days == lookback
+    assert (TODAY - query.window.start).days == lookback
+    assert (query.window.end - TODAY).days == 1
     assert query.metric_focus == metric
 
 
@@ -551,7 +552,8 @@ def test_gravel_ride_named_in_a_hill_trend_keeps_the_ride_family() -> None:
 def test_detect_deep_query_on_past_activity_reference() -> None:
     query = detect_deep_query("check the activity on 2023-01-15", today=TODAY)
     assert query is not None
-    assert query.lookback_days >= 382
+    assert query.reference == date(2023, 1, 15)
+    assert (query.window.end - query.window.start).days >= 389
 
 
 def test_detect_deep_query_on_worded_past_reference() -> None:
@@ -590,7 +592,9 @@ async def test_deep_extraction_fetches_filtered_window_and_detail(settings: Sett
     )
     focus = "how did my heart rate improve on hills on my bike in the last 3 months"
     extractor = DeepHistoricalExtractor(settings, client)
-    context = await extractor.extract(focus, query=detect_deep_query(focus), today=TODAY)
+    context = await extractor.extract(
+        focus, query=detect_deep_query(focus, today=TODAY), today=TODAY
+    )
     activities_oldest = next(call for call in client.calls if call[0] == "activities")[1]
     assert activities_oldest == "2023-11-03"
     assert context.activity_detail is not None
@@ -701,7 +705,7 @@ def test_recent_reference_within_the_standard_window_is_not_deep() -> None:
 def test_reference_older_than_the_standard_window_is_deep() -> None:
     query = detect_deep_query("what did I do on 2024-01-18?", today=date(2024, 2, 1))
     assert query is not None
-    assert query.lookback_days >= 21
+    assert (query.window.end - query.window.start).days >= 21
 
 
 async def test_standard_extraction_builds_goal_races(settings: Settings) -> None:
@@ -1136,7 +1140,7 @@ def test_day_month_with_a_relative_year_resolves_to_last_year() -> None:
     )
     assert query is not None
     assert query.reference == date(2025, 9, 28)
-    assert query.lookback_days >= 360
+    assert query.window.start <= date(2025, 9, 28) - timedelta(days=7)
 
 
 def test_bare_relative_year_keeps_the_generic_lookback() -> None:
@@ -1148,4 +1152,4 @@ def test_bare_relative_year_keeps_the_generic_lookback() -> None:
 def test_deep_query_clamps_an_absurd_duration() -> None:
     query = detect_deep_query("trend in heart rate over the last 3000000 weeks", today=TODAY)
     assert query is not None
-    assert query.lookback_days == MAX_DEEP_LOOKBACK_DAYS
+    assert (query.window.end - query.window.start).days == MAX_DEEP_LOOKBACK_DAYS + 1
