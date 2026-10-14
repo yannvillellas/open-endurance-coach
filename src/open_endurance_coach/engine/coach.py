@@ -15,12 +15,13 @@ from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings, effective_input_budget, resolved_input_room
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
+from open_endurance_coach.extractors.context import StandardExtractor
 from open_endurance_coach.extractors.deep import (
     MAX_DEEP_LOOKBACK_DAYS,
     DeepHistoricalExtractor,
     detect_deep_query,
 )
-from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS, StandardExtractor
+from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
 from open_endurance_coach.prompts.prompts import (
     CHAT_ONLY_FALLBACK,
     build_messages,

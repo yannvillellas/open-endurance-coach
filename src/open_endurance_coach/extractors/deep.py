@@ -1,41 +1,16 @@
-import asyncio
-import logging
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
 from zoneinfo import ZoneInfo
 
-from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings
-from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.extractors.splits import per_km_splits, stream_types
-from open_endurance_coach.extractors.standard import (
-    ACTIVITY_LOOKBACK_DAYS,
-    DEFAULT_MAX_TOKENS,
-    RECENT_EVENT_DAYS,
-    UPCOMING_DAYS,
-    WELLNESS_LOOKBACK_DAYS,
-    fetch_goal_races,
-    fetch_training_rollup,
-)
+from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, gather_context
+from open_endurance_coach.extractors.standard import ACTIVITY_LOOKBACK_DAYS
 from open_endurance_coach.schemas.context import CoachContext
-from open_endurance_coach.schemas.intervals import (
-    Activity,
-    ActivitySplit,
-    Event,
-    SportSettings,
-    Wellness,
-)
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
 MAX_DEEP_LOOKBACK_DAYS = 3650
-REFERENCE_WINDOW_DAYS = 3
-SPLIT_COVERAGE_TOLERANCE = 0.02
 
 _TREND_RE = re.compile(r"\b(trend|improve|progress|evolution)\b", re.IGNORECASE)
 _DURATION_RE = re.compile(r"last (\d+) (day|week|month)s?", re.IGNORECASE)
@@ -43,18 +18,6 @@ _HILL_RE = re.compile(r"\b(hills?|hilly|climbs?|elevation)\b", re.IGNORECASE)
 _HEART_RATE_RE = re.compile(r"\b(heart ?rate|hr)\b", re.IGNORECASE)
 _RIDE_RE = re.compile(
     r"\b(ride|rides|riding|bike|biking|cycle|cycling|zwift|gravel|mtb)\b", re.IGNORECASE
-)
-_RIDE_TYPES = frozenset(
-    {
-        "Ride",
-        "VirtualRide",
-        "GravelRide",
-        "MountainBikeRide",
-        "EBikeRide",
-        "TrackRide",
-        "Cyclocross",
-        "Velomobile",
-    }
 )
 _ISO_DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
 _WORDED_DATE_RE = re.compile(
@@ -90,17 +53,6 @@ _MONTHS = {
     "dec": 12,
     "december": 12,
 }
-
-
-def _warn_on_split_coverage(
-    activity_id: str, declared_m: float | None, splits: list[ActivitySplit]
-) -> None:
-    """Note when the split table does not cover the activity's own distance."""
-    if declared_m is None or declared_m <= 0:
-        return
-    covered = sum(split.distance_m for split in splits)
-    if not splits or abs(covered - declared_m) / declared_m > SPLIT_COVERAGE_TOLERANCE:
-        logger.warning("splits for %r cover %.0f of %.0f m", activity_id, covered, declared_m)
 
 
 def _referenced_date(focus: str, today: date) -> date | None:
@@ -162,7 +114,7 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
         metric = "elevation"
     else:
         metric = None
-    activity_types = _RIDE_TYPES if metric is not None and _RIDE_RE.search(focus) else frozenset()
+    activity_types = RIDE_TYPES if metric is not None and _RIDE_RE.search(focus) else frozenset()
     return DeepQuery(
         lookback_days=lookback,
         metric_focus=metric,
@@ -179,13 +131,6 @@ class DeepHistoricalExtractor:
     def _today(self, today: date | None) -> date:
         return today or datetime.now(ZoneInfo(self._settings.app_timezone)).date()
 
-    def _relevance(self, query: DeepQuery) -> Callable[[Activity], Any]:
-        if query.metric_focus == "elevation":
-            return lambda activity: activity.total_elevation_gain or 0.0
-        if query.metric_focus == "heart_rate":
-            return lambda activity: activity.average_heartrate or 0.0
-        return lambda activity: activity.start_date_local
-
     async def extract(
         self,
         focus: str,
@@ -197,111 +142,18 @@ class DeepHistoricalExtractor:
     ) -> CoachContext:
         if query is None:
             raise ValueError(f"focus is not a deep query: {focus!r}")
-        current = self._today(today)
-        newest = (current + timedelta(days=1)).isoformat()
-        activities_raw = await self._client.list_activities(
-            (current - timedelta(days=query.lookback_days)).isoformat(), newest
+        plan = ContextPlan.standard().for_activities(
+            days=query.lookback_days,
+            activity_types=query.activity_types,
+            metric_focus=query.metric_focus,
+            reference=query.reference,
+            detail=True,
         )
-        activities = [Activity.model_validate(item) for item in activities_raw]
-        if query.activity_types:
-            activities = [a for a in activities if a.type in query.activity_types]
-        keep_ids: set[str] = set()
-        if query.reference is not None:
-            window = timedelta(days=REFERENCE_WINDOW_DAYS)
-            keep_ids = {
-                activity.id
-                for activity in activities
-                if query.reference - window
-                <= activity.start_date_local.date()
-                <= query.reference + window
-            }
-        activities = sorted(activities, key=self._relevance(query), reverse=True)
-        detail_source: Activity | None = None
-        if query.reference is not None:
-            # The cited date wins: exact day first, then the nearest, then relevance.
-            reference = query.reference
-            candidates = [activity for activity in activities if activity.id in keep_ids]
-            candidates.sort(
-                key=lambda activity: abs((activity.start_date_local.date() - reference).days)
-            )
-            detail_source = candidates[0] if candidates else None
-        elif activities:
-            detail_source = activities[0]
-
-        async def load_detail() -> tuple[Activity | None, list[ActivitySplit]]:
-            if detail_source is None:
-                return None, []
-            try:
-                detail_raw = await self._client.get_activity(detail_source.id, intervals=True)
-                detail = Activity.model_validate(detail_raw)
-            except (IntervalsApiError, ValueError) as exc:
-                logger.warning("could not read the detail of %r: %r", detail_source.id, exc)
-                return None, []
-            except Exception:
-                logger.exception("unexpected error reading the detail of %r", detail_source.id)
-                return None, []
-            try:
-                speed_based = detail.type in _RIDE_TYPES
-                streams = await self._client.get_activity_streams(
-                    detail_source.id, stream_types(speed_based)
-                )
-                splits = per_km_splits(streams, speed_based=speed_based)
-                _warn_on_split_coverage(detail_source.id, detail.distance, splits)
-                return detail, splits
-            except (IntervalsApiError, ValueError) as exc:
-                logger.warning(
-                    "could not read the streams of %r; splits skipped: %r", detail_source.id, exc
-                )
-            except Exception:
-                logger.exception(
-                    "unexpected error reading the streams of %r; splits skipped", detail_source.id
-                )
-            return detail, []
-
-        (
-            detail_result,
-            wellness_raw,
-            events_raw,
-            goal_races,
-            rollup,
-            settings_raw,
-        ) = await asyncio.gather(
-            load_detail(),
-            self._client.list_wellness(
-                (current - timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(), newest
-            ),
-            self._client.list_events(
-                (current - timedelta(days=RECENT_EVENT_DAYS)).isoformat(),
-                (current + timedelta(days=UPCOMING_DAYS)).isoformat(),
-            ),
-            fetch_goal_races(self._client, current),
-            fetch_training_rollup(self._client, current),
-            self._client.get_sport_settings(),
-        )
-        activity_detail, activity_splits = detail_result
-        events = sorted(
-            (Event.model_validate(item) for item in events_raw),
-            key=lambda event: event.start_date_local,
-        )
-        return build_within_budget(
-            focus=focus,
-            recent_activities=activities,
-            wellness=sorted(
-                (Wellness.model_validate(item) for item in wellness_raw),
-                key=lambda row: row.id,
-                reverse=True,
-            ),
-            upcoming_events=[event for event in events if event.start_date_local.date() >= current],
-            recent_events=[
-                event for event in reversed(events) if event.start_date_local.date() < current
-            ],
-            goal_races=goal_races,
-            training_rollup=rollup,
-            sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
+        return await gather_context(
+            self._client,
+            plan,
+            focus,
             user_feedback=user_feedback,
-            activity_keep_ids=keep_ids,
-            activity_detail=activity_detail,
-            activity_splits=activity_splits,
-            max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
-            today=current,
+            max_tokens=max_tokens,
+            today=self._today(today),
         )

@@ -8,13 +8,13 @@ from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.config import Settings
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
+from open_endurance_coach.extractors.context import StandardExtractor, _warn_on_split_coverage
 from open_endurance_coach.extractors.deep import (
     MAX_DEEP_LOOKBACK_DAYS,
     DeepHistoricalExtractor,
-    _warn_on_split_coverage,
     detect_deep_query,
 )
-from open_endurance_coach.extractors.standard import StandardExtractor, macro_phase, training_rollup
+from open_endurance_coach.extractors.standard import macro_phase, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import (
     Activity,
