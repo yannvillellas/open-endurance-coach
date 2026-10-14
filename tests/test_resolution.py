@@ -8,13 +8,13 @@ from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
 from open_endurance_coach.extractors.resolution import resolve_context_plan
 
-from .fakes import FakeLlmProvider, RecordingSleep, completion
+from .fakes import FakeLlmProvider, RecordingSleep
 
 TODAY = date(2024, 2, 1)
 
 
 def make_client(settings: Settings, payloads: list[object]) -> LlmClient:
-    provider = FakeLlmProvider([completion(json.dumps(payload)) for payload in payloads])
+    provider = FakeLlmProvider(resolutions=[json.dumps(payload) for payload in payloads])
     return LlmClient(
         settings.model_copy(update={"llm_provider": "fake"}),
         {"fake": provider},

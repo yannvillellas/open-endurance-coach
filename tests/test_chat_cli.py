@@ -440,16 +440,17 @@ def test_chat_yes_outside_proposal_never_writes(patched: Any) -> None:
     assert store.list_unapplied_proposals() == []
 
 
-def test_chat_deep_query_refreshes_analysis(patched: Any) -> None:
-    provider = FakeLlmProvider([completion(report_json())])
-    _, store = patched(provider)
-    result = runner.invoke(
-        cli_main.app,
-        [],
-        input="how much did my heart rate improve on hills over the last 3 months\n",
+def test_chat_announces_the_resolved_window(patched: Any) -> None:
+    provider = FakeLlmProvider(
+        [completion(report_json())],
+        resolutions=[json.dumps({"window": {"start": "2023-12-01", "end": "2023-12-20"}})],
     )
+    _, store = patched(provider)
+
+    result = runner.invoke(cli_main.app, [], input="average heart rate in December\n/exit\n")
+
     assert result.exit_code == 0
-    assert '"activity_detail": null' not in provider.calls[0]["messages"][1].content
+    assert "Fetch: 2023-12-01 → 2023-12-20" in result.output
     assert len(store.list_proposals()) == 1
 
 
@@ -923,7 +924,6 @@ async def test_chat_feedback_fallback_keeps_gate_open(patched: Any) -> None:
     )
     state = ChatState(plan=PlanSnapshot(plan_text="plan", proposal_id=proposal_id))
     session = ChatSession()
-    session.context = CoachContext(focus="f", max_tokens=100)
     result = await cli_chat._handle_proposal(engine, state, "make it easier", session)
     assert isinstance(result, ChatState)
     assert result.plan is not None

@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 
 from open_endurance_coach.clients.llm import LlmMessage
 from open_endurance_coach.sanitize import sanitize_text
-from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.store.records import Message
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
@@ -62,7 +61,6 @@ def trim_history(turns: list[LlmMessage], max_tokens: int) -> list[LlmMessage]:
 @dataclass
 class ChatSession:
     history: list[LlmMessage] = field(default_factory=list)
-    context: CoachContext | None = None
     cap: int | None = None
     pending_proposal_id: int | None = None
     notified: set[float] = field(default_factory=set)

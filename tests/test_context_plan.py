@@ -2,15 +2,8 @@ from datetime import date
 
 import pytest
 
-from open_endurance_coach.config import Settings
-from open_endurance_coach.extractors import context as context_module
-from open_endurance_coach.extractors import deep as deep_module
-from open_endurance_coach.extractors.context import (
-    ContextPlan,
-    DateRange,
-    StandardExtractor,
-)
-from open_endurance_coach.extractors.deep import DeepHistoricalExtractor, detect_deep_query
+from open_endurance_coach.clients.intervals import IntervalsApiError
+from open_endurance_coach.extractors.context import ContextPlan, DateRange, gather_context
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
     RACE_HORIZON_DAYS,
@@ -20,7 +13,7 @@ from open_endurance_coach.extractors.standard import (
     WELLNESS_LOOKBACK_DAYS,
 )
 
-from .fakes import make_activity, make_event, make_intervals_client, make_wellness
+from .fakes import make_activity, make_intervals_client
 
 TODAY = date(2024, 2, 1)
 
@@ -77,177 +70,109 @@ def test_with_windows_replaces_only_the_question_windows() -> None:
 
 
 @pytest.mark.parametrize(
-    "focus",
+    "expected",
     [
-        "review the week 2 weeks ago",
-        "quelle était ma charge la semaine il y a 2 semaines",
+        ("activities", "2024-01-18", "2024-02-02"),
+        ("wellness", "2024-01-25", "2024-02-02"),
+        ("events", "2024-01-18", "2024-02-15", None),
+        ("athlete_summary", "2023-11-03", "2024-02-01"),
+        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
+        ("sport_settings",),
     ],
 )
-def test_deep_query_targets_a_named_past_week(focus: str) -> None:
-    query = detect_deep_query(focus, today=TODAY)
+async def test_the_standard_plan_reproduces_the_tactical_calls(
+    expected: tuple[object, ...],
+) -> None:
+    client = make_intervals_client()
 
-    assert query is not None
-    assert query.window == DateRange(date(2024, 1, 15), date(2024, 1, 21))
-    assert query.focus_window == query.window
-    assert query.reference is None
+    await gather_context(client, ContextPlan.standard(TODAY), "status check", today=TODAY)
 
-
-@pytest.mark.parametrize(
-    "focus",
-    [
-        "average resting heart rate over the last 2 weeks",
-        "moyenne de ma fréquence cardiaque sur les 2 dernières semaines",
-    ],
-)
-def test_a_duration_opens_the_question_window(focus: str) -> None:
-    query = detect_deep_query(focus, today=TODAY)
-
-    assert query is not None
-    assert query.window == DateRange(date(2024, 1, 18), date(2024, 2, 2))
-    assert query.focus_window == query.window
+    assert expected in client.calls
+    assert len(client.calls) == 6
 
 
-def test_an_ago_point_pins_a_small_window() -> None:
-    query = detect_deep_query("what was my resting heart rate 15 days ago", today=TODAY)
-
-    assert query is not None
-    assert query.reference == date(2024, 1, 17)
-    assert query.focus_window == DateRange(date(2024, 1, 14), date(2024, 1, 20))
-    assert query.window == DateRange(date(2023, 11, 3), date(2024, 2, 2))
-
-
-def test_a_recent_cited_date_is_deep_at_any_age() -> None:
-    query = detect_deep_query("what did I do on 2024-01-30?", today=TODAY)
-
-    assert query is not None
-    assert query.reference == date(2024, 1, 30)
-    assert query.focus_window == DateRange(date(2024, 1, 27), date(2024, 2, 2))
-    assert query.window == DateRange(date(2023, 11, 3), date(2024, 2, 2))
-
-
-def test_a_future_cited_date_is_not_deep() -> None:
-    assert detect_deep_query("plan the week of 2024-02-05", today=TODAY) is None
-
-
-async def test_a_detail_request_returns_the_activity_at_any_age(settings: Settings) -> None:
-    client = make_intervals_client(activities=[make_activity("fx-old", 30)])
-    focus = "give me the per kilometre splits of my ride on 2024-01-30"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    context = await DeepHistoricalExtractor(settings, client).extract(
-        focus, query=query, today=TODAY
+async def test_a_question_window_drives_every_source() -> None:
+    window = DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    plan = (
+        ContextPlan.standard(TODAY)
+        .for_activities(window=window)
+        .with_windows(wellness=window, events=window)
     )
+    client = make_intervals_client()
+
+    await gather_context(client, plan, "average heart rate", today=TODAY)
+
+    assert ("activities", "2023-12-01", "2023-12-20") in client.calls
+    assert ("wellness", "2023-12-01", "2023-12-20") in client.calls
+    assert ("events", "2023-12-01", "2023-12-20", None) in client.calls
+
+
+async def test_a_detail_plan_pins_the_referenced_activity() -> None:
+    client = make_intervals_client(activities=[make_activity("fx-old", 30)])
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 30), date(2024, 1, 30)),
+        reference=date(2024, 1, 30),
+        detail=True,
+    )
+
+    context = await gather_context(client, plan, "the splits of that ride", today=TODAY)
 
     assert context.activity_detail is not None
     assert context.activity_detail.id == "fx-old"
-    assert ("wellness", "2024-01-27", "2024-02-02") in client.calls
     assert any(call[0] == "streams" and call[1] == "fx-old" for call in client.calls)
 
 
-async def test_a_detail_request_without_a_date_pins_the_most_recent_activity(
-    settings: Settings,
-) -> None:
-    client = make_intervals_client(
-        activities=[make_activity("fx-recent", 31), make_activity("fx-old", 10)]
-    )
-    focus = "give me the details of my latest ride"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    context = await DeepHistoricalExtractor(settings, client).extract(
-        focus, query=query, today=TODAY
-    )
-
-    assert context.activity_detail is not None
-    assert context.activity_detail.id == "fx-recent"
-
-
-async def test_a_wellness_row_from_fifteen_days_ago_is_available(
-    settings: Settings,
-) -> None:
-    client = make_intervals_client(wellness=[make_wellness(17)])
-    focus = "what was my resting heart rate 15 days ago"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    context = await DeepHistoricalExtractor(settings, client).extract(
-        focus, query=query, today=TODAY
+async def test_a_detail_plan_includes_the_splits() -> None:
+    streams = {
+        "time": list(range(601)),
+        "distance": [index * 1000 / 300 for index in range(601)],
+        "heartrate": [150] * 601,
+    }
+    client = make_intervals_client(streams=streams)
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        reference=date(2024, 1, 20),
+        detail=True,
     )
 
-    assert ("wellness", "2024-01-14", "2024-01-20") in client.calls
-    assert [row.id for row in context.wellness] == [date(2024, 1, 17)]
+    context = await gather_context(client, plan, "the splits", today=TODAY)
+
+    assert [split.label for split in context.activity_splits] == ["km 1", "km 2"]
+    assert context.activity_splits[0].average_heartrate == 150
+    assert any(call[0] == "streams" and "watts" in call[2] for call in client.calls)
 
 
-async def test_an_event_from_fifteen_days_ago_is_visible(settings: Settings) -> None:
-    client = make_intervals_client(events=[make_event(7, "2024-01-17", name="Old session")])
-    focus = "what was on my calendar 15 days ago"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    context = await DeepHistoricalExtractor(settings, client).extract(
-        focus, query=query, today=TODAY
-    )
-
-    assert [event.name for event in context.recent_events] == ["Old session"]
-    events_call = next(call for call in client.calls if call[0] == "events")
-    assert events_call[1] <= "2024-01-17" <= events_call[2]
-
-
-async def test_a_two_week_average_gets_the_wellness_rows(settings: Settings) -> None:
-    rows = [make_wellness(day) for day in range(18, 32)]
-    client = make_intervals_client(wellness=rows)
-    focus = "average resting heart rate over the last 2 weeks"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    context = await DeepHistoricalExtractor(settings, client).extract(
-        focus, query=query, today=TODAY
-    )
-
-    assert ("wellness", "2024-01-18", "2024-02-02") in client.calls
-    assert len(context.wellness) == 14
-
-
-async def test_long_question_windows_are_capped(settings: Settings) -> None:
-    client = make_intervals_client(wellness=[make_wellness(17)])
-    focus = "average resting heart rate over the last 60 months"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-
-    await DeepHistoricalExtractor(settings, client).extract(focus, query=query, today=TODAY)
-
-    wellness_call = next(call for call in client.calls if call[0] == "wellness")
-    wellness_start = date.fromisoformat(wellness_call[1])
-    assert (date.fromisoformat(wellness_call[2]) - wellness_start).days == 365
-    events_call = next(call for call in client.calls if call[0] == "events")
-    assert (date.fromisoformat(events_call[2]) - date.fromisoformat(events_call[1])).days <= 380
-
-
-async def test_both_extractors_feed_the_single_gather(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    plans: list[ContextPlan] = []
-
-    async def fake_gather(
-        client: object, plan: ContextPlan, focus: str, **kwargs: object
-    ) -> object:
-        plans.append(plan)
-        return None
-
-    monkeypatch.setattr(context_module, "gather_context", fake_gather)
-    monkeypatch.setattr(deep_module, "gather_context", fake_gather)
+async def test_a_streams_failure_keeps_the_detail(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_intervals_client()
 
-    await StandardExtractor(settings, client).extract("status check", today=TODAY)
+    async def boom(activity_id: str, types: object) -> dict[str, list]:
+        raise IntervalsApiError(404, "no streams")
 
-    focus = "how has my heart rate trend over the last 3 months"
-    query = detect_deep_query(focus, today=TODAY)
-    assert query is not None
-    await DeepHistoricalExtractor(settings, client).extract(focus, query=query, today=TODAY)
+    monkeypatch.setattr(client, "get_activity_streams", boom)
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        reference=date(2024, 1, 20),
+        detail=True,
+    )
 
-    assert plans[0] == ContextPlan.standard(TODAY)
-    assert plans[1].activities == DateRange(date(2023, 11, 3), date(2024, 2, 2))
-    assert plans[1].wellness == DateRange(date(2023, 11, 3), date(2024, 2, 2))
-    assert plans[1].metric_focus == "heart_rate"
-    assert plans[1].detail is True
+    context = await gather_context(client, plan, "the splits", today=TODAY)
+
+    assert context.activity_detail is not None
+    assert context.activity_splits == []
+
+
+async def test_a_named_sport_ranks_first_without_dropping() -> None:
+    client = make_intervals_client(
+        activities=[
+            make_activity("fx-run", 20, activity_type="Run"),
+            make_activity("fx-ride", 18),
+        ]
+    )
+    plan = ContextPlan.standard(TODAY).for_activities(
+        window=DateRange(date(2024, 1, 1), date(2024, 2, 2)),
+        activity_types=frozenset({"Ride"}),
+    )
+
+    context = await gather_context(client, plan, "my rides", today=TODAY)
+
+    assert [activity.id for activity in context.recent_activities] == ["fx-ride", "fx-run"]

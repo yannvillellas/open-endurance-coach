@@ -15,11 +15,10 @@ from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.config import Settings, effective_input_budget, resolved_input_room
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
-from open_endurance_coach.extractors.context import StandardExtractor
-from open_endurance_coach.extractors.deep import (
-    MAX_DEEP_LOOKBACK_DAYS,
-    DeepHistoricalExtractor,
-    detect_deep_query,
+from open_endurance_coach.extractors.context import gather_context
+from open_endurance_coach.extractors.resolution import (
+    MAX_ACTIVITY_WINDOW_DAYS,
+    resolve_context_plan,
 )
 from open_endurance_coach.extractors.standard import DEFAULT_MAX_TOKENS
 from open_endurance_coach.prompts.prompts import (
@@ -266,16 +265,23 @@ class CoachEngine:
         self._writer = writer
 
     async def _extract(
-        self, focus: str, *, user_feedback: str | None, today: date | None
+        self,
+        focus: str,
+        *,
+        user_feedback: str | None,
+        today: date | None,
+        notices: list[str] | None = None,
     ) -> CoachContext:
-        deep_query = detect_deep_query(focus, today=today)
-        if deep_query is not None:
-            extractor = DeepHistoricalExtractor(self._settings, self._read_client)
-            return await extractor.extract(
-                focus, query=deep_query, user_feedback=user_feedback, today=today
-            )
-        return await StandardExtractor(self._settings, self._read_client).extract(
-            focus, user_feedback=user_feedback, today=today
+        current = today or self.today()
+        resolution = await resolve_context_plan(self._llm_client, focus, today=current)
+        if notices is not None:
+            notices.extend(resolution.notices)
+        return await gather_context(
+            self._read_client,
+            resolution.plan,
+            focus,
+            user_feedback=user_feedback,
+            today=current,
         )
 
     def _surface_unseen(self, context: CoachContext) -> CoachContext:
@@ -401,9 +407,10 @@ class CoachEngine:
         *,
         user_feedback: str | None = None,
         today: date | None = None,
+        notices: list[str] | None = None,
     ) -> CoachContext:
         context = self._surface_unseen(
-            await self._extract(focus, user_feedback=user_feedback, today=today)
+            await self._extract(focus, user_feedback=user_feedback, today=today, notices=notices)
         )
         return self._with_memory(context, focus)
 
@@ -499,20 +506,22 @@ class CoachEngine:
         today: date | None = None,
         context: CoachContext | None = None,
         history: list[LlmMessage] | None = None,
-        memory_notices: list[str] | None = None,
+        notices: list[str] | None = None,
     ) -> Proposal:
         self.check_focus(focus)
         if context is None:
-            context = await self.build_context(focus, user_feedback=user_feedback, today=today)
+            context = await self.build_context(
+                focus, user_feedback=user_feedback, today=today, notices=notices
+            )
         report = await self._run_llm(context, history=history)
         proposal_id = self._store.save_proposal(
             focus=context.focus, report=report, context=context, user_feedback=user_feedback
         )
         self._store.mark_activities_seen(activity.id for activity in context.recent_activities)
         message_id = self._store.add_message(MessageRole.USER, focus)
-        notices = self.apply_memory_ops(report.memory, source_message_id=message_id)
-        if memory_notices is not None:
-            memory_notices.extend(notices)
+        memory_notices = self.apply_memory_ops(report.memory, source_message_id=message_id)
+        if notices is not None:
+            notices.extend(memory_notices)
         self._store.add_message(
             MessageRole.ASSISTANT, assistant_turn(report).content, report=report
         )
@@ -592,7 +601,7 @@ class CoachEngine:
         return self.llm_selection()
 
     def prune_seen_activities(self, *, now: datetime | None = None) -> int:
-        cutoff = (now or datetime.now(UTC)) - timedelta(days=MAX_DEEP_LOOKBACK_DAYS)
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=MAX_ACTIVITY_WINDOW_DAYS)
         return self._store.prune_seen_activities(cutoff)
 
     def wipe_local_state(self) -> dict[str, int]:

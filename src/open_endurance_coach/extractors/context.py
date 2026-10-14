@@ -4,13 +4,11 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsReadClient
-from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.splits import per_km_splits, stream_types
 from open_endurance_coach.extractors.standard import (
@@ -147,6 +145,11 @@ def _relevance(plan: ContextPlan) -> Callable[[Activity], Any]:
     return lambda activity: activity.start_date_local
 
 
+def _sport_rank(activity: Activity, plan: ContextPlan) -> bool:
+    """The named sport ranks first; no activity is ever dropped by its type."""
+    return not plan.activity_types or activity.type in plan.activity_types
+
+
 async def _load_detail(
     client: IntervalsReadClient, detail_source: Activity
 ) -> tuple[Activity | None, list[ActivitySplit]]:
@@ -189,8 +192,6 @@ async def gather_context(
         plan.activities.start.isoformat(), plan.activities.end.isoformat()
     )
     activities = [Activity.model_validate(item) for item in activities_raw]
-    if plan.activity_types:
-        activities = [activity for activity in activities if activity.type in plan.activity_types]
     keep_ids: set[str] = set()
     if plan.detail and plan.reference is not None:
         reference = plan.reference
@@ -200,15 +201,22 @@ async def gather_context(
             for activity in activities
             if reference - window <= activity.start_date_local.date() <= reference + window
         }
-    activities = sorted(activities, key=_relevance(plan), reverse=True)
+    activities = sorted(
+        activities,
+        key=lambda activity: (_sport_rank(activity, plan), _relevance(plan)(activity)),
+        reverse=True,
+    )
     detail_source: Activity | None = None
     if plan.detail:
         if plan.reference is not None:
-            # The cited date wins: exact day first, then the nearest.
+            # The cited date wins, then the named sport, then the nearest.
             reference = plan.reference
             candidates = [activity for activity in activities if activity.id in keep_ids]
             candidates.sort(
-                key=lambda activity: abs((activity.start_date_local.date() - reference).days)
+                key=lambda activity: (
+                    0 if _sport_rank(activity, plan) else 1,
+                    abs((activity.start_date_local.date() - reference).days),
+                )
             )
             detail_source = candidates[0] if candidates else None
         elif activities:
@@ -261,30 +269,3 @@ async def gather_context(
         max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
         today=today,
     )
-
-
-class StandardExtractor:
-    def __init__(self, settings: Settings, client: IntervalsReadClient) -> None:
-        self._settings = settings
-        self._client = client
-
-    def _today(self, today: date | None) -> date:
-        return today or datetime.now(ZoneInfo(self._settings.app_timezone)).date()
-
-    async def extract(
-        self,
-        focus: str,
-        *,
-        user_feedback: str | None = None,
-        max_tokens: int | None = None,
-        today: date | None = None,
-    ) -> CoachContext:
-        current = self._today(today)
-        return await gather_context(
-            self._client,
-            ContextPlan.standard(current),
-            focus,
-            user_feedback=user_feedback,
-            max_tokens=max_tokens,
-            today=current,
-        )

@@ -270,20 +270,49 @@ async def test_analyze_falls_back_to_chat_when_the_mutation_is_invalid(
     assert "empty mutations list" in provider.calls[-1]["messages"][-1].content
 
 
-async def test_analyze_uses_deep_extractor_for_deep_focus(
+async def test_analyze_resolves_the_window_with_the_model(
     settings: Settings, tmp_path: Path
 ) -> None:
     client = make_intervals_client()
-    provider = FakeLlmProvider([completion(report_json())])
-    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
-    proposal = await engine.analyze(
-        "how did my heart rate improve on hills in the last 3 months", today=TODAY
+    provider = FakeLlmProvider(
+        [completion(report_json())],
+        resolutions=[
+            json.dumps(
+                {
+                    "window": {"start": "2024-01-01", "end": "2024-01-20"},
+                    "metric": "heart_rate",
+                    "detail": True,
+                }
+            )
+        ],
     )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
+    notices: list[str] = []
+
+    proposal = await engine.analyze("whatever", today=TODAY, notices=notices)
+
+    assert ("activities", "2024-01-01", "2024-01-20") in client.calls
     assert ("detail", "fx-a") in client.calls
-    assert ("activities", "2023-11-03", "2024-02-02") in client.calls
-    assert "New activities since last review" in proposal.focus
     assert proposal.context.activity_detail is not None
     assert proposal.context.activity_detail.id == "fx-a"
+    assert any(notice.startswith("Fetch: 2024-01-01") for notice in notices)
+    assert len(provider.resolution_calls) == 1
+
+
+async def test_analyze_falls_back_to_standard_windows_when_resolution_fails(
+    settings: Settings, tmp_path: Path
+) -> None:
+    client = make_intervals_client()
+    provider = FakeLlmProvider(
+        [completion(report_json())], resolutions=["not json", "still not json"]
+    )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
+    notices: list[str] = []
+
+    await engine.analyze("whatever", today=TODAY, notices=notices)
+
+    assert ("activities", "2024-01-18", "2024-02-02") in client.calls
+    assert any("resolution failed" in notice for notice in notices)
 
 
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:

@@ -1,7 +1,6 @@
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -46,7 +45,6 @@ from open_endurance_coach.engine.coach import (
     StateDriftError,
 )
 from open_endurance_coach.errors import InternalError
-from open_endurance_coach.extractors.deep import detect_deep_query
 from open_endurance_coach.schemas.decisions import mutations_fingerprint
 from open_endurance_coach.store.records import Proposal
 
@@ -66,7 +64,6 @@ HELP_TEXT = (
     "/exit, /quit           leave the chat\n"
 )
 
-_REFRESH_RE = re.compile(r"\b(analy[sz]e|re-?analy[sz]e|assess|review|check)\b", re.IGNORECASE)
 _BARE_COMMAND_RE = re.compile(
     r"^\s*(help|exit|quit|forget(?:\s+(?:\d+|all))?|provider(?:\s+\w+)?|model(?:\s+\w+)?)\s*$",
     re.IGNORECASE,
@@ -89,12 +86,6 @@ def _print_needs_input(questions: list[str]) -> None:
     for question in questions:
         console.print(f"  [question]? {escape(question)}[/question]")
     console.print('[hint]Answer here, or say "proceed with assumptions" to plan anyway.[/hint]')
-
-
-def _needs_fresh_context(focus: str, today: date | None) -> bool:
-    if detect_deep_query(focus, today=today) is not None:
-        return True
-    return _REFRESH_RE.search(focus) is not None
 
 
 def _handle_llm_command(
@@ -144,20 +135,13 @@ def _enter_confirmation(snapshot: PlanSnapshot) -> ChatState:
 
 async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -> ChatState | None:
     today = engine.today()
-    if session.context is not None and _needs_fresh_context(focus, today):
-        cached = None
-    elif session.context is not None:
-        cached = engine.refocus_context(session.context, focus, today=today)
-    else:
-        cached = None
     async with thinking():
         notices: list[str] = []
         proposal = await engine.analyze(
             focus,
-            context=cached,
             history=session.history,
-            today=today if cached is None else None,
-            memory_notices=notices,
+            today=today,
+            notices=notices,
         )
     for notice in notices:
         console.print(f"[meta]{escape(notice)}[/meta]")
@@ -170,7 +154,6 @@ async def _analyze_line(engine: CoachEngine, session: ChatSession, focus: str) -
         if len(remaining) != len(report.questions):
             report = report.model_copy(update={"questions": remaining})
     render_report(report)
-    session.context = proposal.context
     session.append(focus, assistant_turn(proposal.report).content)
     needs_input = proposal.report.needs_input
     assumed = _assumes_answers(focus)
@@ -392,7 +375,6 @@ async def _run_command(
         session.pending_proposal_id = remaining[0].id if remaining else None
         if days is None:
             session.history = []
-            session.context = None
             session.notified.clear()
         else:
             session.seed(
@@ -499,7 +481,6 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
                     state = ChatState()
                     continue
                 session.history = []
-                session.context = None
                 session.notified.clear()
                 session.pending_proposal_id = None
                 facts_noun = "fact" if counts["coach_memory"] == 1 else "facts"
