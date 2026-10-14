@@ -20,7 +20,7 @@ from open_endurance_coach.extractors.standard import (
     WELLNESS_LOOKBACK_DAYS,
 )
 
-from .fakes import make_event, make_intervals_client, make_wellness
+from .fakes import make_activity, make_event, make_intervals_client, make_wellness
 
 TODAY = date(2024, 2, 1)
 
@@ -114,6 +114,53 @@ def test_an_ago_point_pins_a_small_window() -> None:
     assert query.reference == date(2024, 1, 17)
     assert query.focus_window == DateRange(date(2024, 1, 14), date(2024, 1, 20))
     assert query.window == DateRange(date(2023, 11, 3), date(2024, 2, 2))
+
+
+def test_a_recent_cited_date_is_deep_at_any_age() -> None:
+    query = detect_deep_query("what did I do on 2024-01-30?", today=TODAY)
+
+    assert query is not None
+    assert query.reference == date(2024, 1, 30)
+    assert query.focus_window == DateRange(date(2024, 1, 27), date(2024, 2, 2))
+    assert query.window == DateRange(date(2023, 11, 3), date(2024, 2, 2))
+
+
+def test_a_future_cited_date_is_not_deep() -> None:
+    assert detect_deep_query("plan the week of 2024-02-05", today=TODAY) is None
+
+
+async def test_a_detail_request_returns_the_activity_at_any_age(settings: Settings) -> None:
+    client = make_intervals_client(activities=[make_activity("fx-old", 30)])
+    focus = "give me the per kilometre splits of my ride on 2024-01-30"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert context.activity_detail is not None
+    assert context.activity_detail.id == "fx-old"
+    assert ("wellness", "2024-01-27", "2024-02-02") in client.calls
+    assert any(call[0] == "streams" and call[1] == "fx-old" for call in client.calls)
+
+
+async def test_a_detail_request_without_a_date_pins_the_most_recent_activity(
+    settings: Settings,
+) -> None:
+    client = make_intervals_client(
+        activities=[make_activity("fx-recent", 31), make_activity("fx-old", 10)]
+    )
+    focus = "give me the details of my latest ride"
+    query = detect_deep_query(focus, today=TODAY)
+    assert query is not None
+
+    context = await DeepHistoricalExtractor(settings, client).extract(
+        focus, query=query, today=TODAY
+    )
+
+    assert context.activity_detail is not None
+    assert context.activity_detail.id == "fx-recent"
 
 
 async def test_a_wellness_row_from_fifteen_days_ago_is_available(

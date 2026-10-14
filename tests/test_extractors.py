@@ -566,10 +566,6 @@ def test_detect_deep_query_ignores_impossible_dates() -> None:
     assert detect_deep_query("31st of april 2023 race", today=TODAY) is None
 
 
-def test_detect_deep_query_ignores_recent_references() -> None:
-    assert detect_deep_query("how was my run on 2024-01-30?", today=TODAY) is None
-
-
 def test_detect_deep_query_returns_none_for_plain_focus() -> None:
     assert detect_deep_query("status check") is None
     assert detect_deep_query("Analyze this week") is None
@@ -696,10 +692,6 @@ def test_budget_drops_the_oldest_activities_even_when_sorted_by_metric() -> None
         today=date(2024, 2, 1),
     )
     assert [activity.id for activity in context.recent_activities] == ["fx-new-easy"]
-
-
-def test_recent_reference_within_the_standard_window_is_not_deep() -> None:
-    assert detect_deep_query("what did I do on 2024-01-25?", today=date(2024, 2, 1)) is None
 
 
 def test_reference_older_than_the_standard_window_is_deep() -> None:

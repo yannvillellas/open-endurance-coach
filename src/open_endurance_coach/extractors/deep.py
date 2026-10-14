@@ -12,7 +12,6 @@ from open_endurance_coach.extractors.context import (
     DateRange,
     gather_context,
 )
-from open_endurance_coach.extractors.standard import ACTIVITY_LOOKBACK_DAYS
 from open_endurance_coach.schemas.context import CoachContext
 
 DEFAULT_DEEP_LOOKBACK_DAYS = 90
@@ -30,6 +29,12 @@ _DURATION_FR_RE = re.compile(
 )
 _AGO_RE = re.compile(r"\b(\d+)\s+(days?|weeks?|months?)\s+ago\b", re.IGNORECASE)
 _AGO_FR_RE = re.compile(r"\bil y a\s+(\d+)\s+(jours?|semaines?|mois)\b", re.IGNORECASE)
+_DETAIL_RE = re.compile(
+    r"\b(details?|détails?|splits?|kilomet(?:er|re)s?|kilomètres?)\b"
+    r"|\b(?:analyse|analyze)\s+(?:my|ma|mon|the|this|ces|cette|la|le)?\s*"
+    r"(?:session|rides?|activities|activity|workouts?|training|sortie|séance|courses?)\b",
+    re.IGNORECASE,
+)
 _HILL_RE = re.compile(r"\b(hills?|hilly|climbs?|elevation)\b", re.IGNORECASE)
 _HEART_RATE_RE = re.compile(r"\b(heart ?rate|hr)\b", re.IGNORECASE)
 _RIDE_RE = re.compile(
@@ -125,10 +130,11 @@ def _week_window(weeks_ago: int, today: date) -> DateRange:
 def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | None:
     current = today or date.today()
     cited = _referenced_date(focus, current)
-    stale_reference = cited is not None and (current - cited).days >= ACTIVITY_LOOKBACK_DAYS
+    past_reference = cited is not None and cited <= current
     ago = _AGO_RE.search(focus) or _AGO_FR_RE.search(focus)
     duration = _DURATION_RE.search(focus) or _DURATION_FR_RE.search(focus)
-    if not (_TREND_RE.search(focus) or stale_reference or ago or duration):
+    detail = _DETAIL_RE.search(focus)
+    if not (_TREND_RE.search(focus) or past_reference or ago or duration or detail):
         return None
 
     point: date | None = None
@@ -139,7 +145,7 @@ def detect_deep_query(focus: str, *, today: date | None = None) -> DeepQuery | N
             weeks_ago = amount
         else:
             point = current - timedelta(days=amount * _unit_days(ago.group(2)))
-    elif stale_reference:
+    elif past_reference:
         point = cited
 
     focus_window: DateRange | None
