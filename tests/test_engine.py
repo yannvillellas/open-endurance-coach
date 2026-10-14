@@ -609,6 +609,7 @@ async def test_feedback_rebuilds_the_context_with_splits_events_and_memory(
     outcome = await engine.submit_feedback(proposal_id, "make it easier")
 
     rebuilt = outcome.proposal.context
+    assert provider.resolution_calls == []
     assert [split.label for split in rebuilt.activity_splits] == ["km 1"]
     assert [event.name for event in rebuilt.recent_events] == ["Prescribed hill session"]
     assert [item.text for item in rebuilt.coach_memory] == ["Tendinite genou gauche"]

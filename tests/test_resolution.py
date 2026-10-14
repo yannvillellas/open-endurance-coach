@@ -80,19 +80,20 @@ async def test_a_window_ending_in_the_future_is_clamped_to_today(settings: Setti
 
 
 async def test_long_windows_are_capped_and_announced(settings: Settings) -> None:
-    start = TODAY - timedelta(days=1000)
+    start = TODAY - timedelta(days=4000)
     client = make_client(
         settings,
         [{"window": {"start": start.isoformat(), "end": TODAY.isoformat()}}],
     )
 
-    resolution = await resolve_context_plan(client, "the last 1000 days", today=TODAY)
+    resolution = await resolve_context_plan(client, "the last 4000 days", today=TODAY)
 
-    assert resolution.plan.activities == DateRange(start, TODAY)
+    assert resolution.plan.activities == DateRange(TODAY - timedelta(days=3650), TODAY)
     assert resolution.plan.wellness == DateRange(TODAY - timedelta(days=365), TODAY)
     assert resolution.plan.events == DateRange(
         TODAY - timedelta(days=365), TODAY + timedelta(days=14)
     )
+    assert any("3651 dates" in notice for notice in resolution.notices)
     assert any("366 dates" in notice for notice in resolution.notices)
 
 
