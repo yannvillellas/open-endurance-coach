@@ -7,9 +7,10 @@ conversation; the only commands are session commands.
 
 Every message is classified from the data snapshot as _chat_, _analysis_ or _plan_:
 
-- the analysis window is resolved with the model before every message and the snapshot
-  is gathered fresh: tactical windows for ordinary questions, the exact past window for
-  historical ones, capped per source — one `Fetch:` line states what was read;
+- each new question resolves its window with the model and gathers a fresh snapshot:
+  tactical windows for ordinary questions, the exact past window for historical ones,
+  capped per source — one `Fetch:` line states what was read; a message sent while a
+  proposal is open rebuilds that proposal's own snapshot instead;
 - follow-ups stay in the conversation history under the model's input budget, and a
   proposal is revised from your feedback without re-planning from scratch;
 - if a change would help during a chat, the coach offers it instead of interrupting you

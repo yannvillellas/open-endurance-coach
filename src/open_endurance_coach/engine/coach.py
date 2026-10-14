@@ -643,22 +643,6 @@ class CoachEngine:
         )
         return self._with_memory(built, focus)
 
-    def refocus_context(
-        self, base: CoachContext, focus: str, *, today: date | None = None
-    ) -> CoachContext:
-        """Reuse cached athlete data for a new message within the context budget.
-
-        A raw copy would let a long message push the estimate over ``max_tokens``
-        and break the proposal on reload, so the data is trimmed to fit.
-        """
-        return self._context_around(
-            base,
-            focus=focus,
-            proposal=None,
-            user_feedback=None,
-            today=today or self.today(),
-        )
-
     async def submit_feedback(
         self,
         proposal_id: int,

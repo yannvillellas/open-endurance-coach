@@ -57,7 +57,7 @@ Applied:
 
 ## How it works
 
-- **Snapshot** — each session resolves the question's window with the model (a small
+- **Snapshot** — each new question resolves its window with the model (a small
   JSON call), announces what it read (`Fetch: …`) and gathers only what is needed from
   Intervals.icu (recent activities, the calendar, wellness, sport settings, goal races,
   a weekly rollup), budgeted to the model's token limit; an explicit past window is

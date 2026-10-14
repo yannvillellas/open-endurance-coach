@@ -340,16 +340,6 @@ async def test_a_long_fact_never_breaks_the_context_budget(
     assert context.data_tokens() <= context.max_tokens
 
 
-async def test_refocus_context_keeps_the_memory(settings: Settings, tmp_path: Path) -> None:
-    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
-    remember(store, MemoryCategory.INJURY_NIGGLE, "Tendinite genou gauche")
-
-    context = await engine.build_context("status check")
-    refocused = engine.refocus_context(context, "plan next week")
-
-    assert [item.text for item in refocused.coach_memory] == ["Tendinite genou gauche"]
-
-
 async def test_a_reloaded_report_replays_the_same_memory_ops(
     settings: Settings, tmp_path: Path
 ) -> None:
