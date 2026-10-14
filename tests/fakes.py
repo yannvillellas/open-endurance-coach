@@ -251,12 +251,23 @@ class FakeCalendarClient:
         raise IntervalsApiError(404, "not found")
 
 
+RESOLUTION_MARKER = "You pick which athlete data"
+
+
 class FakeLlmProvider:
     name = "fake"
 
-    def __init__(self, responses: list[LlmCompletion] | None = None) -> None:
+    def __init__(
+        self,
+        responses: list[LlmCompletion] | None = None,
+        *,
+        resolutions: list[str] | None = None,
+    ) -> None:
         self.responses = list(responses or [])
+        self.resolutions = list(resolutions or [])
+        self.scripted_resolutions = len(self.resolutions)
         self.calls: list[dict[str, Any]] = []
+        self.resolution_calls: list[dict[str, Any]] = []
 
     async def complete(
         self,
@@ -269,17 +280,23 @@ class FakeLlmProvider:
         temperature: float | None,
         reasoning_effort: str | None,
     ) -> LlmCompletion:
-        self.calls.append(
-            {
-                "model": model,
-                "messages": messages,
-                "thinking": thinking,
-                "json_mode": json_mode,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "reasoning_effort": reasoning_effort,
-            }
-        )
+        record = {
+            "model": model,
+            "messages": messages,
+            "thinking": thinking,
+            "json_mode": json_mode,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "reasoning_effort": reasoning_effort,
+        }
+        if any(RESOLUTION_MARKER in str(message.content) for message in messages):
+            self.resolution_calls.append(record)
+            if self.resolutions:
+                return completion(self.resolutions.pop(0))
+            if self.scripted_resolutions:
+                raise AssertionError("FakeLlmProvider: extra resolution call")
+            return completion('{"window": null}')
+        self.calls.append(record)
         if not self.responses:
             raise AssertionError("FakeLlmProvider: no responses left")
         return self.responses.pop(0)

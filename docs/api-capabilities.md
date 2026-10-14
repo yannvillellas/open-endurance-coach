@@ -14,7 +14,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 - **5000 requests/day** (reset midnight UTC), **2500/rolling 15 min**, **10 req/s per IP** (silent).
 - Headers `X-RateLimit-Limit` / `X-RateLimit-Remaining` (`<15m>,<daily>`); over-limit → `429` + `Retry-After` seconds.
-- Implication: polling cadence and deep-historical extraction must be budgeted. Worst-case daily loop (per webhook: activity detail + wellness + events read + event writes) stays well under limits; deep-historical queries can spike — need explicit call budgeting.
+- Implication: polling cadence and historical extraction must be budgeted. Worst-case daily loop (per webhook: activity detail + wellness + events read + event writes) stays well under limits; historical queries can spike — need explicit call budgeting.
 
 ### Cloudflare note (critical)
 
@@ -101,7 +101,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 ## 5. Design implications recorded for later iterations
 
-- HTTP client: browser-like `User-Agent`, Basic auth, retry with `Retry-After` respect, rate-limit header tracking (budgeting for deep-historical queries).
+- HTTP client: browser-like `User-Agent`, Basic auth, retry with `Retry-After` respect, rate-limit header tracking (budgeting for historical queries).
 - Token budgets: prefer `fields` filtering, interval summaries over raw streams; wellness has 46 fields — select columns via `cols`/`fields` params.
 - When a webhook adapter is added later (OAuth app), ack-first + in-process queue is confirmed correct: ACTIVITY_ANALYZED already has a 60 s consolidation delay, so processing after ack is the native pattern.
 - **Polling cadence (rate-limit math, for the optional background poller):** activities list every 5 min ≈ 288 calls/day; wellness every 30 min ≈ 48/day; per-analysis extraction ≈ 5–10 calls; total stays far below the 5000/day limit. Polling is also self-healing for missed webhooks — no separate reconciliation job needed.
@@ -111,7 +111,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 - **Strava-sourced activities:** the API does not expose power/detailed metrics for activities synced via Strava (direct Garmin/device sync is required). Matches the documented webhook exclusion for Strava activities.
 - **`ATHLETE_ID` location confirmed:** Settings → Developer Settings in Intervals.icu shows both the API key and the athlete ID (their `.env` uses `INTERVALS_API_KEY` + `ATHLETE_ID`).
-- **Weekly load history:** both the standard and deep-historical extraction paths call `GET /api/v1/athlete/{id}/athlete-summary` with `start`/`end` for the 90-day `training_rollup` section, and both issue the race-filtered `GET /events?oldest=&newest=&category=RACE_A,RACE_B,RACE_C` call for the 120-day `goal_races` section. Live-verified 2026-09-15: a 90-day window returns ~14 weekly buckets, **Monday-anchored and newest-first**, each with `fitness` (CTL), `fatigue` (ATL), `form` (TSB), `rampRate`, `training_load`, `time`, `count`, `distance`, plus `byCategory[]` per-sport `count`/`time`/`training_load`. Buckets keep their returned dates (no re-anchoring), are ordered ascending, the newest week is marked `partial`, and internal gaps are zero-filled; an irregular spacing is dropped with a warning instead of aborting the analysis. Note `start`/`end` are the parameters — `oldest`/`newest` are ignored.
+- **Weekly load history:** the context gather calls `GET /api/v1/athlete/{id}/athlete-summary` with `start`/`end` for the 90-day `training_rollup` section, and issues the race-filtered `GET /events?oldest=&newest=&category=RACE_A,RACE_B,RACE_C` call for the 120-day `goal_races` section. Live-verified 2026-09-15: a 90-day window returns ~14 weekly buckets, **Monday-anchored and newest-first**, each with `fitness` (CTL), `fatigue` (ATL), `form` (TSB), `rampRate`, `training_load`, `time`, `count`, `distance`, plus `byCategory[]` per-sport `count`/`time`/`training_load`. Buckets keep their returned dates (no re-anchoring), are ordered ascending, the newest week is marked `partial`, and internal gaps are zero-filled; an irregular spacing is dropped with a warning instead of aborting the analysis. Note `start`/`end` are the parameters — `oldest`/`newest` are ignored.
 - **Upload idempotency pattern (reference):** index existing WORKOUT events by `(name, date)` in the target range → `PUT` update if found, else `POST` create; safe re-runs, no duplicates. Structured workouts upload as `.zwo` `file_contents` with step definitions; tags are supported on events.
 - **Tunnel + localhost note:** the reference MCP setup requires an allowed-host configuration for the tunnel's public hostname (`Host` header) — any local receiver will need the same when wired to the tunnel.
 

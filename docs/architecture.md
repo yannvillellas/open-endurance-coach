@@ -6,17 +6,29 @@ safety rules are in [safety-model.md](safety-model.md); the chat behaviour is in
 
 ## Data extraction
 
-Two scopes (`extractors/standard.py`, `extractors/deep.py`), both budgeted to fit the
-model's token limit (`extractors/budget.py`):
+One gather (`extractors/context.py`) driven by a declared context plan, budgeted to fit
+the model's token limit (`extractors/budget.py`).
 
-- **Standard** — recent activities, a ±14-day calendar window split into recent and
-  upcoming events, wellness, sport settings, goal races over a 120-day horizon with
-  macro phase anchors, and a 90-day weekly training rollup with CTL/ATL/ramp and
-  per-sport load.
-- **Deep historical** — trend queries such as "heart rate improvement on hills over the
-  last 3 months". It carries the same goal-race and rollup context so a trend answer can
-  be tied back to the race being trained for, and pins the referenced window (±3 days)
-  so the evidence survives context trimming.
+Before each new question the analysis window is resolved with a small model call
+(`extractors/resolution.py`): a strict JSON reply gives the exact past window (or none
+for tactical questions), the sport, the metric and whether one activity must be
+detailed. The code validates the dates, caps the windows (activities 3650 days,
+wellness and events 365 days) and announces what was read with one `Fetch:` line; a
+resolution failure falls back to the standard windows with a warning. A refinement sent
+while a proposal is open rebuilds that proposal's snapshot instead, with no resolution
+call.
+
+- **Tactical plan** — recent activities (14 days), wellness (7 days), a ±14-day
+  calendar window split into recent and upcoming events, sport settings, goal races over
+  a 120-day horizon, and a 90-day weekly training rollup with CTL/ATL/ramp and per-sport
+  load.
+- **Question window** — activities and wellness cover exactly the resolved window;
+  events add the tactical ±14-day window when the two overlap, so a mixed question
+  ("that session three weeks ago, should I repeat it next week?") sees both, and goal
+  races and the rollup stay tactical. A named sport ranks matching activities first and
+  guides the detail pin without dropping any activity; a detailed activity carries its
+  streams and per-kilometre splits, pinned ±3 days so the evidence survives context
+  trimming.
 
 When the budget is exceeded, the extractor evicts data by priority until the context
 fits, and never touches the current message. Goal-race descriptions are trimmed before
@@ -66,7 +78,7 @@ Proposals are lifecycle-bound and never pruned by age: apply and reject delete t
 orphaned `pending` drafts are discarded at startup, an invalid `unapplied` is discarded
 on drift or staleness, and a valid one is deliberately re-offered until resolved.
 `seen_activities` markers are pruned to the widest fetch window
-(`MAX_DEEP_LOOKBACK_DAYS`): a marker is deleted only once its activity can no longer be
+(`MAX_ACTIVITY_WINDOW_DAYS`): a marker is deleted only once its activity can no longer be
 returned by any `list_activities` call, so it never causes a false "New activities
 since last review" and is never kept once it cannot be read again. The tests pin the
 boundaries: old messages and unfetchable markers are pruned while proposals and

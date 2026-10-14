@@ -38,6 +38,7 @@ from open_endurance_coach.schemas.decisions import (
     mutations_fingerprint,
 )
 from open_endurance_coach.schemas.intervals import Activity, ActivitySplit
+from open_endurance_coach.schemas.memory import MemoryCategory, MemoryOrigin
 from open_endurance_coach.store.db import CoachStore
 from open_endurance_coach.store.records import MessageRole, ProposalStatus
 from open_endurance_coach.tokens import CHARS_PER_TOKEN, estimate_text_tokens
@@ -270,20 +271,52 @@ async def test_analyze_falls_back_to_chat_when_the_mutation_is_invalid(
     assert "empty mutations list" in provider.calls[-1]["messages"][-1].content
 
 
-async def test_analyze_uses_deep_extractor_for_deep_focus(
+async def test_analyze_resolves_the_window_with_the_model(
     settings: Settings, tmp_path: Path
 ) -> None:
     client = make_intervals_client()
-    provider = FakeLlmProvider([completion(report_json())])
-    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
-    proposal = await engine.analyze(
-        "how did my heart rate improve on hills in the last 3 months", today=TODAY
+    provider = FakeLlmProvider(
+        [completion(report_json())],
+        resolutions=[
+            json.dumps(
+                {
+                    "window": {"start": "2024-01-01", "end": "2024-01-20"},
+                    "metric": "heart_rate",
+                    "detail": True,
+                }
+            )
+        ],
     )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
+    notices: list[str] = []
+
+    proposal = await engine.analyze("whatever", today=TODAY, notices=notices)
+
+    assert ("activities", "2024-01-01", "2024-01-20") in client.calls
     assert ("detail", "fx-a") in client.calls
-    assert ("activities", "2023-11-03", "2024-02-02") in client.calls
-    assert "New activities since last review" in proposal.focus
     assert proposal.context.activity_detail is not None
     assert proposal.context.activity_detail.id == "fx-a"
+    assert any(notice.startswith("Fetch: 2024-01-01") for notice in notices)
+    assert len(provider.resolution_calls) == 1
+    resolution_call = provider.resolution_calls[0]
+    assert "whatever" in resolution_call["messages"][1].content
+    assert resolution_call["json_mode"] is True
+
+
+async def test_analyze_falls_back_to_standard_windows_when_resolution_fails(
+    settings: Settings, tmp_path: Path
+) -> None:
+    client = make_intervals_client()
+    provider = FakeLlmProvider(
+        [completion(report_json())], resolutions=["not json", "still not json"]
+    )
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider, client=client)
+    notices: list[str] = []
+
+    await engine.analyze("whatever", today=TODAY, notices=notices)
+
+    assert ("activities", "2024-01-18", "2024-02-02") in client.calls
+    assert any("resolution failed" in notice for notice in notices)
 
 
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:
@@ -357,36 +390,6 @@ async def test_recent_feedback_keeps_the_answer_report_for_transient_turns(
     assert recent[0].role is MessageRole.ASSISTANT
     assert recent[0].report is not None
     assert recent[0].report.summary == "Answer."
-
-
-async def test_refocus_context_keeps_activity_splits(settings: Settings, tmp_path: Path) -> None:
-    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
-    splits = [ActivitySplit(label="km 1", distance_m=1000.0, time_s=300)]
-    base = CoachContext(focus="hi", activity_splits=splits)
-    context = engine.refocus_context(base, "review yesterday", today=TODAY)
-
-    assert [split.label for split in context.activity_splits] == ["km 1"]
-
-
-async def test_refocus_context_keeps_data_within_budget(settings: Settings, tmp_path: Path) -> None:
-    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
-    base = CoachContext(
-        focus="hi",
-        max_tokens=400,
-        training_rollup=[
-            TrainingWeek(
-                week_start=date(2026, 8, 3) + timedelta(days=7 * index),
-                sessions=3,
-                time_s=1000,
-            )
-            for index in range(5)
-        ],
-    )
-    long_message = "x" * ((base.max_tokens + 100) * CHARS_PER_TOKEN)
-    context = engine.refocus_context(base, long_message, today=date(2026, 9, 17))
-    assert context.data_tokens() <= base.max_tokens
-    assert len(context.training_rollup) == len(base.training_rollup)
-    assert context.focus == long_message
 
 
 def test_check_focus_rejects_messages_over_the_limit(settings: Settings, tmp_path: Path) -> None:
@@ -568,17 +571,6 @@ async def test_submit_feedback_does_not_charge_the_message_against_data_budget(
     assert long_message in provider.calls[0]["messages"][1].content
 
 
-async def test_refocus_context_keeps_recent_events(settings: Settings, tmp_path: Path) -> None:
-    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), FakeLlmProvider())
-    base = CoachContext(
-        focus="f",
-        today=TODAY,
-        recent_events=[make_event(1, "2024-01-31", name="Prescribed hill session")],
-    )
-    context = engine.refocus_context(base, "review yesterday", today=TODAY)
-    assert [event.name for event in context.recent_events] == ["Prescribed hill session"]
-
-
 async def test_submit_feedback_persists_feedback_context(
     settings: Settings, tmp_path: Path
 ) -> None:
@@ -592,6 +584,35 @@ async def test_submit_feedback_persists_feedback_context(
     stored = store.get_proposal(proposal.id)
     assert stored is not None
     assert stored.context.user_feedback == "Legs heavy, RPE 8"
+
+
+async def test_feedback_rebuilds_the_context_with_splits_events_and_memory(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    store.remember_fact(
+        MemoryCategory.INJURY_NIGGLE, MemoryOrigin.DECLARED, "Tendinite genou gauche"
+    )
+    base = CoachContext(
+        focus="f",
+        activity_splits=[ActivitySplit(label="km 1", distance_m=1000.0, time_s=300)],
+        recent_events=[make_event(1, "2024-01-31", name="Prescribed hill session")],
+    )
+    proposal_id = store.save_proposal(
+        focus="f",
+        report=DecisionReport.model_validate(json.loads(report_json())),
+        context=base,
+    )
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+
+    outcome = await engine.submit_feedback(proposal_id, "make it easier")
+
+    rebuilt = outcome.proposal.context
+    assert provider.resolution_calls == []
+    assert [split.label for split in rebuilt.activity_splits] == ["km 1"]
+    assert [event.name for event in rebuilt.recent_events] == ["Prescribed hill session"]
+    assert [item.text for item in rebuilt.coach_memory] == ["Tendinite genou gauche"]
 
 
 async def test_submit_feedback_trims_an_over_budget_context(

@@ -32,13 +32,15 @@ async def test_analyze_remembers_a_fact_and_reports_a_notice(
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("no bike for now", memory_notices=notices)
+    await engine.analyze("no bike for now", notices=notices)
 
     facts = store.list_active_facts()
     assert len(facts) == 1
     assert facts[0].text == "Pas de vélo jusqu'au 20/10"
     assert facts[0].source_message_id is not None
-    assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
+        "Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"
+    ]
 
 
 async def test_memory_is_applied_even_when_the_plan_is_blocked(
@@ -50,10 +52,12 @@ async def test_memory_is_applied_even_when_the_plan_is_blocked(
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("no bike for now", memory_notices=notices)
+    await engine.analyze("no bike for now", notices=notices)
 
     assert len(store.list_active_facts()) == 1
-    assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
+        "Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"
+    ]
 
 
 async def test_update_merges_only_the_provided_fields(settings: Settings, tmp_path: Path) -> None:
@@ -70,15 +74,15 @@ async def test_update_merges_only_the_provided_fields(settings: Settings, tmp_pa
     )
     engine, store = make_engine(settings, tmp_path, provider)
 
-    await engine.analyze("first", memory_notices=[])
-    await engine.analyze("second", memory_notices=[])
+    await engine.analyze("first", notices=[])
+    await engine.analyze("second", notices=[])
 
     fact = store.list_active_facts()[0]
     assert fact.id == 1
     assert fact.text == "Pas de vélo jusqu'au 21/10"
     assert fact.expires_on == date(2099, 1, 1)
 
-    await engine.analyze("third", memory_notices=[])
+    await engine.analyze("third", notices=[])
 
     fact = store.list_active_facts()[0]
     assert fact.text == "Pas de vélo jusqu'au 21/10"
@@ -97,11 +101,11 @@ async def test_an_update_without_a_change_is_skipped(
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("first", memory_notices=[])
+    await engine.analyze("first", notices=[])
     with caplog.at_level(logging.WARNING):
-        await engine.analyze("second", memory_notices=notices)
+        await engine.analyze("second", notices=notices)
 
-    assert notices == []
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == []
     assert "update carries no change" in caplog.text
     assert store.list_active_facts()[0].text == "Pas de vélo jusqu'au 20/10"
 
@@ -132,14 +136,14 @@ async def test_close_keeps_a_history_fact_and_deletes_a_constraint(
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("first", memory_notices=[])
-    await engine.analyze("second", memory_notices=notices)
+    await engine.analyze("first", notices=[])
+    await engine.analyze("second", notices=notices)
 
     injury = store.get_fact(1)
     assert injury is not None
     assert injury.status is MemoryStatus.RESOLVED
     assert store.get_fact(2) is None
-    assert notices == [
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
         "Closed: [injury_niggle] Tendinite genou gauche (kept as history)",
         "Closed: [training_constraints] Pas de vélo",
     ]
@@ -155,11 +159,13 @@ async def test_forget_deletes_a_history_fact(settings: Settings, tmp_path: Path)
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("first", memory_notices=[])
-    await engine.analyze("second", memory_notices=notices)
+    await engine.analyze("first", notices=[])
+    await engine.analyze("second", notices=notices)
 
     assert store.get_fact(1) is None
-    assert notices == ["Forgotten: [health_medical] Asthme"]
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
+        "Forgotten: [health_medical] Asthme"
+    ]
 
 
 async def test_an_unknown_id_is_skipped_with_a_warning(
@@ -181,11 +187,13 @@ async def test_an_unknown_id_is_skipped_with_a_warning(
     notices: list[str] = []
 
     with caplog.at_level(logging.WARNING):
-        await engine.analyze("first", memory_notices=notices)
+        await engine.analyze("first", notices=notices)
 
     assert "memory operation skipped" in caplog.text
     assert len(store.list_active_facts()) == 1
-    assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
+        "Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"
+    ]
 
 
 async def test_feedback_applies_memory_and_returns_notices(
@@ -199,7 +207,7 @@ async def test_feedback_applies_memory_and_returns_notices(
     )
     engine, store = make_engine(settings, tmp_path, provider)
 
-    proposal = await engine.analyze("hello", memory_notices=[])
+    proposal = await engine.analyze("hello", notices=[])
     outcome = await engine.submit_feedback(proposal.id, "no bike until the 20th")
 
     assert outcome.memory_notices == (
@@ -225,7 +233,7 @@ async def test_expire_memory_applies_the_category_policy(
         ]
     )
     engine, store = make_engine(settings, tmp_path, provider)
-    await engine.analyze("first", memory_notices=[])
+    await engine.analyze("first", notices=[])
 
     outcomes = engine.expire_memory()
 
@@ -262,8 +270,8 @@ async def test_memory_is_injected_into_the_next_prompt(settings: Settings, tmp_p
     )
     engine, _ = make_engine(settings, tmp_path, provider)
 
-    await engine.analyze("first", memory_notices=[])
-    await engine.analyze("second", memory_notices=[])
+    await engine.analyze("first", notices=[])
+    await engine.analyze("second", notices=[])
 
     second_prompt = provider.calls[1]["messages"][1].content
     assert "coach_memory" in second_prompt
@@ -332,16 +340,6 @@ async def test_a_long_fact_never_breaks_the_context_budget(
     assert context.data_tokens() <= context.max_tokens
 
 
-async def test_refocus_context_keeps_the_memory(settings: Settings, tmp_path: Path) -> None:
-    engine, store = make_engine(settings, tmp_path, FakeLlmProvider())
-    remember(store, MemoryCategory.INJURY_NIGGLE, "Tendinite genou gauche")
-
-    context = await engine.build_context("status check")
-    refocused = engine.refocus_context(context, "plan next week")
-
-    assert [item.text for item in refocused.coach_memory] == ["Tendinite genou gauche"]
-
-
 async def test_a_reloaded_report_replays_the_same_memory_ops(
     settings: Settings, tmp_path: Path
 ) -> None:
@@ -372,9 +370,11 @@ async def test_memory_ops_apply_from_the_chat_only_fallback(
     engine, store = make_engine(settings, tmp_path, provider)
     notices: list[str] = []
 
-    await engine.analyze("no bike", memory_notices=notices)
+    await engine.analyze("no bike", notices=notices)
 
-    assert notices == ["Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"]
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == [
+        "Remembered: [training_constraints] Pas de vélo jusqu'au 20/10"
+    ]
     assert len(store.list_active_facts()) == 1
 
 
@@ -424,7 +424,7 @@ async def test_an_update_on_an_expired_fact_is_skipped(
     with caplog.at_level(logging.WARNING):
         notices = engine.apply_memory_ops(report.memory)
 
-    assert notices == []
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == []
     assert "has expired" in caplog.text
     fact = store.get_fact(fact_id)
     assert fact is not None
@@ -441,7 +441,7 @@ async def test_an_update_on_a_missing_id_is_skipped(
     notices: list[str] = []
 
     with caplog.at_level(logging.WARNING):
-        await engine.analyze("first", memory_notices=notices)
+        await engine.analyze("first", notices=notices)
 
-    assert notices == []
+    assert [notice for notice in notices if not notice.startswith("Fetch:")] == []
     assert "memory fact not found: 999" in caplog.text
