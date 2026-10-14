@@ -60,7 +60,7 @@ class DateRange:
     end: date
 
     def clamped(self, max_days: int) -> "DateRange":
-        """Keep only the most recent max_days of the window."""
+        """Keep at most max_days between start and end (inclusive window: max_days + 1 dates)."""
         if (self.end - self.start).days <= max_days:
             return self
         return DateRange(start=self.end - timedelta(days=max_days), end=self.end)
