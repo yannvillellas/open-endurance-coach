@@ -35,7 +35,8 @@ _RESOLUTION_PROMPT = (
     "- illness: true only when an active athlete fact says the athlete is currently ill "
     "or sick.\n"
     "- elite: true only when an active athlete fact says the athlete is professional or "
-    "elite."
+    "elite.\n"
+    "A follow-up or clarification keeps the period of the question it refers to."
 )
 
 _RIDE_TYPES_FOLDED = {family.casefold() for family in RIDE_TYPES}
@@ -83,10 +84,19 @@ class PlanResolution:
     notices: tuple[str, ...]
 
 
-def _resolution_messages(focus: str, today: date, facts: Sequence[str]) -> list[LlmMessage]:
+def _render_history(history: Sequence[LlmMessage]) -> str:
+    return "\n".join(f"{message.role}: {message.content}" for message in history)
+
+
+def _resolution_messages(
+    focus: str, today: date, facts: Sequence[str], history: Sequence[LlmMessage]
+) -> list[LlmMessage]:
     today_line = f"Today is {today.isoformat()}."
     system = f"{_RESOLUTION_PROMPT}\n{today_line}"
     parts: list[str] = []
+    transcript = _render_history(history) if history else ""
+    if transcript:
+        parts.append(f"Conversation so far:\n{transcript}")
     if facts:
         listing = "\n".join(f"- {fact}" for fact in facts)
         parts.append(f"Active athlete facts:\n{listing}")
@@ -199,12 +209,13 @@ async def resolve_context_plan(
     *,
     today: date,
     facts: Sequence[str] = (),
+    history: Sequence[LlmMessage] = (),
     max_attempts: int = 2,
 ) -> PlanResolution:
     standard = ContextPlan.standard(today)
     try:
         raw = await llm_client.complete_json(
-            _resolution_messages(focus, today, facts),
+            _resolution_messages(focus, today, facts, history),
             max_attempts=max_attempts,
             validator=_validate_resolved,
         )

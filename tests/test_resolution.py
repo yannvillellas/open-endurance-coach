@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
 from open_endurance_coach.extractors.resolution import resolve_context_plan
@@ -204,3 +204,31 @@ async def test_no_declared_facts_leave_the_state_off(settings: Settings) -> None
     assert resolution.plan.illness is False
     assert resolution.plan.elite is False
     assert "state:" not in resolution.notices[0]
+
+
+async def test_a_clarification_sees_the_conversation(settings: Settings) -> None:
+    provider = FakeLlmProvider(
+        resolutions=[json.dumps({"window": {"start": "2023-12-01", "end": "2023-12-20"}})]
+    )
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        LlmMessage(role="user", content="what was my average hr 1-20 dec 2023"),
+        LlmMessage(role="assistant", content="Your average was 159 bpm."),
+    ]
+
+    resolution = await resolve_context_plan(
+        client, "sorry I meant resting hr", today=TODAY, history=history
+    )
+
+    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    request = provider.resolution_calls[0]
+    assert "Conversation so far:" in request["messages"][1].content
+    assert "what was my average hr 1-20 dec 2023" in request["messages"][1].content
+    assert (
+        "A follow-up or clarification keeps the period of the question it refers to."
+        in request["messages"][0].content
+    )

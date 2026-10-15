@@ -333,6 +333,19 @@ async def test_analyze_passes_declared_facts_to_the_resolution(
     assert "[health_medical] Flu since Monday" in request["messages"][1].content
 
 
+async def test_analyze_passes_the_history_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
+    history = [LlmMessage(role="user", content="what was my average hr 1-20 dec 2025")]
+
+    await engine.analyze("sorry I meant resting hr", today=TODAY, history=history)
+
+    request = provider.resolution_calls[0]
+    assert "what was my average hr 1-20 dec 2025" in request["messages"][1].content
+
+
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
