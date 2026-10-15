@@ -1,10 +1,20 @@
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from open_endurance_coach.store import db as store_db
 from open_endurance_coach.store.db import SCHEMA_VERSION, CoachStore
+
+
+def _apply_migration(
+    connection: sqlite3.Connection, migration: str | Callable[[sqlite3.Connection], None]
+) -> None:
+    if callable(migration):
+        migration(connection)
+    else:
+        connection.executescript(migration)
 
 
 def _user_version(path: Path) -> int:
@@ -26,9 +36,10 @@ def _set_user_version(path: Path, version: int) -> None:
 
 def _build_version(path: Path, version: int) -> None:
     connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
     try:
         for target in range(1, version + 1):
-            connection.executescript(store_db.MIGRATIONS[target])
+            _apply_migration(connection, store_db.MIGRATIONS[target])
         connection.execute(f"PRAGMA user_version = {version}")
         connection.commit()
     finally:

@@ -699,6 +699,9 @@ class CoachEngine:
     def discard_pending_proposals(self) -> list[int]:
         return self._store.delete_pending_proposals()
 
+    def discard_unreadable_proposals(self) -> list[int]:
+        return self._store.delete_unreadable_proposals()
+
     def expire_memory(self, *, today: date | None = None) -> list[tuple[int, str]]:
         return self._store.expire_facts(today=today or self.today())
 
