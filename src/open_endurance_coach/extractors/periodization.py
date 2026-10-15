@@ -546,9 +546,7 @@ def _apply_contingency(
             row = by_start.get(start)
             if row is not None and row.phase != "Race":
                 _mark_rest(row)
-        _apply_relief(
-            rows, by_start, resumption, weeks=len(weeks), illness=illness, ctl=ctl
-        )
+        _apply_relief(rows, by_start, resumption, weeks=len(weeks), illness=illness, ctl=ctl)
     if not run:
         return
     elapsed = (today - current_week).days
@@ -564,9 +562,7 @@ def _apply_contingency(
     if current is None:
         return
     if gap_days <= 7 and not illness:
-        _apply_omissions(
-            _omissions_4_7(rows, current, current_week), anchor=current_week, count=1
-        )
+        _apply_omissions(_omissions_4_7(rows, current, current_week), anchor=current_week, count=1)
         return
     if _is_late_cut(rows, current):
         return
