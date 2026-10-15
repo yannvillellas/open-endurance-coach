@@ -471,24 +471,26 @@ def _apply_omissions(candidates: Iterable[BlockWeek], *, anchor: date, count: in
 def _apply_relief(
     rows: Sequence[BlockWeek],
     by_start: dict[date, BlockWeek],
-    resumption: date,
+    anchor: date,
     *,
     weeks: int,
     illness: bool,
     ctl: float | None,
 ) -> None:
-    """Apply one finished interruption's adjustments, anchored at its resumption.
+    """Apply one interruption's adjustments at its anchor week.
 
-    The brackets read the whole empty weeks: one week is a 4-7 day stop, two an
-    8-14 day stop, three or more the deep bracket; a declared illness upgrades a
-    one-week stop to the 8-14 treatment. The anchor is the resumption week, so
-    the marks are a pure function of the executed history.
+    The anchor is the resumption week of a finished stop, or the current week of
+    the ongoing one; the caller marks the stopped weeks rest and converts the
+    duration to whole weeks. The brackets read those weeks: one is a 4-7 day
+    stop, two an 8-14 day stop, three or more the deep bracket; a declared
+    illness upgrades a one-week stop to the 8-14 treatment. Anchor and weeks
+    derive from the executed history, so the marks are stable.
     """
-    current = by_start.get(resumption)
+    current = by_start.get(anchor)
     if current is None:
         return
     if weeks == 1 and not illness:
-        _apply_omissions(_omissions_4_7(rows, current, resumption), anchor=resumption, count=1)
+        _apply_omissions(_omissions_4_7(rows, current, anchor), anchor=anchor, count=1)
         return
     if _is_late_cut(rows, current):
         return
@@ -500,10 +502,10 @@ def _apply_relief(
     current.target_tss_low = band[0] if band else None
     current.target_tss_high = band[1] if band else None
     if deep:
-        _apply_omissions(_omissions_deep(rows), anchor=resumption, count=2)
+        _apply_omissions(_omissions_deep(rows), anchor=anchor, count=2)
         return
-    _apply_omissions(_omissions_8_14(rows), anchor=resumption, count=1)
-    following = by_start.get(resumption + timedelta(days=7))
+    _apply_omissions(_omissions_8_14(rows), anchor=anchor, count=1)
+    following = by_start.get(anchor + timedelta(days=7))
     if following is not None and following.phase != "Race" and following.status != "omitted":
         following.status = "repeat"
         following.role = _REPEAT_ROLE
@@ -558,29 +560,7 @@ def _apply_contingency(
         row = by_start.get(start)
         if row is not None and row.phase != "Race":
             _mark_rest(row)
-    current = by_start.get(current_week)
-    if current is None:
-        return
-    if gap_days <= 7 and not illness:
-        _apply_omissions(_omissions_4_7(rows, current, current_week), anchor=current_week, count=1)
-        return
-    if _is_late_cut(rows, current):
-        return
-    deep = gap_days > 14
-    current.status = "step_back"
-    current.role = _step_back_role(current.phase, illness=illness, deep=deep)
-    prep_entry = current.phase != "Build" and (illness or deep)
-    band = _entry_band("Prep" if prep_entry else current.phase, ctl)
-    current.target_tss_low = band[0] if band else None
-    current.target_tss_high = band[1] if band else None
-    if deep:
-        _apply_omissions(_omissions_deep(rows), anchor=current_week, count=2)
-        return
-    _apply_omissions(_omissions_8_14(rows), anchor=current_week, count=1)
-    following = by_start.get(current_week + timedelta(days=7))
-    if following is not None and following.phase != "Race" and following.status != "omitted":
-        following.status = "repeat"
-        following.role = _REPEAT_ROLE
+    _apply_relief(rows, by_start, current_week, weeks=(gap_days + 6) // 7, illness=illness, ctl=ctl)
 
 
 def derive_block_plan(
