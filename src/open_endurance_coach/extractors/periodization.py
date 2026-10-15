@@ -2,8 +2,9 @@
 
 A pure function of the anchor race, the weekly grid and the executed history:
 the same inputs derive the same weeks, recomputed every turn and never persisted.
-Only ``today`` positions the current week; it never moves the block. See
-docs/periodization.md for the doctrine and the design decisions.
+``today`` positions the current week and extends an ongoing interruption, but a
+finished stop is replayed from the executed weeks, so past weeks are never
+re-labelled. See docs/periodization.md for the doctrine and the design decisions.
 """
 
 import math
@@ -405,17 +406,20 @@ def _mark_omitted(row: BlockWeek) -> None:
     row.target_tss_high = 0.0
 
 
-def _omittable(row: BlockWeek, current_week: date) -> bool:
+def _omittable(row: BlockWeek, anchor: date) -> bool:
+    """A week the block may drop: after the episode and not already adjusted.
+
+    The rule is positional, so a week is dropped by the same interruption at
+    every recomputation, whether it is future, current or already past.
+    """
     return (
-        row.week_start > current_week
-        and row.status in ("current", "upcoming")
+        row.week_start > anchor
         and row.phase != "Race"
+        and row.status not in ("rest", "omitted", "step_back", "repeat")
     )
 
 
-def _omissions_4_7(
-    rows: Sequence[BlockWeek], current: BlockWeek, current_week: date
-) -> list[BlockWeek]:
+def _omissions_4_7(rows: Sequence[BlockWeek], current: BlockWeek, anchor: date) -> list[BlockWeek]:
     """Reduce the current block by one week; in the Peak, Peak 2 becomes 1.
 
     In the Peak the stopped week itself absorbs the reduction (it is statused
@@ -425,9 +429,7 @@ def _omissions_4_7(
         return []
     peak = [row for row in rows if row.phase == "Peak"]
     candidates: list[BlockWeek] = []
-    phase_rows = [
-        row for row in rows if row.phase == current.phase and _omittable(row, current_week)
-    ]
+    phase_rows = [row for row in rows if row.phase == current.phase and _omittable(row, anchor)]
     if phase_rows:
         candidates.append(phase_rows[-1])
     if len(peak) == 2:
@@ -455,15 +457,56 @@ def _omissions_deep(rows: Sequence[BlockWeek]) -> list[BlockWeek]:
     return candidates
 
 
-def _apply_omissions(candidates: Iterable[BlockWeek], *, current_week: date, count: int) -> None:
+def _apply_omissions(candidates: Iterable[BlockWeek], *, anchor: date, count: int) -> None:
     omitted = 0
     for row in candidates:
         if omitted >= count:
             return
-        if not _omittable(row, current_week):
+        if not _omittable(row, anchor):
             continue
         _mark_omitted(row)
         omitted += 1
+
+
+def _apply_relief(
+    rows: Sequence[BlockWeek],
+    by_start: dict[date, BlockWeek],
+    resumption: date,
+    *,
+    weeks: int,
+    illness: bool,
+    ctl: float | None,
+) -> None:
+    """Apply one finished interruption's adjustments, anchored at its resumption.
+
+    The brackets read the whole empty weeks: one week is a 4-7 day stop, two an
+    8-14 day stop, three or more the deep bracket; a declared illness upgrades a
+    one-week stop to the 8-14 treatment. The anchor is the resumption week, so
+    the marks are a pure function of the executed history.
+    """
+    current = by_start.get(resumption)
+    if current is None:
+        return
+    if weeks == 1 and not illness:
+        _apply_omissions(_omissions_4_7(rows, current, resumption), anchor=resumption, count=1)
+        return
+    if _is_late_cut(rows, current):
+        return
+    deep = weeks >= 3
+    current.status = "step_back"
+    current.role = _step_back_role(current.phase, illness=illness, deep=deep)
+    prep_entry = current.phase != "Build" and (illness or deep)
+    band = _entry_band("Prep" if prep_entry else current.phase, ctl)
+    current.target_tss_low = band[0] if band else None
+    current.target_tss_high = band[1] if band else None
+    if deep:
+        _apply_omissions(_omissions_deep(rows), anchor=resumption, count=2)
+        return
+    _apply_omissions(_omissions_8_14(rows), anchor=resumption, count=1)
+    following = by_start.get(resumption + timedelta(days=7))
+    if following is not None and following.phase != "Race" and following.status != "omitted":
+        following.status = "repeat"
+        following.role = _REPEAT_ROLE
 
 
 def _apply_contingency(
@@ -474,27 +517,45 @@ def _apply_contingency(
     illness: bool,
     ctl: float | None,
 ) -> None:
-    if not rows:
+    """Replay the interruptions of the executed history, then the ongoing one.
+
+    Every run of whole empty weeks closed by a resumption week is replayed from
+    the history, so a finished stop leaves its marks (rest, omission, step_back,
+    repeat) at the same weeks forever. The ongoing stop keeps the day precision
+    of the uneventful current week: its elapsed days extend the whole empty
+    weeks before it. Only the current week may change as it fills up; past
+    weeks are never re-labelled.
+    """
+    if not rows or not any(trained.values()):
         return
-    cadence = rows[0].week_start
-    current_week = _week_start(today, cadence)
-    if not any(trained.values()):
+    current_week = _week_start(today, rows[0].week_start)
+    by_start = {row.week_start: row for row in rows}
+    closed: list[tuple[list[date], date]] = []
+    run: list[date] = []
+    cursor = rows[0].week_start
+    while cursor <= current_week:
+        if trained.get(cursor, False):
+            if run:
+                closed.append((run, cursor))
+                run = []
+        else:
+            run.append(cursor)
+        cursor += timedelta(days=7)
+    for weeks, resumption in closed:
+        for start in weeks:
+            row = by_start.get(start)
+            if row is not None and row.phase != "Race":
+                _mark_rest(row)
+        _apply_relief(
+            rows, by_start, resumption, weeks=len(weeks), illness=illness, ctl=ctl
+        )
+    if not run:
         return
-    current_executed = trained.get(current_week, False)
     elapsed = (today - current_week).days
-    empty_full = 0
-    floor = min(trained)
-    cursor = current_week - timedelta(days=7)
-    while cursor >= floor and not trained.get(cursor, False):
-        empty_full += 1
-        cursor -= timedelta(days=7)
-    gap_days = 7 * empty_full + (0 if current_executed else elapsed)
+    gap_days = 7 * (len(run) - 1) + elapsed
     if gap_days <= 3:
         return
-    by_start = {row.week_start: row for row in rows}
-    stopped = [current_week - timedelta(days=7 * offset) for offset in range(1, empty_full + 1)]
-    if not current_executed and elapsed >= 3:
-        stopped.insert(0, current_week)
+    stopped = run if elapsed >= 3 else run[:-1]
     for start in stopped:
         row = by_start.get(start)
         if row is not None and row.phase != "Race":
@@ -504,7 +565,7 @@ def _apply_contingency(
         return
     if gap_days <= 7 and not illness:
         _apply_omissions(
-            _omissions_4_7(rows, current, current_week), current_week=current_week, count=1
+            _omissions_4_7(rows, current, current_week), anchor=current_week, count=1
         )
         return
     if _is_late_cut(rows, current):
@@ -516,14 +577,14 @@ def _apply_contingency(
     band = _entry_band("Prep" if prep_entry else current.phase, ctl)
     current.target_tss_low = band[0] if band else None
     current.target_tss_high = band[1] if band else None
-    if not deep:
-        following = by_start.get(current_week + timedelta(days=7))
-        if following is not None and following.phase != "Race":
-            following.status = "repeat"
-            following.role = _REPEAT_ROLE
-        _apply_omissions(_omissions_8_14(rows), current_week=current_week, count=1)
-    else:
-        _apply_omissions(_omissions_deep(rows), current_week=current_week, count=2)
+    if deep:
+        _apply_omissions(_omissions_deep(rows), anchor=current_week, count=2)
+        return
+    _apply_omissions(_omissions_8_14(rows), anchor=current_week, count=1)
+    following = by_start.get(current_week + timedelta(days=7))
+    if following is not None and following.phase != "Race" and following.status != "omitted":
+        following.status = "repeat"
+        following.role = _REPEAT_ROLE
 
 
 def derive_block_plan(
@@ -537,14 +598,17 @@ def derive_block_plan(
     """Derive the block for the anchored race; empty when no race anchors it.
 
     The block is race-anchored: it starts at the later of the first executed week
-    and 24 training weeks before the race, so it never moves as ``today`` advances
-    and past weeks are never re-labelled. Only ``today`` positions the current week
-    and the execution and interruption statuses.
+    and 24 training weeks before the race, so the layout never moves as ``today``
+    advances: the same anchor, grid and history derive the same weeks, and weeks
+    once past are never re-labelled. ``today`` positions the current week, judges
+    execution, and extends the ongoing interruption by the elapsed days of its
+    unfinished week; every finished interruption is replayed from the executed
+    weeks themselves.
 
-    ``elite`` and ``illness`` are declared by the caller from the athlete's own words;
-    no metric threshold opens them. The hub path passes neither until the declared
-    facts are wired, so the crash week and the illness branch fire only when a caller
-    declares them.
+    ``elite`` and ``illness`` are declared by the caller from the athlete's own
+    words; no metric threshold opens them. The hub path passes the flags it
+    resolved from the active facts, so the crash week and the illness branch fire
+    only when a caller declares them.
     """
     anchor = select_anchor(races)
     if anchor is None:
