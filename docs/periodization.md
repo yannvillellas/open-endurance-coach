@@ -72,9 +72,10 @@ months ahead.
 **Pure, race-anchored derivation.** The block ends on the anchor race week and starts at
 the later of the first executed week and 24 training weeks before the race, so a week's
 label is a function of its distance to the race: the same anchor, grid and history derive
-the same weeks, and weeks once past are never re-labelled by later recomputations. Only
-`today` positions the current week and judges execution. Late hub revisions may still
-shift past rows; that is accepted.
+the same weeks. Interruptions are replayed from the executed weeks (see below), so a week
+once past is never re-labelled by later recomputations; only the current week, which is
+still filling up, may change between turns as the stop evolves. Late hub revisions may
+still shift past rows; that is accepted.
 
 **Anchor chain.** The anchor is the nearest A-priority race; with no A race, the nearest
 race by A → B → C priority. A second A race within 3 weeks extends the block (prolonged
@@ -118,15 +119,31 @@ percentage.
 coach says so, and no race mutation follows.
 
 **Contingency adjusts statuses, roles and bands — not the layout.** The race-anchored
-layout never moves; an interruption marks the stopped weeks `rest`, the omitted weeks
-(zero band) at their priority, the resumption week `step_back` with its re-entry role
-(Base 3 from Build, Base 1 from Base, Prep when illness or after more than two weeks), and
-on an 8-14 day interruption the following week `repeat`. In the Peak the stopped week
-itself absorbs the reduction (Peak 2 → 1) and the race-eve taper week is never omitted.
-The interruption length is estimated from the weekly rollup: elapsed days in the current
-week plus 7 per fully empty week before it (a week with sessions but no load counts as
-trained), so a full week off is the rest week and a resumed week counts the weeks it
-skipped. Interruption statuses override the execution statuses.
+layout never moves; an interruption marks the stopped weeks `rest` (zero band), the
+resumption week `step_back` with its re-entry role (Base 3 from Build, Base 1 from Base,
+Prep when illness or after more than two weeks) and its re-entry band, the following week
+`repeat` on an 8-14 day stop, and the omitted weeks (zero band) at their priority: the
+last week of the resumed phase for a short stop, Build 2 then Peak 1 for 8-14 days, Peak 1
+then Build 2 then Build 1 beyond. In the Peak the stopped week itself absorbs the
+reduction (Peak 2 → 1) and the race-eve taper week is never omitted. Omissions are placed
+before the repeat mark, so a repeat can never take a week away from the priority.
+
+**Every finished stop is replayed from the executed weeks.** Each run of whole empty
+weeks closed by a resumption week is derived from the weekly rollup again at every turn
+and anchored on that resumption week, so the marks of a finished stop are a pure function
+of the history: an old rest week stays `rest` and an old omission stays `omitted` forever
+instead of flipping back to a missing week once the athlete has resumed. Interruption
+statuses override the execution statuses; an omitted week that is later executed still
+reads `omitted` as the block's structural record, and #66 does not score it. The ongoing
+stop keeps one day-level measure: the elapsed days of its unfinished week, extended by the
+whole empty weeks before it. History is read in whole weeks elsewhere — a week with
+sessions but no load counts as trained, a finished stop's brackets are one empty week
+(4-7 days), two (8-14) or three or more (beyond), and a stop that starts mid-week is
+detected from its first fully skipped week. The late-block exception is wider than the
+doctrine states: for any interruption of 8 days or more, and for illness, nothing changes
+in the Peak or in the last week of a full Build — Friel states it for the >2-week bracket
+and it is extended deliberately, because restructuring a taper to resynchronize the block
+is not worth it.
 
 **In-block races are week roles.** A B race marks its week (mini-taper 2-4 days), a C race
 is trained through, and both stay judged by execution once the week has passed.

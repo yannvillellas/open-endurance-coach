@@ -109,6 +109,28 @@ async def test_an_invalid_window_falls_back_to_standard(settings: Settings) -> N
     assert "invalid" in resolution.notices[0]
 
 
+async def test_an_invalid_window_still_announces_the_declared_state(settings: Settings) -> None:
+    client = make_client(
+        settings,
+        [
+            {
+                "window": {"start": "2024-01-20", "end": "2024-01-10"},
+                "illness": True,
+            }
+        ],
+    )
+
+    resolution = await resolve_context_plan(
+        client, "broken window", today=TODAY, facts=["[health_medical] Flu"]
+    )
+
+    assert resolution.plan.illness is True
+    assert resolution.plan.elite is False
+    assert resolution.notices[0].startswith("Fetch: standard windows")
+    assert "state: illness" in resolution.notices[0]
+    assert "invalid" in resolution.notices[0]
+
+
 async def test_a_failed_resolution_falls_back_to_standard(settings: Settings) -> None:
     client = make_client(settings, ["not json", "still not json"])
 

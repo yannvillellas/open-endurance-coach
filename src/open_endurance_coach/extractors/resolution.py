@@ -168,8 +168,8 @@ def _plan_from_resolution(
         return PlanResolution(
             _with_state(standard, resolved),
             (
-                "Fetch: standard windows"
-                f" (invalid window ignored: {resolved.window.start} → {resolved.window.end}).",
+                _announcement("standard windows", resolved)
+                + f" · invalid window ignored: {start} → {resolved.window.end}.",
             ),
         )
 
