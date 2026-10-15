@@ -98,8 +98,8 @@ maintenance. The crash week (+8..+10) exists only for an athlete who declares an
 profile, and at most once; an absolute CTL threshold was rejected because Friel
 explicitly declines one-size CTL targets ("it depends" on the sport and the individual),
 so no metric opens that gate by itself. Bands are rounded to 5 TSS. The metric is load,
-not hours. The declared state (elite, illness) comes from the athlete's own facts; until
-it is wired the crash week and the illness branch never fire.
+not hours. The declared state (elite, illness) is resolved with the model from the
+athlete's active facts and announced in the fetch line (`state: illness, elite`).
 
 **Recovery tails are mesocycle weeks.** Every fourth week of Base and Build is a
 recovery week, and a phase whose length is not a multiple of four also closes its last

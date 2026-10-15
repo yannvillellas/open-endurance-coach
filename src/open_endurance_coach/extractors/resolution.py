@@ -2,7 +2,8 @@
 
 import json
 import logging
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Literal
 
@@ -30,7 +31,11 @@ _RESOLUTION_PROMPT = (
     "- metric: set it only when the question is about heart rate or elevation.\n"
     "- detail: true only when the question asks to inspect one specific activity "
     "(splits, per kilometre, a cited session); when true, the window end must be that "
-    "activity's date."
+    "activity's date.\n"
+    "- illness: true only when an active athlete fact says the athlete is currently ill "
+    "or sick.\n"
+    "- elite: true only when an active athlete fact says the athlete is professional or "
+    "elite."
 )
 
 _RIDE_TYPES_FOLDED = {family.casefold() for family in RIDE_TYPES}
@@ -68,6 +73,8 @@ class ResolvedContext(BaseModel):
     sport: str | None = None
     metric: Literal["heart_rate", "elevation"] | None = None
     detail: bool = False
+    illness: bool = False
+    elite: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,11 +83,17 @@ class PlanResolution:
     notices: tuple[str, ...]
 
 
-def _resolution_messages(focus: str, today: date) -> list[LlmMessage]:
+def _resolution_messages(focus: str, today: date, facts: Sequence[str]) -> list[LlmMessage]:
     today_line = f"Today is {today.isoformat()}."
+    system = f"{_RESOLUTION_PROMPT}\n{today_line}"
+    parts: list[str] = []
+    if facts:
+        listing = "\n".join(f"- {fact}" for fact in facts)
+        parts.append(f"Active athlete facts:\n{listing}")
+    parts.append(focus)
     return [
-        LlmMessage(role="system", content=f"{_RESOLUTION_PROMPT}\n{today_line}"),
-        LlmMessage(role="user", content=focus),
+        LlmMessage(role="system", content=system),
+        LlmMessage(role="user", content="\n\n".join(parts)),
     ]
 
 
@@ -110,7 +123,18 @@ def _announcement(scope: str, resolved: ResolvedContext) -> str:
         parts.append(f"metric: {resolved.metric.replace('_', ' ')}")
     if resolved.detail:
         parts.append("detail: yes")
+    states = [
+        name
+        for name, enabled in (("illness", resolved.illness), ("elite", resolved.elite))
+        if enabled
+    ]
+    if states:
+        parts.append(f"state: {', '.join(states)}")
     return " · ".join(parts)
+
+
+def _with_state(plan: ContextPlan, resolved: ResolvedContext) -> ContextPlan:
+    return replace(plan, illness=resolved.illness, elite=resolved.elite)
 
 
 def _plan_from_resolution(
@@ -124,13 +148,15 @@ def _plan_from_resolution(
             reference=None,
             detail=resolved.detail,
         )
-        return PlanResolution(plan, (_announcement("standard windows", resolved),))
+        return PlanResolution(
+            _with_state(plan, resolved), (_announcement("standard windows", resolved),)
+        )
 
     start = resolved.window.start
     end = min(resolved.window.end, today)
     if end < start:
         return PlanResolution(
-            standard,
+            _with_state(standard, resolved),
             (
                 "Fetch: standard windows"
                 f" (invalid window ignored: {resolved.window.start} → {resolved.window.end}).",
@@ -153,6 +179,7 @@ def _plan_from_resolution(
         reference=end if resolved.detail else None,
         detail=resolved.detail,
     ).with_windows(wellness=wellness, events=events)
+    plan = _with_state(plan, resolved)
     notices = [_announcement(f"{start.isoformat()} → {end.isoformat()}", resolved)]
     if activities != scope:
         notices.append(
@@ -171,12 +198,13 @@ async def resolve_context_plan(
     focus: str,
     *,
     today: date,
+    facts: Sequence[str] = (),
     max_attempts: int = 2,
 ) -> PlanResolution:
     standard = ContextPlan.standard(today)
     try:
         raw = await llm_client.complete_json(
-            _resolution_messages(focus, today),
+            _resolution_messages(focus, today, facts),
             max_attempts=max_attempts,
             validator=_validate_resolved,
         )

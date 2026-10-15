@@ -11,12 +11,13 @@ the model's token limit (`extractors/budget.py`).
 
 Before each new question the analysis window is resolved with a small model call
 (`extractors/resolution.py`): a strict JSON reply gives the exact past window (or none
-for tactical questions), the sport, the metric and whether one activity must be
-detailed. The code validates the dates, caps the windows (activities 3650 days,
-wellness and events 365 days) and announces what was read with one `Fetch:` line; a
-resolution failure falls back to the standard windows with a warning. A refinement sent
-while a proposal is open rebuilds that proposal's snapshot instead, with no resolution
-call.
+for tactical questions), the sport, the metric, whether one activity must be detailed,
+and the declared athlete state (illness, elite) read from the active facts. The code
+validates the dates, caps the windows (activities 3650 days, wellness and events 365
+days) and announces what was read with one `Fetch:` line (`state:` included when
+declared); a resolution failure falls back to the standard windows with a warning. A
+refinement sent while a proposal is open rebuilds that proposal's snapshot instead, with
+no resolution call.
 
 - **Tactical plan** — recent activities (14 days), wellness (7 days), a ±14-day
   calendar window split into recent and upcoming events, sport settings, goal races and

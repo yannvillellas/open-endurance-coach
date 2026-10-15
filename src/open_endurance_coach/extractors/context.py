@@ -91,6 +91,8 @@ class ContextPlan:
     metric_focus: str | None = None
     reference: date | None = None
     detail: bool = False
+    illness: bool = False
+    elite: bool = False
 
     @classmethod
     def standard(cls, today: date) -> "ContextPlan":
@@ -260,7 +262,9 @@ async def gather_context(
             event for event in reversed(events) if event.start_date_local.date() < today
         ],
         goal_races=goal_races,
-        block_plan=derive_block_plan(goal_races, rollup, today=today),
+        block_plan=derive_block_plan(
+            goal_races, rollup, today=today, illness=plan.illness, elite=plan.elite
+        ),
         training_rollup=rollup,
         sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
         user_feedback=user_feedback,

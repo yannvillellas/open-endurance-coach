@@ -273,7 +273,11 @@ class CoachEngine:
         notices: list[str] | None = None,
     ) -> CoachContext:
         current = today or self.today()
-        resolution = await resolve_context_plan(self._llm_client, focus, today=current)
+        facts = [
+            f"[{fact.category.value}] {fact.text}"
+            for fact in self._store.list_active_facts(today=current)
+        ]
+        resolution = await resolve_context_plan(self._llm_client, focus, today=current, facts=facts)
         if notices is not None:
             notices.extend(resolution.notices)
         return await gather_context(

@@ -168,3 +168,39 @@ async def test_the_resolution_request_carries_the_focus_and_the_detail_anchor(
     assert request["json_mode"] is True
     assert "the splits of my ride on 2024-01-30" in request["messages"][1].content
     assert "the window end must be that activity's date" in request["messages"][0].content
+
+
+async def test_declared_facts_set_the_athlete_state(settings: Settings) -> None:
+    provider = FakeLlmProvider(
+        resolutions=[json.dumps({"window": None, "illness": True, "elite": True})]
+    )
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+
+    resolution = await resolve_context_plan(
+        client,
+        "how should I train this week",
+        today=TODAY,
+        facts=["[health_medical] Flu since Monday", "[athlete_profile] Professional cyclist"],
+    )
+
+    assert resolution.plan.illness is True
+    assert resolution.plan.elite is True
+    assert resolution.notices == ("Fetch: standard windows · state: illness, elite",)
+    request = provider.resolution_calls[0]
+    assert "Flu since Monday" in request["messages"][1].content
+    assert "Professional cyclist" in request["messages"][1].content
+    assert "illness: true only when an active athlete fact" in request["messages"][0].content
+
+
+async def test_no_declared_facts_leave_the_state_off(settings: Settings) -> None:
+    client = make_client(settings, [{"window": None}])
+
+    resolution = await resolve_context_plan(client, "the question", today=TODAY)
+
+    assert resolution.plan.illness is False
+    assert resolution.plan.elite is False
+    assert "state:" not in resolution.notices[0]

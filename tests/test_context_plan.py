@@ -1,8 +1,10 @@
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
+from open_endurance_coach.extractors import context as context_module
 from open_endurance_coach.extractors.context import ContextPlan, DateRange, gather_context
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
@@ -128,6 +130,27 @@ async def test_a_detail_plan_pins_the_referenced_activity() -> None:
     assert context.activity_detail is not None
     assert context.activity_detail.id == "fx-old"
     assert any(call[0] == "streams" and call[1] == "fx-old" for call in client.calls)
+
+
+async def test_the_plan_state_reaches_the_block_derivation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, bool] = {}
+    real = context_module.derive_block_plan
+
+    def capture(
+        races: object, weeks: object, *, today: date, illness: bool = False, elite: bool = False
+    ) -> object:
+        captured["illness"] = illness
+        captured["elite"] = elite
+        return real(races, weeks, today=today, illness=illness, elite=elite)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(context_module, "derive_block_plan", capture)
+    plan = replace(ContextPlan.standard(TODAY), illness=True, elite=True)
+
+    await gather_context(make_intervals_client(), plan, "focus", today=TODAY)
+
+    assert captured == {"illness": True, "elite": True}
 
 
 async def test_a_detail_plan_includes_the_splits() -> None:

@@ -319,6 +319,20 @@ async def test_analyze_falls_back_to_standard_windows_when_resolution_fails(
     assert any("resolution failed" in notice for notice in notices)
 
 
+async def test_analyze_passes_declared_facts_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    store.remember_fact(MemoryCategory.HEALTH_MEDICAL, MemoryOrigin.DECLARED, "Flu since Monday")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider, client=make_intervals_client())
+
+    await engine.analyze("status check", today=TODAY)
+
+    request = provider.resolution_calls[0]
+    assert "[health_medical] Flu since Monday" in request["messages"][1].content
+
+
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:
     provider = FakeLlmProvider([completion(report_json())])
     engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
