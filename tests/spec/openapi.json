@@ -3985,6 +3985,100 @@
         }
       }
     },
+    "/api/v1/activity/{id}/file": {
+      "get": {
+        "tags": [
+          "Activities"
+        ],
+        "summary": "Download original activity file, Strava activities not supported",
+        "operationId": "downloadActivityFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Activities"
+        ],
+        "summary": "Replace the original activity file and reprocess the activity",
+        "description": "Name, description, type, gear, tags, zones, RPE etc. are kept. If the file has not changed nothing is done and the response is still 200 but with activity null, so check for that. Supports .fit, .tcx and .gpx files, optionally gzipped (.gz), or a .zip containing exactly one of these. Strava activities not supported.",
+        "operationId": "replaceActivityFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "keep_intervals",
+            "in": "query",
+            "description": "Keep the current intervals",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "name": "keep_custom_fields",
+            "in": "query",
+            "description": "Keep current custom activity field values",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {},
+            "application/json": {
+              "schema": {
+                "required": [
+                  "file"
+                ],
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "Activity file",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplaceFileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/shared-event/{id}": {
       "get": {
         "tags": [
@@ -7628,30 +7722,6 @@
             "schema": {
               "type": "boolean",
               "default": true
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/api/v1/activity/{id}/file": {
-      "get": {
-        "tags": [
-          "Activities"
-        ],
-        "summary": "Download original activity file, Strava activities not supported",
-        "operationId": "downloadActivityFile",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -15158,6 +15228,14 @@
           },
           "new_chat": {
             "$ref": "#/components/schemas/Chat"
+          }
+        }
+      },
+      "ReplaceFileResponse": {
+        "type": "object",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/Activity"
           }
         }
       },
