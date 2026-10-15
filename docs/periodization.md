@@ -100,7 +100,8 @@ the CTL loss within 10% under the same constant (about 2.8 × CTL), capped at
 maintenance. The crash week (+8..+10) exists only for an athlete who declares an elite
 profile, and at most once; an absolute CTL threshold was rejected because Friel
 explicitly declines one-size CTL targets ("it depends" on the sport and the individual),
-so no metric opens that gate by itself. Bands are rounded to 5 TSS. The metric is load,
+so no metric opens that gate by itself. Bands are rounded to 5 TSS and floored at zero
+(and never inverted): a taper target never goes negative. The metric is load,
 not hours. The declared state (elite, illness) is resolved with the model from the
 athlete's active facts and announced in the fetch line (`state: illness, elite`).
 
