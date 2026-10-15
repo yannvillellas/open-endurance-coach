@@ -39,7 +39,6 @@ RECOVERY_RAMP = (-5.0, -2.0)
 PEAK_RAMP = (-4.0, 0.0)
 PEAK_TAPER_RAMP = (-6.0, -3.0)
 RACE_CTL_LOSS = 0.1
-ELITE_CTL = 85.0
 
 _CATEGORY_RANK = {"RACE_A": 0, "RACE_B": 1, "RACE_C": 2}
 
@@ -245,7 +244,7 @@ def _phase_band(
         return _band(ctl, RECOVERY_RAMP if _is_recovery_tail(number, length) else BUILD_RAMP)
     if _is_recovery_tail(number, length):
         return _band(ctl, RECOVERY_RAMP)
-    crash = (elite or (ctl is not None and ctl >= ELITE_CTL)) and number == _crash_week(length)
+    crash = elite and number == _crash_week(length)
     return _band(ctl, CRASH_RAMP if crash else SUSTAINED_RAMP)
 
 
@@ -544,9 +543,10 @@ def derive_block_plan(
     and past weeks are never re-labelled. Only ``today`` positions the current week
     and the execution and interruption statuses.
 
-    ``elite`` and ``illness`` are reserved for callers that know them (profile,
-    memory); the hub path passes neither, so the crash week fires on an observed
-    CTL of ``ELITE_CTL`` or more, and interruptions never take the illness branch.
+    ``elite`` and ``illness`` are declared by the caller from the athlete's own words;
+    no metric threshold opens them. The hub path passes neither until the declared
+    facts are wired, so the crash week and the illness branch fire only when a caller
+    declares them.
     """
     anchor = select_anchor(races)
     if anchor is None:

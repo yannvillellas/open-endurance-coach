@@ -24,10 +24,10 @@ no fixed percentage cut, the load drop follows naturally.
 ### Load progression: the CTL ramp [3]
 
 The driver is weekly load (TSS), read from the hub's CTL, never recomputed. A sustained
-progression adds 5-8 CTL points per week. A crash week (more than 8, up to 10) happens at
-most once, only for an elite athlete or a structurally high base CTL (85-90 at season
-start). Build raises CTL in small steps (0-4 per week). Race week must not lose more than
-about 10% of CTL, and the peak aims at a positive TSB on race day.
+progression adds 5-8 CTL points per week; above that you are entering the crash range,
+which Friel reserves for rare, short use ("keep such a high ramp rate to a week or
+less"). Build raises CTL in small steps (0-4 per week). Race week must not lose more
+than about 10% of CTL, and the peak aims at a positive TSB on race day.
 
 ### Peak and taper [4]
 
@@ -94,11 +94,12 @@ fitness; the ramp target is added as `42 × ramp` (6 × 7: weekly TSS per CTL po
 week under the 42-day CTL constant): Prep and Build +0..+4, Base +5..+8, recovery tails
 −5..−2, Peak −4..0 (the last Peak week −6..−3), race week floored at the load that keeps
 the CTL loss within 10% under the same constant (about 2.8 × CTL), capped at
-maintenance. The crash week (+8..+10) exists only for a declared elite profile or an
-observed CTL ≥ 85, and at most once. Bands are rounded to 5 TSS. The metric is load, not
-hours. The hub path passes hub CTL only: v1 does not read the illness or elite flags
-from memory, so the crash week fires on the observed CTL and interruptions never take
-the illness branch.
+maintenance. The crash week (+8..+10) exists only for an athlete who declares an elite
+profile, and at most once; an absolute CTL threshold was rejected because Friel
+explicitly declines one-size CTL targets ("it depends" on the sport and the individual),
+so no metric opens that gate by itself. Bands are rounded to 5 TSS. The metric is load,
+not hours. The declared state (elite, illness) comes from the athlete's own facts; until
+it is wired the crash week and the illness branch never fire.
 
 **Recovery tails are mesocycle weeks.** Every fourth week of Base and Build is a
 recovery week, and a phase whose length is not a multiple of four also closes its last

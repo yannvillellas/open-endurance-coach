@@ -325,7 +325,7 @@ def test_a_non_finite_ctl_from_the_hub_is_ignored() -> None:
     assert without_ctl[RACE_DAY].target_tss_high is None
 
 
-def test_the_crash_week_is_elite_only() -> None:
+def test_the_crash_week_needs_a_declared_elite_athlete() -> None:
     regular = by_start(
         derive_block_plan([make_race(RACE_DAY)], history_until(TODAY, fitness=50.0), today=TODAY)
     )
@@ -343,12 +343,13 @@ def test_the_crash_week_is_elite_only() -> None:
 
     crash = date(2024, 3, 25)  # Base 11, the third week of the last full mesocycle
     assert (regular[crash].target_tss_low, regular[crash].target_tss_high) == (560.0, 685.0)
-    assert (high_ctl[crash].target_tss_low, high_ctl[crash].target_tss_high) == (965.0, 1050.0)
+    # A high hub CTL alone never opens the gate: the sustained 5-8 band applies.
+    assert (high_ctl[crash].target_tss_low, high_ctl[crash].target_tss_high) == (840.0, 965.0)
     assert (declared_elite[crash].target_tss_low, declared_elite[crash].target_tss_high) == (
         685.0,
         770.0,
     )
-    assert high_ctl[date(2024, 3, 18)].target_tss_high == 965.0  # one crash week only
+    assert declared_elite[date(2024, 3, 18)].target_tss_high == 685.0  # one crash week only
 
 
 def test_mesocycles_end_in_recovery_tails() -> None:
