@@ -6,7 +6,11 @@ import pytest
 from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
-from open_endurance_coach.extractors.resolution import resolve_context_plan
+from open_endurance_coach.extractors.resolution import (
+    _resolution_context,
+    _resolution_system,
+    resolve_context_plan,
+)
 from open_endurance_coach.tokens import estimate_text_tokens
 
 from .fakes import FakeLlmProvider, RecordingSleep
@@ -177,6 +181,33 @@ async def test_without_a_budget_the_resolution_keeps_the_whole_history(
     await resolve_context_plan(client, "short question", today=TODAY, history=history)
 
     assert "question 0 " in provider.resolution_calls[0]["messages"][1].content
+
+
+async def test_a_thin_budget_drops_the_history_instead_of_overshooting(
+    settings: Settings,
+) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    fixed = estimate_text_tokens(_resolution_system(TODAY)) + estimate_text_tokens(
+        _resolution_context((), "short question")
+    )
+    history = [
+        LlmMessage(role="user", content="q"),
+        LlmMessage(role="assistant", content="a"),
+    ]
+
+    await resolve_context_plan(
+        client, "short question", today=TODAY, history=history, max_tokens=fixed + 5
+    )
+
+    request = provider.resolution_calls[0]
+    total = sum(estimate_text_tokens(message.content) for message in request["messages"])
+    assert total <= fixed + 5
+    assert "Conversation so far:" not in request["messages"][1].content
 
 
 async def test_a_failed_resolution_falls_back_to_standard(settings: Settings) -> None:

@@ -232,7 +232,8 @@ async def resolve_context_plan(
 
     The fixed parts of the prompt (system, facts, question) are subtracted and the
     conversation is trimmed to the remainder with the same helper as the main call,
-    so this request can never exceed the caller's budget either.
+    so the request stays within the budget whenever those fixed parts fit; if even
+    the trimmed transcript would not fit, the conversation is dropped entirely.
     """
     standard = ContextPlan.standard(today)
     if max_tokens is not None:
@@ -248,6 +249,8 @@ async def resolve_context_plan(
             - _messages_tokens(history)
         )
         history = trim_history(history, max(1, max_tokens - fixed - envelope))
+        if _messages_tokens(_resolution_messages(focus, today, facts, history)) > max_tokens:
+            history = []
     try:
         raw = await llm_client.complete_json(
             _resolution_messages(focus, today, facts, history),
