@@ -24,7 +24,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
-SYSTEM_PROMPT_TOKEN_BUDGET = 3600
+SYSTEM_PROMPT_TOKEN_BUDGET = 3700
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -270,6 +270,12 @@ def test_all_examples_carry_the_memory_field() -> None:
         assert "memory" in example, example.get("intent")
 
 
+def test_the_contract_makes_active_health_facts_a_hard_session_constraint() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "An active injury or health fact is a hard constraint on the sessions" in system
+    assert "accept missing the block band" in system
+
+
 def test_contract_blocks_proposals_on_material_questions() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
     assert "Before prescribing anything" in system
@@ -344,14 +350,73 @@ def test_race_example_validates_and_is_placeholder_only() -> None:
 
 def test_contract_teaches_backwards_planning_and_asking() -> None:
     system = build_messages(CONTEXT, make_settings())[0].content
-    assert "plan backwards from the nearest race" in system
-    assert "Base, Build, Peak, Taper" in system
+    assert "Plan backwards from the nearest race" in system
     assert "next 7-14 days only" in system
     assert "RACE_A (season objective), RACE_B (important) or RACE_C" in system
     assert "ask the athlete for it instead of estimating" in system
     assert "Never copy the example race numbers" in system
     assert "When a race is missing a figure" in system
     assert "TrailRun" in system
+
+
+def test_contract_routes_the_plan_through_the_block_plan() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "block_plan is the intended periodization" in system
+    assert "tie each session to its block week" in system
+    assert "follow its role and target band" in system
+    assert "Never restate macro phases from memory" in system
+    assert "rest, repeat, step_back or omitted" in system
+
+
+BLOCK_ROWS = [
+    {
+        "week_start": "2024-02-05",
+        "phase": "Base",
+        "week_in_phase": 5,
+        "role": "Base: aerobic volume, Z2; one long session.",
+        "target_tss_low": 380.0,
+        "target_tss_high": 400.0,
+        "status": "current",
+    },
+    {
+        "week_start": "2024-02-12",
+        "phase": "Base",
+        "week_in_phase": 6,
+        "role": "Base: aerobic volume, Z2; one long session.",
+        "target_tss_low": None,
+        "target_tss_high": None,
+        "status": "upcoming",
+    },
+]
+
+
+def _context_with_block_plan() -> CoachContext:
+    return CoachContext.model_validate({**CONTEXT.model_dump(), "block_plan": BLOCK_ROWS})
+
+
+def test_user_message_renders_the_block_plan_as_a_markdown_table() -> None:
+    user = build_messages(_context_with_block_plan(), make_settings())[1].content
+    assert "<block_plan>\n| Week | Phase | Role | Target | Status |\n" in user
+    assert "| --- | --- | --- | --- | --- |" in user
+    assert (
+        "| 2024-02-05 | Base 5 | Base: aerobic volume, Z2; one long session."
+        " | 380-400 | current |" in user
+    )
+    assert (
+        "| 2024-02-12 | Base 6 | Base: aerobic volume, Z2; one long session."
+        " | — | upcoming |" in user
+    )
+
+
+def test_the_block_plan_leaves_the_json_payload() -> None:
+    user = build_messages(_context_with_block_plan(), make_settings())[1].content
+    body = user.split("<athlete_data>\n", 1)[1].split("\n</athlete_data>", 1)[0]
+    assert "block_plan" not in body
+
+
+def test_no_block_plan_block_without_rows() -> None:
+    user = build_messages(CONTEXT, make_settings())[1].content
+    assert "<block_plan>" not in user
 
 
 def test_system_prompt_stays_small() -> None:

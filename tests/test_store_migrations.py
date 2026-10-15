@@ -1,10 +1,20 @@
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from open_endurance_coach.store import db as store_db
 from open_endurance_coach.store.db import SCHEMA_VERSION, CoachStore
+
+
+def _apply_migration(
+    connection: sqlite3.Connection, migration: str | Callable[[sqlite3.Connection], None]
+) -> None:
+    if callable(migration):
+        migration(connection)
+    else:
+        connection.executescript(migration)
 
 
 def _user_version(path: Path) -> int:
@@ -26,9 +36,10 @@ def _set_user_version(path: Path, version: int) -> None:
 
 def _build_version(path: Path, version: int) -> None:
     connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
     try:
         for target in range(1, version + 1):
-            connection.executescript(store_db.MIGRATIONS[target])
+            _apply_migration(connection, store_db.MIGRATIONS[target])
         connection.execute(f"PRAGMA user_version = {version}")
         connection.commit()
     finally:
@@ -208,6 +219,33 @@ def test_failed_migration_rolls_back_and_keeps_the_version(
         CoachStore(path)
     assert _user_version(path) == SCHEMA_VERSION
     assert "partial" not in _table_names(path)
+
+
+def test_a_failed_callable_migration_rolls_back_and_leaves_the_database_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+
+    class InjectedFailure(Exception):
+        pass
+
+    def broken(connection: sqlite3.Connection) -> None:
+        connection.execute("CREATE TABLE partial (id INTEGER)")
+        raise InjectedFailure("injected")
+
+    monkeypatch.setattr(store_db, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
+    monkeypatch.setitem(store_db.MIGRATIONS, SCHEMA_VERSION + 1, broken)
+
+    with pytest.raises(InjectedFailure):
+        CoachStore(path)
+    assert _user_version(path) == SCHEMA_VERSION
+    assert "partial" not in _table_names(path)
+
+    monkeypatch.undo()
+    reopened = CoachStore(path)
+    assert reopened.schema_version == SCHEMA_VERSION
+    reopened.close()
 
 
 def test_fresh_database_has_the_query_indexes(tmp_path: Path) -> None:

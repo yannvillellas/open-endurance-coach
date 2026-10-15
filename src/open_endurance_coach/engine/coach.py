@@ -271,9 +271,19 @@ class CoachEngine:
         user_feedback: str | None,
         today: date | None,
         notices: list[str] | None = None,
+        history: list[LlmMessage] | None = None,
     ) -> CoachContext:
         current = today or self.today()
-        resolution = await resolve_context_plan(self._llm_client, focus, today=current)
+        ranked = _rank_memory_facts(self._store.list_active_facts(today=current), focus, current)
+        facts = [f"[{fact.category.value}] {fact.text}" for fact in ranked[:MEMORY_MAX_FACTS]]
+        resolution = await resolve_context_plan(
+            self._llm_client,
+            focus,
+            today=current,
+            facts=facts,
+            history=history or (),
+            max_tokens=self.input_room(),
+        )
         if notices is not None:
             notices.extend(resolution.notices)
         return await gather_context(
@@ -408,9 +418,16 @@ class CoachEngine:
         user_feedback: str | None = None,
         today: date | None = None,
         notices: list[str] | None = None,
+        history: list[LlmMessage] | None = None,
     ) -> CoachContext:
         context = self._surface_unseen(
-            await self._extract(focus, user_feedback=user_feedback, today=today, notices=notices)
+            await self._extract(
+                focus,
+                user_feedback=user_feedback,
+                today=today,
+                notices=notices,
+                history=history,
+            )
         )
         return self._with_memory(context, focus)
 
@@ -511,7 +528,11 @@ class CoachEngine:
         self.check_focus(focus)
         if context is None:
             context = await self.build_context(
-                focus, user_feedback=user_feedback, today=today, notices=notices
+                focus,
+                user_feedback=user_feedback,
+                today=today,
+                notices=notices,
+                history=history,
             )
         report = await self._run_llm(context, history=history)
         proposal_id = self._store.save_proposal(
@@ -632,6 +653,7 @@ class CoachEngine:
             base.upcoming_events,
             base.sport_settings,
             goal_races=base.goal_races,
+            block_plan=base.block_plan,
             training_rollup=base.training_rollup,
             recent_events=base.recent_events,
             current_proposal=proposal,
@@ -697,6 +719,9 @@ class CoachEngine:
 
     def discard_pending_proposals(self) -> list[int]:
         return self._store.delete_pending_proposals()
+
+    def discard_unreadable_proposals(self) -> list[int]:
+        return self._store.delete_unreadable_proposals()
 
     def expire_memory(self, *, today: date | None = None) -> list[tuple[int, str]]:
         return self._store.expire_facts(today=today or self.today())

@@ -4,7 +4,7 @@ from itertools import pairwise
 from typing import Any
 
 from open_endurance_coach.clients.protocols import IntervalsReadClient
-from open_endurance_coach.schemas.context import GoalRace, MacroPhase, SportWeek, TrainingWeek
+from open_endurance_coach.schemas.context import GoalRace, SportWeek, TrainingWeek
 from open_endurance_coach.schemas.decisions import RACE_CATEGORIES
 from open_endurance_coach.schemas.intervals import Event
 
@@ -12,8 +12,7 @@ ACTIVITY_LOOKBACK_DAYS = 14
 WELLNESS_LOOKBACK_DAYS = 7
 RECENT_EVENT_DAYS = 14
 UPCOMING_DAYS = 14
-RACE_HORIZON_DAYS = 120
-ROLLUP_LOOKBACK_DAYS = 90
+PLAN_HORIZON_DAYS = 224
 DEFAULT_MAX_TOKENS = 16384
 logger = logging.getLogger(__name__)
 RACE_CATEGORY_FILTER = ",".join(RACE_CATEGORIES)
@@ -68,18 +67,6 @@ def training_rollup(summary_rows: list[dict[str, Any]], *, today: date) -> list[
     return weeks
 
 
-def macro_phase(days_to_race: int) -> MacroPhase:
-    if days_to_race <= 0:
-        return "Race week"
-    if days_to_race <= 7:
-        return "Taper"
-    if days_to_race <= 28:
-        return "Peak"
-    if days_to_race <= 84:
-        return "Build"
-    return "Base"
-
-
 def goal_race(event: Event, *, today: date) -> GoalRace | None:
     if event.category not in RACE_CATEGORIES:
         return None
@@ -95,7 +82,6 @@ def goal_race(event: Event, *, today: date) -> GoalRace | None:
         type=event.type,
         days_to_race=days,
         weeks_to_race=(days + 6) // 7,
-        phase=macro_phase(days),
         moving_time=event.moving_time,
         distance=event.distance,
         description=event.description,

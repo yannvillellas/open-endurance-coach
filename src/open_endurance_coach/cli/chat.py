@@ -426,6 +426,8 @@ async def run_chat(engine: CoachEngine, settings: Settings) -> None:
         )
     for proposal_id in engine.discard_pending_proposals():
         console.print(f"[warn]Proposal #{proposal_id} was never answered; discarded.[/warn]")
+    for proposal_id in engine.discard_unreadable_proposals():
+        console.print(f"[warn]Proposal #{proposal_id} had an unreadable context; discarded.[/warn]")
     for stale_id, reason in engine.discard_stale_proposals():
         console.print(
             f"[warn]Proposal #{stale_id} was approved with {escape(str(reason))}; discarded.[/warn]"

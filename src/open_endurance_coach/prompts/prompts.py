@@ -71,9 +71,9 @@ MEMORY_EXAMPLE: dict[str, Any] = {
 
 RACE_EXAMPLE: dict[str, Any] = {
     "intent": "plan",
-    "summary": "<macro outline for the race countdown: Base, Build, Peak, Taper>",
+    "summary": "<how the coming block weeks map to the race, citing block_plan weeks>",
     "findings": [
-        "<topic label>: <what the weekly rollup and readiness say about the current phase>"
+        "<topic label>: <what the weekly rollup and the block_plan rows say about the current week>"
     ],
     "questions": ["<optional question for the athlete>"],
     "needs_input": [],
@@ -122,10 +122,14 @@ PROPOSAL_POLICY = (
     "data, the example workout text is the only thing to imitate, never copy the "
     "example dates, and any start_date_local must be on or after today from the "
     "upcoming schedule, since a mutation that sets a date before today is rejected.\n"
-    "When goal_races is present, plan backwards from the nearest race: state the macro "
-    "phases (Base, Build, Peak, Taper) with weekly load targets in the summary, then "
-    "propose concrete workouts for the next 7-14 days only - do not schedule sessions "
-    "beyond the visible calendar window.\n"
+    "Plan backwards from the nearest race. block_plan is the intended periodization: "
+    "tie each session to its block week and follow its role and target band. Propose "
+    "workouts for the next 7-14 days only, inside the visible calendar window. Never "
+    "restate macro phases from memory.\n"
+    "Rows statused rest, repeat, step_back or omitted: follow their role.\n"
+    "An active injury or health fact is a hard constraint on the sessions: adapt the "
+    "modality, never load the injured area, stay under the pain threshold, and accept "
+    "missing the block band rather than violating the constraint.\n"
     "A race description is the athlete's plan (target, elevation, splits, fuelling): "
     "read it. If description_truncated is true the tail was cut for the context budget "
     "- treat the plan as partial.\n"
@@ -296,8 +300,11 @@ def _system_message(settings: Settings) -> str:
 def _user_message(context: CoachContext) -> str:
     data = context.sections()
     focus = str(data.pop("focus", ""))
+    block_plan = str(data.pop("block_plan", ""))
     payload = _safe(json.dumps(_finite(data), indent=2, ensure_ascii=False))
     parts = [f"<athlete_data>\n{payload}\n</athlete_data>\n"]
+    if block_plan:
+        parts.append(f"<block_plan>\n{_safe(block_plan)}\n</block_plan>\n")
     parts.append(f"<athlete_message>\n{_safe(focus)}\n</athlete_message>\n")
     parts.append("Respond per the contract.\n")
     return "".join(parts)

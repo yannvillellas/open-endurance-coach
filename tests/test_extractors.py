@@ -11,7 +11,7 @@ from open_endurance_coach.extractors.context import (
     _warn_on_split_coverage,
     gather_context,
 )
-from open_endurance_coach.extractors.standard import macro_phase, training_rollup
+from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS, training_rollup
 from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import (
     Activity,
@@ -54,7 +54,11 @@ async def test_standard_extraction_uses_expected_windows(settings: Settings) -> 
     assert calls == [
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
-        ("athlete_summary", "2023-11-03", "2024-02-01"),
+        (
+            "athlete_summary",
+            (TODAY - timedelta(days=PLAN_HORIZON_DAYS)).isoformat(),
+            "2024-02-01",
+        ),
         ("sport_settings",),
     ]
 
@@ -357,32 +361,13 @@ async def test_standard_extraction_builds_goal_races(settings: Settings) -> None
     assert nearest.type == "Ride"
     assert nearest.days_to_race == 7
     assert nearest.weeks_to_race == 1
-    assert nearest.phase == "Taper"
     assert nearest.description == "Circuit race, 1.2 km lap, target 60 min."
     assert furthest.days_to_race == 29
     assert furthest.weeks_to_race == 5
-    assert furthest.phase == "Build"
     assert furthest.distance == 21097.5
     assert furthest.moving_time == 5400
     assert furthest.icu_training_load == 150
     assert furthest.description == "Flat and fast: target 1:30, hold Z3."
-
-
-@pytest.mark.parametrize(
-    ("days", "expected"),
-    [
-        (0, "Race week"),
-        (7, "Taper"),
-        (8, "Peak"),
-        (28, "Peak"),
-        (29, "Build"),
-        (84, "Build"),
-        (85, "Base"),
-        (120, "Base"),
-    ],
-)
-def test_macro_phase_maps_days_to_race(days: int, expected: str) -> None:
-    assert macro_phase(days) == expected
 
 
 def test_training_rollup_is_ascending_with_partial_current_week() -> None:
@@ -506,7 +491,6 @@ def test_budget_keeps_goal_races_while_other_sections_are_trimmed() -> None:
         category="RACE_B",
         days_to_race=19,
         weeks_to_race=3,
-        phase="Peak",
     )
     activities = [Activity.model_validate(make_activity("fx-old", 1))]
     wellness = [Wellness.model_validate(make_wellness(28))]
@@ -536,7 +520,6 @@ def _goal_race(event_id: int, day: date, *, description: str | None) -> GoalRace
         category="RACE_B",
         days_to_race=(day - TODAY).days,
         weeks_to_race=1,
-        phase="Build",
         description=description,
     )
 

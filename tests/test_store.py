@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -496,3 +497,113 @@ def test_vacuum_best_effort_swallows_errors() -> None:
             raise sqlite3.Error("disk full")
 
     store_db._vacuum_best_effort(Boom())  # type: ignore[arg-type]
+
+
+def test_legacy_contexts_with_race_phase_are_migrated(tmp_path: Path) -> None:
+    path = tmp_path / "coach.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        "CREATE TABLE seen_activities (activity_id TEXT PRIMARY KEY, seen_at TEXT NOT NULL);"
+        "CREATE TABLE proposals ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, status TEXT NOT NULL,"
+        " focus TEXT NOT NULL, user_feedback TEXT, context_json TEXT NOT NULL,"
+        " report_json TEXT NOT NULL, approved_json TEXT, decided_at TEXT);"
+        "CREATE TABLE messages ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, role TEXT NOT NULL,"
+        " content TEXT NOT NULL, report_json TEXT);"
+        "CREATE TABLE coach_memory ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL);"
+    )
+    legacy = json.dumps(
+        {
+            "focus": "status check",
+            "goal_races": [
+                {
+                    "event_id": 1,
+                    "name": "Spring Half",
+                    "date": "2024-03-01",
+                    "category": "RACE_A",
+                    "days_to_race": 29,
+                    "weeks_to_race": 5,
+                    "phase": "Build",
+                }
+            ],
+        }
+    )
+    connection.execute(
+        "INSERT INTO proposals (created_at, status, focus, context_json, report_json)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            "2024-02-01T10:00:00+00:00",
+            ProposalStatus.UNAPPLIED.value,
+            "status check",
+            legacy,
+            json.dumps({"summary": "ok"}),
+        ),
+    )
+    connection.execute(
+        "INSERT INTO proposals (created_at, status, focus, context_json, report_json)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            "2024-02-01T10:00:00+00:00",
+            ProposalStatus.PENDING.value,
+            "corrupt",
+            "[]",
+            json.dumps({"summary": "ok"}),
+        ),
+    )
+    connection.execute("PRAGMA user_version = 3")
+    connection.commit()
+    connection.close()
+
+    store = CoachStore(path)
+
+    assert store.schema_version == 4
+    proposals = store.list_unapplied_proposals()
+    assert [race.name for race in proposals[0].context.goal_races] == ["Spring Half"]
+    with sqlite3.connect(path) as raw:
+        stored = raw.execute("SELECT context_json FROM proposals").fetchone()[0]
+    assert '"phase"' not in stored
+
+
+def test_unreadable_proposals_are_discarded(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    good = store.save_proposal(focus="status check", report=make_report(), context=make_context())
+    with sqlite3.connect(tmp_path / "coach.db") as raw:
+        raw.execute(
+            "INSERT INTO proposals (created_at, status, focus, context_json, report_json)"
+            " VALUES ('2024-02-01T10:00:00+00:00', 'unapplied', 'corrupt', '[]', ?)",
+            (json.dumps({"summary": "ok"}),),
+        )
+        corrupt = int(raw.execute("SELECT max(id) FROM proposals").fetchone()[0])
+
+    discarded = store.delete_unreadable_proposals()
+
+    assert discarded == [corrupt]
+    assert [proposal.id for proposal in store.list_proposals()] == [good]
+    assert store.delete_unreadable_proposals() == []
+
+
+def test_proposals_with_broken_reports_are_discarded(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    good = store.save_proposal(focus="status check", report=make_report(), context=make_context())
+    context_json = json.dumps(make_context().model_dump(mode="json"))
+    with sqlite3.connect(tmp_path / "coach.db") as raw:
+        raw.execute(
+            "INSERT INTO proposals (created_at, status, focus, context_json, report_json)"
+            " VALUES ('2024-02-01T10:00:00+00:00', 'pending', 'bad report', ?, 'not json')",
+            (context_json,),
+        )
+        bad_report = int(raw.execute("SELECT max(id) FROM proposals").fetchone()[0])
+        raw.execute(
+            "INSERT INTO proposals"
+            " (created_at, status, focus, context_json, report_json, approved_json)"
+            " VALUES ('2024-02-01T10:00:00+00:00', 'unapplied', 'bad approved', ?, ?, 'not json')",
+            (context_json, json.dumps({"summary": "ok"})),
+        )
+        bad_approved = int(raw.execute("SELECT max(id) FROM proposals").fetchone()[0])
+
+    discarded = store.delete_unreadable_proposals()
+
+    assert discarded == [bad_report, bad_approved]
+    assert [proposal.id for proposal in store.list_proposals()] == [good]

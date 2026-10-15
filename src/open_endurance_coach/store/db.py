@@ -5,6 +5,8 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from open_endurance_coach.schemas.context import CoachContext
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.memory import HISTORY_CATEGORIES
@@ -45,9 +47,42 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
-MIGRATIONS: dict[int, str] = {
+
+def _migration_4_drop_retired_race_phase(connection: sqlite3.Connection) -> None:
+    """Rewrite stored contexts that still carry the retired goal_races[].phase.
+
+    Contexts saved before the periodization change fail validation on read once
+    GoalRace no longer accepts phase; stripping the field keeps approved-but-unapplied
+    proposals retryable instead of crashing the chat at startup.
+    """
+    rows = connection.execute("SELECT id, context_json FROM proposals").fetchall()
+    updates: list[tuple[str, int]] = []
+    for row in rows:
+        try:
+            context = json.loads(row["context_json"])
+        except ValueError:
+            continue
+        if not isinstance(context, dict):
+            continue
+        races = context.get("goal_races")
+        if not isinstance(races, list):
+            continue
+        touched = False
+        for race in races:
+            if isinstance(race, dict) and "phase" in race:
+                race.pop("phase")
+                touched = True
+        if touched:
+            updates.append((json.dumps(context, ensure_ascii=False), int(row["id"])))
+    for context_json, proposal_id in updates:
+        connection.execute(
+            "UPDATE proposals SET context_json = ? WHERE id = ?", (context_json, proposal_id)
+        )
+
+
+MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection], None]] = {
     1: _BASE_SCHEMA
     + """
 DELETE FROM proposals WHERE status = 'rejected';
@@ -78,6 +113,7 @@ CREATE TABLE IF NOT EXISTS coach_memory (
 CREATE INDEX IF NOT EXISTS idx_coach_memory_status ON coach_memory(status);
 CREATE INDEX IF NOT EXISTS idx_coach_memory_expires_on ON coach_memory(expires_on);
 """,
+    4: _migration_4_drop_retired_race_phase,
 }
 
 
@@ -125,10 +161,17 @@ class CoachStore:
         if missing:
             raise RuntimeError(f"missing migrations for schema version(s): {missing}")
         for target in range(version + 1, SCHEMA_VERSION + 1):
-            script = f"BEGIN;\n{MIGRATIONS[target]}\nPRAGMA user_version = {target};\nCOMMIT;"
+            migration = MIGRATIONS[target]
             try:
-                self._connection.executescript(script)
-            except sqlite3.Error:
+                if callable(migration):
+                    self._connection.execute("BEGIN")
+                    migration(self._connection)
+                    self._connection.execute(f"PRAGMA user_version = {target}")
+                    self._connection.commit()
+                else:
+                    script = f"BEGIN;\n{migration}\nPRAGMA user_version = {target};\nCOMMIT;"
+                    self._connection.executescript(script)
+            except Exception:
                 self._connection.rollback()
                 raise
 
@@ -148,6 +191,28 @@ class CoachStore:
             )
             self._connection.commit()
         return ids
+
+    def delete_unreadable_proposals(self) -> list[int]:
+        """Drop proposals whose stored context no longer validates.
+
+        A row saved under an older schema can fail re-validation after the schema
+        evolves; it can neither be replayed nor re-displayed, so it is discarded
+        at startup instead of crashing every read.
+        """
+        rows = self._connection.execute("SELECT * FROM proposals ORDER BY id").fetchall()
+        unreadable: list[int] = []
+        for row in rows:
+            try:
+                self._proposal_from_row(row)
+            except (ValidationError, ValueError):
+                unreadable.append(int(row["id"]))
+        if unreadable:
+            placeholders = ",".join("?" * len(unreadable))
+            self._connection.execute(
+                f"DELETE FROM proposals WHERE id IN ({placeholders})", unreadable
+            )
+            self._connection.commit()
+        return unreadable
 
     def _restrict_permissions(self) -> None:
         if str(self._path) == ":memory:":

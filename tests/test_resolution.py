@@ -3,10 +3,15 @@ from datetime import date, timedelta
 
 import pytest
 
-from open_endurance_coach.clients.llm import LlmClient
+from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
-from open_endurance_coach.extractors.resolution import resolve_context_plan
+from open_endurance_coach.extractors.resolution import (
+    _resolution_context,
+    _resolution_system,
+    resolve_context_plan,
+)
+from open_endurance_coach.tokens import estimate_text_tokens
 
 from .fakes import FakeLlmProvider, RecordingSleep
 
@@ -109,6 +114,102 @@ async def test_an_invalid_window_falls_back_to_standard(settings: Settings) -> N
     assert "invalid" in resolution.notices[0]
 
 
+async def test_an_invalid_window_still_announces_the_declared_state(settings: Settings) -> None:
+    client = make_client(
+        settings,
+        [
+            {
+                "window": {"start": "2024-01-20", "end": "2024-01-10"},
+                "illness": True,
+            }
+        ],
+    )
+
+    resolution = await resolve_context_plan(
+        client, "broken window", today=TODAY, facts=["[health_medical] Flu"]
+    )
+
+    assert resolution.plan.illness is True
+    assert resolution.plan.elite is False
+    assert resolution.notices[0].startswith("Fetch: standard windows")
+    assert "state: illness" in resolution.notices[0]
+    assert "invalid" in resolution.notices[0]
+
+
+async def test_a_long_history_is_trimmed_to_the_resolution_budget(settings: Settings) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        turn
+        for index in range(20)
+        for turn in (
+            LlmMessage(role="user", content=f"question {index} " + "x" * 800),
+            LlmMessage(role="assistant", content=f"answer {index} " + "y" * 800),
+        )
+    ]
+
+    resolution = await resolve_context_plan(
+        client, "short question", today=TODAY, history=history, max_tokens=600
+    )
+
+    assert resolution.plan == ContextPlan.standard(TODAY)
+    request = provider.resolution_calls[0]
+    total = sum(estimate_text_tokens(message.content) for message in request["messages"])
+    assert total <= 600
+    assert "question 19 " in request["messages"][1].content
+    assert "question 0 " not in request["messages"][1].content
+
+
+async def test_without_a_budget_the_resolution_keeps_the_whole_history(
+    settings: Settings,
+) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        LlmMessage(role="user", content="question 0 " + "x" * 800),
+        LlmMessage(role="assistant", content="answer 0 " + "y" * 800),
+    ]
+
+    await resolve_context_plan(client, "short question", today=TODAY, history=history)
+
+    assert "question 0 " in provider.resolution_calls[0]["messages"][1].content
+
+
+async def test_a_thin_budget_drops_the_history_instead_of_overshooting(
+    settings: Settings,
+) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    fixed = estimate_text_tokens(_resolution_system(TODAY)) + estimate_text_tokens(
+        _resolution_context((), "short question")
+    )
+    history = [
+        LlmMessage(role="user", content="q"),
+        LlmMessage(role="assistant", content="a"),
+    ]
+
+    await resolve_context_plan(
+        client, "short question", today=TODAY, history=history, max_tokens=fixed + 5
+    )
+
+    request = provider.resolution_calls[0]
+    total = sum(estimate_text_tokens(message.content) for message in request["messages"])
+    assert total <= fixed + 5
+    assert "Conversation so far:" not in request["messages"][1].content
+
+
 async def test_a_failed_resolution_falls_back_to_standard(settings: Settings) -> None:
     client = make_client(settings, ["not json", "still not json"])
 
@@ -168,3 +269,67 @@ async def test_the_resolution_request_carries_the_focus_and_the_detail_anchor(
     assert request["json_mode"] is True
     assert "the splits of my ride on 2024-01-30" in request["messages"][1].content
     assert "the window end must be that activity's date" in request["messages"][0].content
+
+
+async def test_declared_facts_set_the_athlete_state(settings: Settings) -> None:
+    provider = FakeLlmProvider(
+        resolutions=[json.dumps({"window": None, "illness": True, "elite": True})]
+    )
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+
+    resolution = await resolve_context_plan(
+        client,
+        "how should I train this week",
+        today=TODAY,
+        facts=["[health_medical] Flu since Monday", "[athlete_profile] Professional cyclist"],
+    )
+
+    assert resolution.plan.illness is True
+    assert resolution.plan.elite is True
+    assert resolution.notices == ("Fetch: standard windows · state: illness, elite",)
+    request = provider.resolution_calls[0]
+    assert "Flu since Monday" in request["messages"][1].content
+    assert "Professional cyclist" in request["messages"][1].content
+    assert "illness: true only when an active athlete fact" in request["messages"][0].content
+
+
+async def test_no_declared_facts_leave_the_state_off(settings: Settings) -> None:
+    client = make_client(settings, [{"window": None}])
+
+    resolution = await resolve_context_plan(client, "the question", today=TODAY)
+
+    assert resolution.plan.illness is False
+    assert resolution.plan.elite is False
+    assert "state:" not in resolution.notices[0]
+
+
+async def test_a_clarification_sees_the_conversation(settings: Settings) -> None:
+    provider = FakeLlmProvider(
+        resolutions=[json.dumps({"window": {"start": "2023-12-01", "end": "2023-12-20"}})]
+    )
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        LlmMessage(role="user", content="what was my average hr 1-20 dec 2023"),
+        LlmMessage(role="assistant", content="Your average was 159 bpm."),
+    ]
+
+    resolution = await resolve_context_plan(
+        client, "sorry I meant resting hr", today=TODAY, history=history
+    )
+
+    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    request = provider.resolution_calls[0]
+    assert "Conversation so far:" in request["messages"][1].content
+    assert "what was my average hr 1-20 dec 2023" in request["messages"][1].content
+    assert (
+        "A follow-up or clarification keeps the period of the question it refers to."
+        in request["messages"][0].content
+    )

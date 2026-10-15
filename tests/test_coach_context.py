@@ -229,6 +229,7 @@ def test_section_tokens_reports_per_section() -> None:
         "recent_events",
         "upcoming_events",
         "goal_races",
+        "block_plan",
         "training_rollup",
         "sport_settings",
         "user_feedback",
@@ -280,7 +281,6 @@ def test_goal_races_serialize_into_sections() -> None:
                     "type": "Run",
                     "days_to_race": 29,
                     "weeks_to_race": 5,
-                    "phase": "Build",
                     "distance": 21097.5,
                 }
             ],
@@ -295,7 +295,6 @@ def test_goal_races_serialize_into_sections() -> None:
             "type": "Run",
             "days_to_race": 29,
             "weeks_to_race": 5,
-            "phase": "Build",
             "distance": 21097.5,
         }
     ]
@@ -311,7 +310,6 @@ def test_goal_race_truncation_flag_is_omitted_unless_set() -> None:
         "type": "Run",
         "days_to_race": 29,
         "weeks_to_race": 5,
-        "phase": "Build",
         "description": "target 1:30",
     }
     intact = CoachContext.model_validate({"focus": "x", "goal_races": [base]})
@@ -330,7 +328,6 @@ def test_goal_race_rejects_unknown_category_and_extras() -> None:
         "category": "RACE_A",
         "days_to_race": 29,
         "weeks_to_race": 5,
-        "phase": "Build",
     }
     with pytest.raises(ValidationError):
         CoachContext.model_validate({"focus": "x", "goal_races": [{**base, "category": "WORKOUT"}]})

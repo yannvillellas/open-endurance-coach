@@ -14,7 +14,18 @@ from open_endurance_coach.schemas.intervals import (
 from open_endurance_coach.schemas.memory import MemoryIndexEntry, MemoryItem
 from open_endurance_coach.tokens import estimate_payload_tokens, estimate_text_tokens
 
-MacroPhase = Literal["Base", "Build", "Peak", "Taper", "Race week"]
+BlockPhase = Literal["Prep", "Base", "Build", "Peak", "Race"]
+BlockWeekStatus = Literal[
+    "done",
+    "under",
+    "over",
+    "current",
+    "upcoming",
+    "rest",
+    "repeat",
+    "step_back",
+    "omitted",
+]
 
 
 def _tokens_of(payload: Any) -> int:
@@ -31,6 +42,7 @@ _SECTION_KEYS = (
     "recent_events",
     "upcoming_events",
     "goal_races",
+    "block_plan",
     "training_rollup",
     "sport_settings",
     "activity_splits",
@@ -79,6 +91,8 @@ def _section_payload(key: str, value: Any) -> Any:
     """The rendered value of one section, shared by ``sections`` and budgeting."""
     if key in ("recent_events", "upcoming_events"):
         return [_event_payload(event) for event in value]
+    if key == "block_plan":
+        return block_plan_table(value)
     if key in _MODEL_LIST_KEYS:
         return [item.model_dump(mode="json", exclude_none=True) for item in value]
     if key in ("activity_detail", "current_proposal"):
@@ -120,12 +134,51 @@ class GoalRace(BaseModel):
     type: str | None = None
     days_to_race: int = Field(ge=0)
     weeks_to_race: int = Field(ge=0)
-    phase: MacroPhase
     moving_time: int | None = None
     distance: float | None = None
     description: str | None = None
     description_truncated: bool | None = None
     icu_training_load: float | None = None
+
+
+class BlockWeek(BaseModel):
+    """One week of the race block: phase, role, target load band and status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    week_start: date
+    phase: BlockPhase
+    week_in_phase: int = Field(ge=1)
+    role: str = Field(min_length=1)
+    target_tss_low: float | None = None
+    target_tss_high: float | None = None
+    status: BlockWeekStatus
+
+
+def _table_cell(text: str) -> str:
+    """One single-line cell: untrusted role text can neither break nor forge rows."""
+    return " ".join(text.split()).replace("|", "\\|")
+
+
+def block_plan_table(rows: list[BlockWeek]) -> str:
+    """The block plan as a compact Markdown table, one row per week."""
+    if not rows:
+        return ""
+    lines = [
+        "| Week | Phase | Role | Target | Status |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        phase = row.phase if row.phase == "Race" else f"{row.phase} {row.week_in_phase}"
+        if row.target_tss_low is None or row.target_tss_high is None:
+            target = "—"
+        else:
+            target = f"{row.target_tss_low:.0f}-{row.target_tss_high:.0f}"
+        lines.append(
+            f"| {row.week_start.isoformat()} | {phase} | {_table_cell(row.role)}"
+            f" | {target} | {row.status} |"
+        )
+    return "\n".join(lines)
 
 
 class CoachContext(BaseModel):
@@ -141,6 +194,7 @@ class CoachContext(BaseModel):
     recent_events: list[Event] = Field(default_factory=list)
     upcoming_events: list[Event] = Field(default_factory=list)
     goal_races: list[GoalRace] = Field(default_factory=list)
+    block_plan: list[BlockWeek] = Field(default_factory=list)
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
@@ -157,9 +211,11 @@ class CoachContext(BaseModel):
             "recent_events": self.recent_events,
             "upcoming_events": self.upcoming_events,
             "goal_races": self.goal_races,
-            "training_rollup": self.training_rollup,
-            "sport_settings": self.sport_settings,
         }
+        if self.block_plan:
+            raw["block_plan"] = self.block_plan
+        raw["training_rollup"] = self.training_rollup
+        raw["sport_settings"] = self.sport_settings
         if self.activity_splits:
             raw["activity_splits"] = self.activity_splits
         if self.today:

@@ -11,6 +11,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings, effective_input_budget
 from open_endurance_coach.engine.coach import (
     MAX_PLANNING_DAYS,
+    MEMORY_MAX_FACTS,
     PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
@@ -29,7 +30,7 @@ from open_endurance_coach.prompts.prompts import (
     estimate_user_message_tokens,
     system_prompt,
 )
-from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
+from open_endurance_coach.schemas.context import BlockWeek, CoachContext, TrainingWeek
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
@@ -317,6 +318,50 @@ async def test_analyze_falls_back_to_standard_windows_when_resolution_fails(
 
     assert ("activities", "2024-01-18", "2024-02-02") in client.calls
     assert any("resolution failed" in notice for notice in notices)
+
+
+async def test_analyze_passes_declared_facts_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    store.remember_fact(MemoryCategory.HEALTH_MEDICAL, MemoryOrigin.DECLARED, "Flu since Monday")
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider, client=make_intervals_client())
+
+    await engine.analyze("status check", today=TODAY)
+
+    request = provider.resolution_calls[0]
+    assert "[health_medical] Flu since Monday" in request["messages"][1].content
+
+
+async def test_analyze_caps_the_facts_sent_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    for index in range(MEMORY_MAX_FACTS + 5):
+        store.remember_fact(
+            MemoryCategory.OBSERVED_PATTERNS, MemoryOrigin.DECLARED, f"fact {index}"
+        )
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider, client=make_intervals_client())
+
+    await engine.analyze("status check", today=TODAY)
+
+    request = provider.resolution_calls[0]
+    assert request["messages"][1].content.count("- [observed_patterns]") == MEMORY_MAX_FACTS
+
+
+async def test_analyze_passes_the_history_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, CoachStore(tmp_path / "coach.db"), provider)
+    history = [LlmMessage(role="user", content="what was my average hr 1-20 dec 2025")]
+
+    await engine.analyze("sorry I meant resting hr", today=TODAY, history=history)
+
+    request = provider.resolution_calls[0]
+    assert "what was my average hr 1-20 dec 2025" in request["messages"][1].content
 
 
 async def test_analyze_injects_user_feedback(settings: Settings, tmp_path: Path) -> None:
@@ -1695,3 +1740,50 @@ async def test_wipe_local_state_clears_everything(settings: Settings, tmp_path: 
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.unseen_activity_ids(["fx-a"]) == {"fx-a"}
+
+
+async def test_submit_feedback_preserves_the_block_plan(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    rows = [
+        BlockWeek(
+            week_start=date(2024, 2, 5),
+            phase="Base",
+            week_in_phase=5,
+            role="Base: aerobic volume, Z2; one long session.",
+            target_tss_low=380.0,
+            target_tss_high=400.0,
+            status="current",
+        )
+    ]
+    base = CoachContext(focus="f", block_plan=rows)
+    proposal_id = store.save_proposal(focus="f", report=DecisionReport(summary="ok"), context=base)
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+
+    outcome = await engine.submit_feedback(proposal_id, "make it easier")
+
+    assert outcome.proposal.context.block_plan == rows
+
+
+async def test_the_block_plan_reaches_the_model_in_the_prompt(
+    settings: Settings, tmp_path: Path
+) -> None:
+    intervals = make_intervals_client(
+        events=[
+            {
+                "id": 7,
+                "name": "Summer A",
+                "start_date_local": "2024-06-17T00:00:00",
+                "category": "RACE_A",
+            }
+        ]
+    )
+    provider = FakeLlmProvider([completion(report_json())])
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, provider, client=intervals)
+
+    await engine.analyze("plan my race", today=date(2024, 2, 5))
+
+    user = provider.calls[0]["messages"][-1].content
+    assert "<block_plan>\n| Week | Phase | Role | Target | Status |" in user
+    assert "| 2024-06-17 | Race |" in user

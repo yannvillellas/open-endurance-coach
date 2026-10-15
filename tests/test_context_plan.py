@@ -1,14 +1,15 @@
-from datetime import date
+from dataclasses import replace
+from datetime import date, timedelta
 
 import pytest
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
+from open_endurance_coach.extractors import context as context_module
 from open_endurance_coach.extractors.context import ContextPlan, DateRange, gather_context
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
-    RACE_HORIZON_DAYS,
+    PLAN_HORIZON_DAYS,
     RECENT_EVENT_DAYS,
-    ROLLUP_LOOKBACK_DAYS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
 )
@@ -28,8 +29,8 @@ def test_standard_plan_windows() -> None:
     assert (TODAY - plan.events.start).days == RECENT_EVENT_DAYS
     assert (plan.events.end - TODAY).days == UPCOMING_DAYS
     assert plan.races.start == TODAY
-    assert (plan.races.end - TODAY).days == RACE_HORIZON_DAYS
-    assert (TODAY - plan.rollup.start).days == ROLLUP_LOOKBACK_DAYS
+    assert (plan.races.end - TODAY).days == PLAN_HORIZON_DAYS
+    assert (TODAY - plan.rollup.start).days == PLAN_HORIZON_DAYS
     assert plan.rollup.end == TODAY
     assert plan.activity_types == frozenset()
     assert plan.metric_focus is None
@@ -75,8 +76,17 @@ def test_with_windows_replaces_only_the_question_windows() -> None:
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
         ("events", "2024-01-18", "2024-02-15", None),
-        ("athlete_summary", "2023-11-03", "2024-02-01"),
-        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
+        (
+            "athlete_summary",
+            (TODAY - timedelta(days=PLAN_HORIZON_DAYS)).isoformat(),
+            "2024-02-01",
+        ),
+        (
+            "events",
+            "2024-02-01",
+            (TODAY + timedelta(days=PLAN_HORIZON_DAYS)).isoformat(),
+            "RACE_A,RACE_B,RACE_C",
+        ),
         ("sport_settings",),
     ],
 )
@@ -120,6 +130,27 @@ async def test_a_detail_plan_pins_the_referenced_activity() -> None:
     assert context.activity_detail is not None
     assert context.activity_detail.id == "fx-old"
     assert any(call[0] == "streams" and call[1] == "fx-old" for call in client.calls)
+
+
+async def test_the_plan_state_reaches_the_block_derivation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, bool] = {}
+    real = context_module.derive_block_plan
+
+    def capture(
+        races: object, weeks: object, *, today: date, illness: bool = False, elite: bool = False
+    ) -> object:
+        captured["illness"] = illness
+        captured["elite"] = elite
+        return real(races, weeks, today=today, illness=illness, elite=elite)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(context_module, "derive_block_plan", capture)
+    plan = replace(ContextPlan.standard(TODAY), illness=True, elite=True)
+
+    await gather_context(make_intervals_client(), plan, "focus", today=TODAY)
+
+    assert captured == {"illness": True, "elite": True}
 
 
 async def test_a_detail_plan_includes_the_splits() -> None:
