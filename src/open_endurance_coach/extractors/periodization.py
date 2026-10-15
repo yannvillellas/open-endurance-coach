@@ -188,10 +188,9 @@ def _band(ctl: float | None, ramp: tuple[float, float]) -> tuple[float, float] |
     if ctl is None:
         return None
     maintenance = 7.0 * ctl
-    return (
-        _rounded(maintenance + WEEKLY_TSS_PER_CTL * ramp[0]),
-        _rounded(maintenance + WEEKLY_TSS_PER_CTL * ramp[1]),
-    )
+    low = max(0.0, _rounded(maintenance + WEEKLY_TSS_PER_CTL * ramp[0]))
+    high = max(low, _rounded(maintenance + WEEKLY_TSS_PER_CTL * ramp[1]))
+    return (low, high)
 
 
 def _race_week_band(ctl: float | None) -> tuple[float, float] | None:

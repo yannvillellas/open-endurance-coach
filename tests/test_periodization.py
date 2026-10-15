@@ -352,6 +352,20 @@ def test_the_crash_week_needs_a_declared_elite_athlete() -> None:
     assert declared_elite[date(2024, 3, 18)].target_tss_high == 685.0  # one crash week only
 
 
+def test_bands_never_go_negative_or_invert() -> None:
+    rows = by_start(
+        derive_block_plan([make_race(RACE_DAY)], history_until(TODAY, fitness=10.0), today=TODAY)
+    )
+
+    peak_two = rows[date(2024, 6, 10)]
+    assert (peak_two.target_tss_low, peak_two.target_tss_high) == (0.0, 0.0)
+    for row in rows.values():
+        if row.target_tss_low is None or row.target_tss_high is None:
+            continue
+        assert row.target_tss_low >= 0.0
+        assert row.target_tss_low <= row.target_tss_high
+
+
 def test_mesocycles_end_in_recovery_tails() -> None:
     rows = by_start(derive_block_plan([make_race(RACE_DAY)], history_until(TODAY), today=TODAY))
 
