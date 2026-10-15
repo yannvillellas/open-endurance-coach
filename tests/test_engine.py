@@ -11,6 +11,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.config import Settings, effective_input_budget
 from open_endurance_coach.engine.coach import (
     MAX_PLANNING_DAYS,
+    MEMORY_MAX_FACTS,
     PROMPT_OVERHEAD_TOKENS,
     CoachEngine,
     PlaceholderMutationError,
@@ -331,6 +332,23 @@ async def test_analyze_passes_declared_facts_to_the_resolution(
 
     request = provider.resolution_calls[0]
     assert "[health_medical] Flu since Monday" in request["messages"][1].content
+
+
+async def test_analyze_caps_the_facts_sent_to_the_resolution(
+    settings: Settings, tmp_path: Path
+) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    for index in range(MEMORY_MAX_FACTS + 5):
+        store.remember_fact(
+            MemoryCategory.OBSERVED_PATTERNS, MemoryOrigin.DECLARED, f"fact {index}"
+        )
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider, client=make_intervals_client())
+
+    await engine.analyze("status check", today=TODAY)
+
+    request = provider.resolution_calls[0]
+    assert request["messages"][1].content.count("- [observed_patterns]") == MEMORY_MAX_FACTS
 
 
 async def test_analyze_passes_the_history_to_the_resolution(

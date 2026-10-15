@@ -9,8 +9,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from open_endurance_coach.chat.history import trim_history
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
+from open_endurance_coach.tokens import estimate_text_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -84,25 +86,38 @@ class PlanResolution:
     notices: tuple[str, ...]
 
 
+def _messages_tokens(messages: Sequence[LlmMessage]) -> int:
+    return sum(estimate_text_tokens(message.content) for message in messages)
+
+
 def _render_history(history: Sequence[LlmMessage]) -> str:
     return "\n".join(f"{message.role}: {message.content}" for message in history)
+
+
+def _resolution_system(today: date) -> str:
+    return f"{_RESOLUTION_PROMPT}\nToday is {today.isoformat()}."
+
+
+def _resolution_context(facts: Sequence[str], focus: str) -> str:
+    """The fixed part of the user message, without the conversation."""
+    parts: list[str] = []
+    if facts:
+        listing = "\n".join(f"- {fact}" for fact in facts)
+        parts.append(f"Active athlete facts:\n{listing}")
+    parts.append(focus)
+    return "\n\n".join(parts)
 
 
 def _resolution_messages(
     focus: str, today: date, facts: Sequence[str], history: Sequence[LlmMessage]
 ) -> list[LlmMessage]:
-    today_line = f"Today is {today.isoformat()}."
-    system = f"{_RESOLUTION_PROMPT}\n{today_line}"
     parts: list[str] = []
     transcript = _render_history(history) if history else ""
     if transcript:
         parts.append(f"Conversation so far:\n{transcript}")
-    if facts:
-        listing = "\n".join(f"- {fact}" for fact in facts)
-        parts.append(f"Active athlete facts:\n{listing}")
-    parts.append(focus)
+    parts.append(_resolution_context(facts, focus))
     return [
-        LlmMessage(role="system", content=system),
+        LlmMessage(role="system", content=_resolution_system(today)),
         LlmMessage(role="user", content="\n\n".join(parts)),
     ]
 
@@ -211,8 +226,28 @@ async def resolve_context_plan(
     facts: Sequence[str] = (),
     history: Sequence[LlmMessage] = (),
     max_attempts: int = 2,
+    max_tokens: int | None = None,
 ) -> PlanResolution:
+    """Resolve the window; with ``max_tokens`` the request is fitted to that budget.
+
+    The fixed parts of the prompt (system, facts, question) are subtracted and the
+    conversation is trimmed to the remainder with the same helper as the main call,
+    so this request can never exceed the caller's budget either.
+    """
     standard = ContextPlan.standard(today)
+    if max_tokens is not None:
+        fixed = estimate_text_tokens(_resolution_system(today)) + estimate_text_tokens(
+            _resolution_context(facts, focus)
+        )
+        history = trim_history(list(history), max(1, max_tokens - fixed))
+        # The rendered transcript adds a prefix per turn and separators on top of
+        # the message contents; the second trim also reserves that envelope.
+        envelope = (
+            _messages_tokens(_resolution_messages(focus, today, facts, history))
+            - fixed
+            - _messages_tokens(history)
+        )
+        history = trim_history(history, max(1, max_tokens - fixed - envelope))
     try:
         raw = await llm_client.complete_json(
             _resolution_messages(focus, today, facts, history),

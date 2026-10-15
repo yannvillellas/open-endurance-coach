@@ -7,6 +7,7 @@ from open_endurance_coach.clients.llm import LlmClient, LlmMessage
 from open_endurance_coach.config import Settings
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
 from open_endurance_coach.extractors.resolution import resolve_context_plan
+from open_endurance_coach.tokens import estimate_text_tokens
 
 from .fakes import FakeLlmProvider, RecordingSleep
 
@@ -129,6 +130,53 @@ async def test_an_invalid_window_still_announces_the_declared_state(settings: Se
     assert resolution.notices[0].startswith("Fetch: standard windows")
     assert "state: illness" in resolution.notices[0]
     assert "invalid" in resolution.notices[0]
+
+
+async def test_a_long_history_is_trimmed_to_the_resolution_budget(settings: Settings) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        turn
+        for index in range(20)
+        for turn in (
+            LlmMessage(role="user", content=f"question {index} " + "x" * 800),
+            LlmMessage(role="assistant", content=f"answer {index} " + "y" * 800),
+        )
+    ]
+
+    resolution = await resolve_context_plan(
+        client, "short question", today=TODAY, history=history, max_tokens=600
+    )
+
+    assert resolution.plan == ContextPlan.standard(TODAY)
+    request = provider.resolution_calls[0]
+    total = sum(estimate_text_tokens(message.content) for message in request["messages"])
+    assert total <= 600
+    assert "question 19 " in request["messages"][1].content
+    assert "question 0 " not in request["messages"][1].content
+
+
+async def test_without_a_budget_the_resolution_keeps_the_whole_history(
+    settings: Settings,
+) -> None:
+    provider = FakeLlmProvider(resolutions=[json.dumps({"window": None})])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    history = [
+        LlmMessage(role="user", content="question 0 " + "x" * 800),
+        LlmMessage(role="assistant", content="answer 0 " + "y" * 800),
+    ]
+
+    await resolve_context_plan(client, "short question", today=TODAY, history=history)
+
+    assert "question 0 " in provider.resolution_calls[0]["messages"][1].content
 
 
 async def test_a_failed_resolution_falls_back_to_standard(settings: Settings) -> None:

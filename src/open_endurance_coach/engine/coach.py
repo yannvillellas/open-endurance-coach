@@ -274,12 +274,15 @@ class CoachEngine:
         history: list[LlmMessage] | None = None,
     ) -> CoachContext:
         current = today or self.today()
-        facts = [
-            f"[{fact.category.value}] {fact.text}"
-            for fact in self._store.list_active_facts(today=current)
-        ]
+        ranked = _rank_memory_facts(self._store.list_active_facts(today=current), focus, current)
+        facts = [f"[{fact.category.value}] {fact.text}" for fact in ranked[:MEMORY_MAX_FACTS]]
         resolution = await resolve_context_plan(
-            self._llm_client, focus, today=current, facts=facts, history=history or ()
+            self._llm_client,
+            focus,
+            today=current,
+            facts=facts,
+            history=history or (),
+            max_tokens=self.input_room(),
         )
         if notices is not None:
             notices.extend(resolution.notices)
