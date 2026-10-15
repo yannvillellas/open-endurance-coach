@@ -632,6 +632,7 @@ class CoachEngine:
             base.upcoming_events,
             base.sport_settings,
             goal_races=base.goal_races,
+            block_plan=base.block_plan,
             training_rollup=base.training_rollup,
             recent_events=base.recent_events,
             current_proposal=proposal,

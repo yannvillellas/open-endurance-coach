@@ -29,7 +29,7 @@ from open_endurance_coach.prompts.prompts import (
     estimate_user_message_tokens,
     system_prompt,
 )
-from open_endurance_coach.schemas.context import CoachContext, TrainingWeek
+from open_endurance_coach.schemas.context import BlockWeek, CoachContext, TrainingWeek
 from open_endurance_coach.schemas.decisions import (
     CreateWorkout,
     DecisionReport,
@@ -1695,3 +1695,50 @@ async def test_wipe_local_state_clears_everything(settings: Settings, tmp_path: 
     assert store.list_messages() == []
     assert store.list_proposals() == []
     assert store.unseen_activity_ids(["fx-a"]) == {"fx-a"}
+
+
+async def test_submit_feedback_preserves_the_block_plan(settings: Settings, tmp_path: Path) -> None:
+    store = CoachStore(tmp_path / "coach.db")
+    rows = [
+        BlockWeek(
+            week_start=date(2024, 2, 5),
+            phase="Base",
+            week_in_phase=5,
+            role="Base: aerobic volume, Z2; one long session.",
+            target_tss_low=380.0,
+            target_tss_high=400.0,
+            status="current",
+        )
+    ]
+    base = CoachContext(focus="f", block_plan=rows)
+    proposal_id = store.save_proposal(focus="f", report=DecisionReport(summary="ok"), context=base)
+    provider = FakeLlmProvider([completion(report_json())])
+    engine = make_engine(settings, store, provider)
+
+    outcome = await engine.submit_feedback(proposal_id, "make it easier")
+
+    assert outcome.proposal.context.block_plan == rows
+
+
+async def test_the_block_plan_reaches_the_model_in_the_prompt(
+    settings: Settings, tmp_path: Path
+) -> None:
+    intervals = make_intervals_client(
+        events=[
+            {
+                "id": 7,
+                "name": "Summer A",
+                "start_date_local": "2024-06-17T00:00:00",
+                "category": "RACE_A",
+            }
+        ]
+    )
+    provider = FakeLlmProvider([completion(report_json())])
+    store = CoachStore(tmp_path / "coach.db")
+    engine = make_engine(settings, store, provider, client=intervals)
+
+    await engine.analyze("plan my race", today=date(2024, 2, 5))
+
+    user = provider.calls[0]["messages"][-1].content
+    assert "<block_plan>\n| Week | Phase | Role | Target | Status |" in user
+    assert "| 2024-06-17 | Race |" in user

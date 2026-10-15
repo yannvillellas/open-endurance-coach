@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from open_endurance_coach.errors import InternalError
-from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
+from open_endurance_coach.schemas.context import BlockWeek, CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.decisions import DecisionReport
 from open_endurance_coach.schemas.intervals import (
     Activity,
@@ -50,6 +50,7 @@ def build_within_budget(
     sport_settings: list[SportSettings],
     *,
     goal_races: list[GoalRace] | None = None,
+    block_plan: list[BlockWeek] | None = None,
     training_rollup: list[TrainingWeek] | None = None,
     recent_events: list[Event] | None = None,
     activity_keep_ids: set[str] | None = None,
@@ -71,6 +72,7 @@ def build_within_budget(
         recent_events=list(recent_events or []),
         upcoming_events=list(upcoming_events),
         goal_races=list(goal_races or []),
+        block_plan=list(block_plan or []),
         training_rollup=list(training_rollup or []),
         sport_settings=list(sport_settings),
         current_proposal=current_proposal,
@@ -115,6 +117,8 @@ def build_within_budget(
             _trim_furthest_goal_race_description(ctx, max_tokens)
         elif ctx.goal_races:
             ctx.goal_races.pop()
+        elif ctx.block_plan:
+            ctx.block_plan = []
         elif ctx.recent_activities:
             candidates = [
                 index

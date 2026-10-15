@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -6,9 +6,8 @@ from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.extractors.context import ContextPlan, DateRange, gather_context
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
-    RACE_HORIZON_DAYS,
+    PLAN_HORIZON_DAYS,
     RECENT_EVENT_DAYS,
-    ROLLUP_LOOKBACK_DAYS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
 )
@@ -28,8 +27,8 @@ def test_standard_plan_windows() -> None:
     assert (TODAY - plan.events.start).days == RECENT_EVENT_DAYS
     assert (plan.events.end - TODAY).days == UPCOMING_DAYS
     assert plan.races.start == TODAY
-    assert (plan.races.end - TODAY).days == RACE_HORIZON_DAYS
-    assert (TODAY - plan.rollup.start).days == ROLLUP_LOOKBACK_DAYS
+    assert (plan.races.end - TODAY).days == PLAN_HORIZON_DAYS
+    assert (TODAY - plan.rollup.start).days == PLAN_HORIZON_DAYS
     assert plan.rollup.end == TODAY
     assert plan.activity_types == frozenset()
     assert plan.metric_focus is None
@@ -75,8 +74,17 @@ def test_with_windows_replaces_only_the_question_windows() -> None:
         ("activities", "2024-01-18", "2024-02-02"),
         ("wellness", "2024-01-25", "2024-02-02"),
         ("events", "2024-01-18", "2024-02-15", None),
-        ("athlete_summary", "2023-11-03", "2024-02-01"),
-        ("events", "2024-02-01", "2024-05-31", "RACE_A,RACE_B,RACE_C"),
+        (
+            "athlete_summary",
+            (TODAY - timedelta(days=PLAN_HORIZON_DAYS)).isoformat(),
+            "2024-02-01",
+        ),
+        (
+            "events",
+            "2024-02-01",
+            (TODAY + timedelta(days=PLAN_HORIZON_DAYS)).isoformat(),
+            "RACE_A,RACE_B,RACE_C",
+        ),
         ("sport_settings",),
     ],
 )

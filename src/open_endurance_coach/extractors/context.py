@@ -10,13 +10,13 @@ from typing import Any
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsReadClient
 from open_endurance_coach.extractors.budget import build_within_budget
+from open_endurance_coach.extractors.periodization import derive_block_plan
 from open_endurance_coach.extractors.splits import per_km_splits, stream_types
 from open_endurance_coach.extractors.standard import (
     ACTIVITY_LOOKBACK_DAYS,
     DEFAULT_MAX_TOKENS,
-    RACE_HORIZON_DAYS,
+    PLAN_HORIZON_DAYS,
     RECENT_EVENT_DAYS,
-    ROLLUP_LOOKBACK_DAYS,
     UPCOMING_DAYS,
     WELLNESS_LOOKBACK_DAYS,
     fetch_goal_races,
@@ -105,8 +105,8 @@ class ContextPlan:
                 today - timedelta(days=RECENT_EVENT_DAYS),
                 today + timedelta(days=UPCOMING_DAYS),
             ),
-            races=DateRange(today, today + timedelta(days=RACE_HORIZON_DAYS)),
-            rollup=DateRange(today - timedelta(days=ROLLUP_LOOKBACK_DAYS), today),
+            races=DateRange(today, today + timedelta(days=PLAN_HORIZON_DAYS)),
+            rollup=DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today),
         )
 
     def for_activities(
@@ -260,6 +260,7 @@ async def gather_context(
             event for event in reversed(events) if event.start_date_local.date() < today
         ],
         goal_races=goal_races,
+        block_plan=derive_block_plan(goal_races, rollup, today=today),
         training_rollup=rollup,
         sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
         user_feedback=user_feedback,
