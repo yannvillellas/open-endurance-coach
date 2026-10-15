@@ -221,6 +221,33 @@ def test_failed_migration_rolls_back_and_keeps_the_version(
     assert "partial" not in _table_names(path)
 
 
+def test_a_failed_callable_migration_rolls_back_and_leaves_the_database_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "coach.db"
+    CoachStore(path).close()
+
+    class InjectedFailure(Exception):
+        pass
+
+    def broken(connection: sqlite3.Connection) -> None:
+        connection.execute("CREATE TABLE partial (id INTEGER)")
+        raise InjectedFailure("injected")
+
+    monkeypatch.setattr(store_db, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
+    monkeypatch.setitem(store_db.MIGRATIONS, SCHEMA_VERSION + 1, broken)
+
+    with pytest.raises(InjectedFailure):
+        CoachStore(path)
+    assert _user_version(path) == SCHEMA_VERSION
+    assert "partial" not in _table_names(path)
+
+    monkeypatch.undo()
+    reopened = CoachStore(path)
+    assert reopened.schema_version == SCHEMA_VERSION
+    reopened.close()
+
+
 def test_fresh_database_has_the_query_indexes(tmp_path: Path) -> None:
     path = tmp_path / "coach.db"
     CoachStore(path).close()

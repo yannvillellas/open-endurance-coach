@@ -582,3 +582,28 @@ def test_unreadable_proposals_are_discarded(tmp_path: Path) -> None:
     assert discarded == [corrupt]
     assert [proposal.id for proposal in store.list_proposals()] == [good]
     assert store.delete_unreadable_proposals() == []
+
+
+def test_proposals_with_broken_reports_are_discarded(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    good = store.save_proposal(focus="status check", report=make_report(), context=make_context())
+    context_json = json.dumps(make_context().model_dump(mode="json"))
+    with sqlite3.connect(tmp_path / "coach.db") as raw:
+        raw.execute(
+            "INSERT INTO proposals (created_at, status, focus, context_json, report_json)"
+            " VALUES ('2024-02-01T10:00:00+00:00', 'pending', 'bad report', ?, 'not json')",
+            (context_json,),
+        )
+        bad_report = int(raw.execute("SELECT max(id) FROM proposals").fetchone()[0])
+        raw.execute(
+            "INSERT INTO proposals"
+            " (created_at, status, focus, context_json, report_json, approved_json)"
+            " VALUES ('2024-02-01T10:00:00+00:00', 'unapplied', 'bad approved', ?, ?, 'not json')",
+            (context_json, json.dumps({"summary": "ok"})),
+        )
+        bad_approved = int(raw.execute("SELECT max(id) FROM proposals").fetchone()[0])
+
+    discarded = store.delete_unreadable_proposals()
+
+    assert discarded == [bad_report, bad_approved]
+    assert [proposal.id for proposal in store.list_proposals()] == [good]
