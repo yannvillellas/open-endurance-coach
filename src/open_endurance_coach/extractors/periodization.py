@@ -379,13 +379,13 @@ def _is_late_cut(rows: Sequence[BlockWeek], current: BlockWeek) -> bool:
 
 
 def _step_back_role(phase: str, *, illness: bool, deep: bool) -> str:
-    if illness:
-        return _STEP_BACK_ILLNESS_ROLE
     if phase == "Build":
         return _STEP_BACK_BUILD_ROLE
-    if phase == "Base" and not deep:
-        return _STEP_BACK_BASE_ROLE
-    return _STEP_BACK_PREP_ROLE
+    if deep:
+        return _STEP_BACK_PREP_ROLE
+    if illness:
+        return _STEP_BACK_ILLNESS_ROLE
+    return _STEP_BACK_BASE_ROLE
 
 
 def _entry_band(phase: str, ctl: float | None) -> tuple[float, float] | None:
@@ -503,7 +503,7 @@ def _apply_contingency(
     current = by_start.get(current_week)
     if current is None:
         return
-    if gap_days <= 7:
+    if gap_days <= 7 and not illness:
         _apply_omissions(
             _omissions_4_7(rows, current, current_week), current_week=current_week, count=1
         )
@@ -513,9 +513,8 @@ def _apply_contingency(
     deep = gap_days > 14
     current.status = "step_back"
     current.role = _step_back_role(current.phase, illness=illness, deep=deep)
-    band = _entry_band(
-        "Prep" if illness or (deep and current.phase != "Build") else current.phase, ctl
-    )
+    prep_entry = current.phase != "Build" and (illness or deep)
+    band = _entry_band("Prep" if prep_entry else current.phase, ctl)
     current.target_tss_low = band[0] if band else None
     current.target_tss_high = band[1] if band else None
     if not deep:

@@ -525,6 +525,53 @@ def test_an_illness_steps_back_to_prep() -> None:
     assert "Prep" in rows[today].role and "illness" in rows[today].role
 
 
+def test_a_short_illness_is_treated_as_more_than_seven_days() -> None:
+    today = date(2024, 2, 11)  # a Sunday, five days after the last session
+    rows = by_start(
+        derive_block_plan(
+            [make_race(RACE_DAY)],
+            history_until(date(2024, 1, 29)),
+            today=today,
+            illness=True,
+        )
+    )
+
+    assert rows[TODAY].status == "step_back"
+    assert "illness" in rows[TODAY].role
+    assert rows[date(2024, 2, 12)].status == "repeat"
+
+
+def test_an_illness_in_build_still_steps_back_to_base_3() -> None:
+    today = date(2024, 4, 29)
+    history = [
+        *history_until(date(2024, 4, 8)),
+        make_week(date(2024, 4, 15), load=0.0, sessions=0),
+        make_week(date(2024, 4, 22), load=0.0, sessions=0),
+        make_week(today, load=100.0),
+    ]
+    rows = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today, illness=True))
+
+    assert rows[today].status == "step_back"
+    assert "Base 3" in rows[today].role
+    assert "illness" not in rows[today].role
+
+
+def test_a_deep_illness_keeps_the_standard_deep_target() -> None:
+    today = date(2024, 2, 12)
+    history = [
+        *history_until(date(2024, 1, 15)),
+        make_week(date(2024, 1, 22), load=0.0, sessions=0),
+        make_week(date(2024, 1, 29), load=0.0, sessions=0),
+        make_week(date(2024, 2, 5), load=0.0, sessions=0),
+        make_week(today, load=100.0),
+    ]
+    regular = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today))
+    ill = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today, illness=True))
+
+    assert ill[today].role == regular[today].role
+    assert "back up one block" in ill[today].role
+
+
 def test_a_one_week_remainder_joins_the_previous_mesocycle() -> None:
     today = date(2024, 3, 4)
     rows = by_start(

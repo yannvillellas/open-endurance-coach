@@ -38,8 +38,9 @@ race is trained through.
 ### Missed workouts (interruptions) [5]
 
 - **1-3 days**: return as if nothing happened; never make up the missed load.
-- **4-7 days**: the lost time is a rest week; reduce the current block by one week (or
-  Peak 2 → 1) to resynchronize.
+- **4-7 days**: not due to illness, the lost time is a rest week; reduce the current block
+  by one week (or Peak 2 → 1) to resynchronize. Due to illness, treat it as more than
+  seven days missed (next bracket).
 - **8-14 days**: step back (Build → Base 3; Base → Base 1, or Prep when illness), then
   repeat the last hard week until it goes well; omission priority: Build 2, then the first
   week of Peak.
@@ -47,7 +48,9 @@ race is trained through.
   omission priority: first week of Peak, then Build 2, then Build 1. Nothing changes when
   the interruption falls in the last week of Build 2 or in the Peak.
 - Illness always resumes in zones 1-2 until heart rate and perceived effort are back to
-  normal.
+  normal; the >2-week bracket has no illness variant, and an injury follows the same
+  duration brackets — its specificity is modality and tolerance, handled in the sessions,
+  not in the block.
 
 ### Time-crunched floors and short blocks [6]
 
