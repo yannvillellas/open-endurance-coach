@@ -573,13 +573,16 @@ def derive_block_plan(
 ) -> list[BlockWeek]:
     """Derive the block for the anchored race; empty when no race anchors it.
 
-    The block is race-anchored: it starts at the later of the first executed week
-    and 24 training weeks before the race, so the layout never moves as ``today``
-    advances: the same anchor, grid and history derive the same weeks, and weeks
-    once past are never re-labelled. ``today`` positions the current week, judges
-    execution, and extends the ongoing interruption by the elapsed days of its
-    unfinished week; every finished interruption is replayed from the executed
-    weeks themselves.
+    The block is race-anchored: it spans the template's training weeks and ends on
+    the anchor race week (``race_week - 7 * template.training_weeks``), so the
+    layout never moves as ``today`` advances: the same anchor, grid and history
+    derive the same weeks, and weeks once past are never re-labelled. The template
+    compresses to the training weeks available since the first executed week, so
+    with a horizon that is not a clean cascade (for example 23 weeks) the first
+    executed week can fall just outside the block. ``today`` positions the current
+    week, judges execution, and extends the ongoing interruption by the elapsed
+    days of its unfinished week; every finished interruption is replayed from the
+    executed weeks themselves.
 
     ``elite`` and ``illness`` are declared by the caller from the athlete's own
     words; no metric threshold opens them. The hub path passes the flags it

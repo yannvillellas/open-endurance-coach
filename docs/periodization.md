@@ -69,13 +69,16 @@ months ahead.
 
 ## Design decisions
 
-**Pure, race-anchored derivation.** The block ends on the anchor race week and starts at
-the later of the first executed week and 24 training weeks before the race, so a week's
-label is a function of its distance to the race: the same anchor, grid and history derive
-the same weeks. Interruptions are replayed from the executed weeks (see below), so a week
-once past is never re-labelled by later recomputations; only the current week, which is
-still filling up, may change between turns as the stop evolves. Late hub revisions may
-still shift past rows; that is accepted.
+**Pure, race-anchored derivation.** The block ends on the anchor race week and spans the
+template's training weeks, starting at `race_week − 7 × template.training_weeks`: a week's
+label is a function of its distance to the race. The template compresses to the training
+weeks available since the first executed week, so with a horizon that is not a clean
+cascade (for example 23 weeks, where the Prep is dropped) the first executed week can fall
+just outside the block. The same anchor, grid and history derive the same weeks.
+Interruptions are replayed from the executed weeks (see below), so a week once past is
+never re-labelled by later recomputations; only the current week, which is still filling
+up, may change between turns as the stop evolves. Late hub revisions may still shift past
+rows; that is accepted.
 
 **Anchor chain.** The anchor is the nearest A-priority race; with no A race, the nearest
 race by A → B → C priority. A second A race within 3 weeks extends the block (prolonged
@@ -124,9 +127,11 @@ resumption week `step_back` with its re-entry role (Base 3 from Build, Base 1 fr
 Prep when illness or after more than two weeks) and its re-entry band, the following week
 `repeat` on an 8-14 day stop, and the omitted weeks (zero band) at their priority: the
 last week of the resumed phase for a short stop, Build 2 then Peak 1 for 8-14 days, Peak 1
-then Build 2 then Build 1 beyond. In the Peak the stopped week itself absorbs the
-reduction (Peak 2 → 1) and the race-eve taper week is never omitted. Omissions are placed
-before the repeat mark, so a repeat can never take a week away from the priority.
+then Build 2 then Build 1 beyond. A candidate must lie after the interruption's anchor
+week: late in a block, Build 2 falls before the resumption and is skipped, so the loss
+lands on Peak 1. In the Peak the stopped week itself absorbs the reduction (Peak 2 → 1)
+and the race-eve taper week is never omitted. Omissions are placed before the repeat mark,
+so a repeat can never take a week away from the priority.
 
 **Every finished stop is replayed from the executed weeks.** Each run of whole empty
 weeks closed by a resumption week is derived from the weekly rollup again at every turn
