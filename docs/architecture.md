@@ -19,9 +19,9 @@ while a proposal is open rebuilds that proposal's snapshot instead, with no reso
 call.
 
 - **Tactical plan** — recent activities (14 days), wellness (7 days), a ±14-day
-  calendar window split into recent and upcoming events, sport settings, goal races over
-  a 120-day horizon, and a 90-day weekly training rollup with CTL/ATL/ramp and per-sport
-  load.
+  calendar window split into recent and upcoming events, sport settings, goal races and
+  a weekly training rollup with CTL/ATL/ramp and per-sport load, both over a 224-day
+  horizon (`PLAN_HORIZON_DAYS`).
 - **Question window** — activities and wellness cover exactly the resolved window;
   events add the tactical ±14-day window when the two overlap, so a mixed question
   ("that session three weeks ago, should I repeat it next week?") sees both, and goal
@@ -30,18 +30,27 @@ call.
   streams and per-kilometre splits, pinned ±3 days so the evidence survives context
   trimming.
 
+A pure periodization skeleton (`extractors/periodization.py`, [periodization.md](periodization.md))
+derives the race block from the anchor race, the week grid and the executed rollup: one
+`block_plan` row per week (phase, role, target TSS band, status), injected right after
+`goal_races` and rendered in its own `<block_plan>` prompt block as a compact Markdown
+table. Same inputs, same weeks: the block is race-anchored and recomputed each turn, never
+persisted; only `today` positions the current week. Contingency adjustments (rest, repeat,
+step_back, omitted) travel as row statuses, roles and adjusted bands.
+
 When the budget is exceeded, the extractor evicts data by priority until the context
 fits, and never touches the current message. Goal-race descriptions are trimmed before
-a whole race is dropped, and activities/events are evicted before the sports settings.
+a whole race is dropped, the block plan is dropped only after the goal races, and
+activities/events are evicted before the sports settings.
 
 ## Analysis
 
 The model answers through a strict JSON schema (invalid output is retried, then
 rejected; `schemas/decisions.py`). The prompt enforces Joe Friel's periodization
 principles and Dr. Andrew Coggan's power analytics: executed training against planned
-targets, and current readiness (CTL/ATL, HRV, sleep). The answer is one of _chat_,
-_analysis_ or _plan_, and anything material the coach is missing is asked for before a
-proposal is finalized.
+targets and the `block_plan` rows, and current readiness (CTL/ATL, HRV, sleep). The
+answer is one of _chat_, _analysis_ or _plan_, and anything material the coach is missing
+is asked for before a proposal is finalized.
 
 The decision loop is explicit and ordered: validate planned against executed, solicit
 and inject the athlete's qualitative context (RPE, fatigue, schedule constraints)
