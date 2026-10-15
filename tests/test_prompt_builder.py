@@ -24,7 +24,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
-SYSTEM_PROMPT_TOKEN_BUDGET = 3600
+SYSTEM_PROMPT_TOKEN_BUDGET = 3700
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -268,6 +268,12 @@ def test_all_examples_carry_the_memory_field() -> None:
         MEMORY_EXAMPLE,
     ):
         assert "memory" in example, example.get("intent")
+
+
+def test_the_contract_makes_active_health_facts_a_hard_session_constraint() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "An active injury or health fact is a hard constraint on the sessions" in system
+    assert "accept missing the block band" in system
 
 
 def test_contract_blocks_proposals_on_material_questions() -> None:
