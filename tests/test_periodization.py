@@ -468,6 +468,128 @@ def test_a_build_interruption_steps_back_to_base_3() -> None:
     assert rows[date(2024, 6, 3)].status == "omitted"
 
 
+@pytest.mark.parametrize(
+    ("first_empty", "omitted_week", "resume_status"),
+    [
+        (date(2024, 2, 5), date(2024, 4, 1), "under"),  # one week off: Base 12 omitted
+        (date(2024, 1, 29), date(2024, 4, 15), "step_back"),  # two weeks: Build 2 omitted
+    ],
+)
+def test_a_finished_stop_keeps_its_marks_as_today_advances(
+    first_empty: date, omitted_week: date, resume_status: str
+) -> None:
+    history: list[TrainingWeek] = []
+    cursor = PREP_START
+    while cursor < first_empty:
+        history.append(make_week(cursor))
+        cursor += timedelta(days=7)
+    while cursor < date(2024, 2, 12):
+        history.append(make_week(cursor, load=0.0, sessions=0))
+        cursor += timedelta(days=7)
+    history.append(make_week(date(2024, 2, 12), load=100.0))
+
+    first = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=date(2024, 2, 12)))
+    later = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=date(2024, 2, 19)))
+
+    assert first[first_empty].status == "rest"
+    assert later[first_empty].status == "rest"
+    assert later[date(2024, 2, 12)].status == resume_status
+    assert first[omitted_week].status == "omitted"
+    assert later[omitted_week].status == "omitted"
+    for start, row in first.items():
+        if start + timedelta(days=6) >= date(2024, 2, 12):
+            continue
+        other = later[start]
+        assert (
+            other.phase,
+            other.week_in_phase,
+            other.role,
+            other.target_tss_low,
+            other.target_tss_high,
+            other.status,
+        ) == (
+            row.phase,
+            row.week_in_phase,
+            row.role,
+            row.target_tss_low,
+            row.target_tss_high,
+            row.status,
+        )
+
+
+def test_two_stops_accumulate_their_adjustments() -> None:
+    today = date(2024, 3, 4)
+    history = [
+        *history_until(date(2024, 1, 1)),
+        make_week(date(2024, 1, 8), load=0.0, sessions=0),
+        make_week(date(2024, 1, 15), load=300.0),
+        make_week(date(2024, 1, 22), load=300.0),
+        make_week(date(2024, 1, 29), load=300.0),
+        make_week(date(2024, 2, 5), load=0.0, sessions=0),
+        make_week(date(2024, 2, 12), load=0.0, sessions=0),
+        make_week(date(2024, 2, 19), load=300.0),
+        make_week(date(2024, 2, 26), load=300.0),
+        make_week(today, load=100.0),
+    ]
+    rows = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today))
+
+    assert rows[date(2024, 1, 8)].status == "rest"
+    assert rows[date(2024, 4, 1)].status == "omitted"  # the first stop loses Base 12
+    assert rows[date(2024, 2, 5)].status == "rest"
+    assert rows[date(2024, 2, 12)].status == "rest"
+    assert rows[date(2024, 2, 19)].status == "step_back"
+    assert rows[date(2024, 2, 26)].status == "repeat"
+    assert rows[date(2024, 4, 15)].status == "omitted"  # the second loses Build 2
+    assert rows[date(2024, 6, 3)].status == "upcoming"
+
+
+def test_an_intra_week_pause_is_not_an_interruption() -> None:
+    today = date(2024, 2, 11)  # Sunday; the paused week has sessions, then nothing
+    history = [
+        *history_until(date(2024, 1, 22)),
+        make_week(date(2024, 1, 29), load=0.0, sessions=1),
+        make_week(date(2024, 2, 5), load=0.0, sessions=2),
+    ]
+    rows = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today))
+
+    assert rows[date(2024, 2, 5)].status == "current"
+    assert {row.status for row in rows.values()} <= {"done", "under", "over", "current", "upcoming"}
+
+
+def test_a_finished_short_illness_still_steps_back() -> None:
+    today = date(2024, 2, 12)
+    history = [
+        *history_until(date(2024, 1, 29)),
+        make_week(date(2024, 2, 5), load=0.0, sessions=0),
+        make_week(today, load=100.0),
+    ]
+    rows = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today, illness=True))
+
+    assert rows[date(2024, 2, 5)].status == "rest"
+    assert rows[today].status == "step_back"
+    assert "illness" in rows[today].role
+    assert rows[date(2024, 2, 19)].status == "repeat"
+
+
+def test_an_eight_to_fourteen_day_stop_omits_build_two_before_the_peak() -> None:
+    today = date(2024, 4, 8)  # Build 1
+    history = [
+        *history_until(date(2024, 3, 18)),
+        make_week(date(2024, 3, 25), load=0.0, sessions=0),
+        make_week(date(2024, 4, 1), load=0.0, sessions=0),
+        make_week(today, load=100.0),
+    ]
+    rows = by_start(derive_block_plan([make_race(RACE_DAY)], history, today=today))
+
+    assert rows[date(2024, 3, 25)].status == "rest"
+    assert rows[date(2024, 4, 1)].status == "rest"
+    assert rows[today].status == "step_back"
+    assert "Base 3" in rows[today].role
+    assert rows[date(2024, 4, 15)].status == "omitted"  # Build 2, the documented priority
+    assert rows[date(2024, 6, 3)].status == "upcoming"  # Peak 1 is kept
+    assert rows[date(2024, 4, 15)].role.startswith("Omitted")  # and no repeat overwrote it
+
+
 def test_a_one_to_three_day_gap_changes_nothing() -> None:
     today = date(2024, 2, 7)  # Wednesday, two days into the current week
     rows = by_start(
