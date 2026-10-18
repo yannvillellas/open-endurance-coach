@@ -6,13 +6,28 @@ on:
   pull_request:
 
 jobs:
-  checks:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/lint
+
+  tests:
+    name: Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/checks
+      - uses: ./.github/actions/setup
+        with:
+          python-version: ${{ matrix.python-version }}
+      - id: tests
+        uses: ./.github/actions/tests
         with:
           python-version: ${{ matrix.python-version }}

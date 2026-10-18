@@ -1,0 +1,19 @@
+name: Tests
+description: Run the test suite with pytest
+
+inputs:
+  python-version:
+    description: Python version, used in the annotation
+    required: false
+    default: "3.12"
+  args:
+    description: Extra pytest arguments (for example a test path)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Tests (pytest)
+      shell: bash
+      run: pytest -q ${{ inputs.args }}

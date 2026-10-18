@@ -17,10 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/checks
+      - uses: ./.github/actions/setup
         with:
-          refresh-spec: "true"
-          scope: contract-tests
+          python-version: "3.12"
+      - name: Refresh OpenAPI snapshot
+        run: refresh-spec
+      - uses: ./.github/actions/tests
+        with:
+          args: tests/test_openapi_contract.py
       - name: Detect drift
         id: drift
         if: always()
