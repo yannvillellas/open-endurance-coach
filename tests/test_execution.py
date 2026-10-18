@@ -1,6 +1,12 @@
 from datetime import date, datetime
 
-from open_endurance_coach.analysis.execution import aggregate_weeks, match_execution
+from open_endurance_coach.analysis.execution import (
+    WeekReview,
+    aggregate_weeks,
+    compare_trajectory,
+    match_execution,
+)
+from open_endurance_coach.schemas.context import BlockWeek, TrainingWeek
 from open_endurance_coach.schemas.intervals import Activity, Event
 
 TODAY = date(2024, 2, 12)
@@ -476,3 +482,130 @@ def test_an_unplanned_only_week_has_no_adherence_and_a_full_share() -> None:
     assert week.adherence is None
     assert week.unplanned_load == 50.0
     assert week.unplanned_share == 1.0
+
+
+def weekly_review(
+    week_start: date,
+    *,
+    planned: float | None = None,
+    executed: float | None = None,
+    completed: int = 0,
+    partial: int = 0,
+    missed: int = 0,
+    unplanned: float | None = None,
+    adherence: float | None = None,
+    share: float | None = None,
+    current: bool = False,
+) -> WeekReview:
+    return WeekReview(
+        week_start=week_start,
+        planned_load=planned,
+        executed_load=executed,
+        completed=completed,
+        partial=partial,
+        missed=missed,
+        adherence=adherence,
+        unplanned_load=unplanned,
+        unplanned_share=share,
+        current=current,
+    )
+
+
+def block_row(
+    week_start: date,
+    *,
+    phase: str = "Base",
+    status: str = "done",
+    low: float | None = 300.0,
+    high: float | None = 400.0,
+) -> BlockWeek:
+    return BlockWeek(
+        week_start=week_start,
+        phase=phase,
+        week_in_phase=1,
+        role="Endurance",
+        target_tss_low=low,
+        target_tss_high=high,
+        status=status,
+    )
+
+
+def rollup_week(
+    week_start: date, *, fitness: float | None = None, ramp: float | None = None
+) -> TrainingWeek:
+    return TrainingWeek(
+        week_start=week_start, sessions=4, time_s=7200, load=300.0, fitness=fitness, ramp_rate=ramp
+    )
+
+
+def test_efficacy_lines_up_the_adjusted_week_the_status_and_the_hub_movement() -> None:
+    reviews = [
+        weekly_review(date(2024, 1, 29), executed=250.0, completed=1),  # trained in a rest week
+        weekly_review(date(2024, 2, 5), planned=320.0, executed=300.0, completed=3, unplanned=50.0),
+        weekly_review(date(2024, 2, 12), executed=120.0, completed=1, current=True),
+        weekly_review(date(2024, 1, 22), executed=90.0, completed=1),  # before the block: skipped
+    ]
+    block = [
+        block_row(date(2024, 1, 29), status="rest", low=0.0, high=0.0),
+        block_row(date(2024, 2, 5), status="done", low=300.0, high=400.0),
+        block_row(date(2024, 2, 12), status="under", low=200.0, high=300.0),
+    ]
+    rollup = [
+        rollup_week(date(2024, 1, 29), fitness=58.0, ramp=0.5),
+        rollup_week(date(2024, 2, 5), fitness=60.0, ramp=0.7),
+        rollup_week(date(2024, 2, 12), fitness=62.0, ramp=0.4),
+    ]
+
+    rows = compare_trajectory(reviews, block, rollup)
+
+    assert [row.week_start for row in rows] == [
+        date(2024, 1, 29),
+        date(2024, 2, 5),
+        date(2024, 2, 12),
+    ]
+    rest_week = rows[0]
+    assert rest_week.status == "rest"  # the plan status is read as-is, never re-derived
+    assert rest_week.executed_load == 250.0
+    first = rows[1]
+    assert (first.phase, first.status) == ("Base", "done")
+    assert (first.band_low, first.band_high) == (300.0, 400.0)
+    assert first.executed_load == 350.0
+    assert (first.fitness, first.ramp) == (60.0, 0.7)
+    assert rows[2].executed_load == 120.0
+    assert (rows[2].phase, rows[2].status) == ("Base", "under")
+
+
+def test_efficacy_leaves_missing_values_empty() -> None:
+    reviews = [weekly_review(date(2024, 2, 5), planned=None, executed=None)]
+    block = [block_row(date(2024, 2, 5), status="rest", low=0.0, high=0.0)]
+
+    rows = compare_trajectory(reviews, block, [])
+
+    assert len(rows) == 1
+    assert rows[0].executed_load is None
+    assert rows[0].fitness is None
+    assert rows[0].ramp is None
+    assert (rows[0].band_low, rows[0].band_high) == (0.0, 0.0)
+
+
+def test_efficacy_keeps_the_review_order_and_reads_zero_loads() -> None:
+    reviews = [
+        weekly_review(date(2024, 2, 12), executed=0.0),
+        weekly_review(date(2024, 2, 5), unplanned=50.0),
+    ]
+    block = [
+        block_row(date(2024, 2, 5), status="rest", low=0.0, high=0.0),
+        block_row(date(2024, 2, 12), status="rest", low=0.0, high=0.0),
+    ]
+    rollup = [
+        rollup_week(date(2024, 2, 5), fitness=0.0, ramp=0.0),
+        rollup_week(date(2024, 2, 12)),
+    ]
+
+    rows = compare_trajectory(reviews, block, rollup)
+
+    assert [row.week_start for row in rows] == [date(2024, 2, 12), date(2024, 2, 5)]
+    assert rows[0].executed_load == 0.0
+    assert rows[1].executed_load == 50.0
+    assert (rows[1].fitness, rows[1].ramp) == (0.0, 0.0)
+    assert rows[0].fitness is None

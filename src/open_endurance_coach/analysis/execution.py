@@ -25,6 +25,12 @@ from datetime import date, timedelta
 from typing import Literal
 
 from open_endurance_coach.extractors.context import RIDE_TYPES
+from open_endurance_coach.schemas.context import (
+    BlockPhase,
+    BlockWeek,
+    BlockWeekStatus,
+    TrainingWeek,
+)
 from open_endurance_coach.schemas.intervals import Activity, Event
 
 COMPLETED_THRESHOLD = 0.8
@@ -247,3 +253,55 @@ def aggregate_weeks(match: ExecutionMatch, *, today: date) -> tuple[WeekReview, 
         )
         week_start += timedelta(days=7)
     return tuple(reviews)
+
+
+@dataclass(frozen=True)
+class WeekEfficacy:
+    week_start: date
+    phase: BlockPhase
+    status: BlockWeekStatus
+    band_low: float | None
+    band_high: float | None
+    executed_load: float | None
+    fitness: float | None
+    ramp: float | None
+
+
+def compare_trajectory(
+    reviews: Sequence[WeekReview],
+    block_plan: Sequence[BlockWeek],
+    rollup: Sequence[TrainingWeek],
+) -> tuple[WeekEfficacy, ...]:
+    """Line each judged week up with its adjusted plan and the hub's movement.
+
+    The band and the status are the plan's own (the #64 vocabulary, never
+    re-derived); the executed load is the week's total, matched and unplanned;
+    fitness and ramp are read from the hub rollup. A reviewed week missing from
+    the block (before the block start) is skipped, and a week without a rollup
+    row keeps its empty movement. The join reads the exact week starts (Monday
+    on both sides) and the rows follow the reviews' order.
+    """
+    weeks = {row.week_start: row for row in block_plan}
+    movements = {week.week_start: week for week in rollup}
+    rows = []
+    for review in reviews:
+        planned = weeks.get(review.week_start)
+        if planned is None:
+            continue
+        movement = movements.get(review.week_start)
+        loads = [
+            value for value in (review.executed_load, review.unplanned_load) if value is not None
+        ]
+        rows.append(
+            WeekEfficacy(
+                week_start=review.week_start,
+                phase=planned.phase,
+                status=planned.status,
+                band_low=planned.target_tss_low,
+                band_high=planned.target_tss_high,
+                executed_load=sum(loads) if loads else None,
+                fitness=movement.fitness if movement is not None else None,
+                ramp=movement.ramp_rate if movement is not None else None,
+            )
+        )
+    return tuple(rows)
