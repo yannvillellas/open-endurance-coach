@@ -1,0 +1,12 @@
+name: Lint and types
+description: Run ruff and mypy
+
+runs:
+  using: composite
+  steps:
+    - name: Lint (ruff)
+      shell: bash
+      run: ruff check . && ruff format --check .
+    - name: Types (mypy)
+      shell: bash
+      run: mypy src tests
