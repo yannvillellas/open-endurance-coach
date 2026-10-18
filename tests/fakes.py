@@ -342,6 +342,7 @@ def make_engine(
     provider: FakeLlmProvider,
     calendar: FakeCalendarClient | None = None,
     intervals: FakeIntervalsClient | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> tuple[CoachEngine, CoachStore]:
     llm = LlmClient(
         settings.model_copy(update={"llm_provider": "fake"}),
@@ -350,7 +351,9 @@ def make_engine(
     )
     store = CoachStore(tmp_path / "coach.db")
     writer = CalendarWriter(calendar) if calendar is not None else None
-    engine = CoachEngine(settings, store, intervals or make_intervals_client(), llm, writer=writer)
+    engine = CoachEngine(
+        settings, store, intervals or make_intervals_client(), llm, writer=writer, clock=clock
+    )
     return engine, store
 
 
