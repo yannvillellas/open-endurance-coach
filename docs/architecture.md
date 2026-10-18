@@ -42,10 +42,17 @@ table. Same inputs, same weeks: the block is race-anchored and recomputed each t
 persisted; only `today` positions the current week. Contingency adjustments (rest, repeat,
 step_back, omitted) travel as row statuses, roles and adjusted bands.
 
+On a review turn (`review_execution` from the resolver), the same gather computes an
+execution review over the block — matching, weekly aggregation and the efficacy
+comparison against the adjusted block rows (`analysis/execution.py`,
+[execution-review.md](execution-review.md)); the digest is injected as the compact
+`execution_review` section and rendered in its own `<execution_review>` prompt block.
+
 When the budget is exceeded, the extractor evicts data by priority until the context
 fits, and never touches the current message. Goal-race descriptions are trimmed before
-a whole race is dropped, the block plan is dropped only after the goal races, and
-activities/events are evicted before the sports settings.
+a whole race is dropped, the block plan is dropped only after the goal races, the
+execution review only after the block plan, and activities/events are evicted before
+the sports settings.
 
 ## Analysis
 
