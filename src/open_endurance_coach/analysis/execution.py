@@ -29,6 +29,9 @@ from open_endurance_coach.schemas.context import (
     BlockPhase,
     BlockWeek,
     BlockWeekStatus,
+    ExecutionReview,
+    ReviewSession,
+    ReviewWeek,
     TrainingWeek,
 )
 from open_endurance_coach.schemas.intervals import Activity, Event
@@ -52,6 +55,7 @@ class SessionMatch:
     activity: Activity | None
     status: Status
     completion: float | None
+    paired: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,13 @@ def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
+def _bucket(day: date, origin: date | None) -> date:
+    """The week start holding ``day``: the hub cadence when known, Monday otherwise."""
+    if origin is None:
+        return _monday(day)
+    return origin + timedelta(days=7 * ((day - origin).days // 7))
+
+
 def _family_of(type_name: str) -> frozenset[str]:
     for family in TYPE_FAMILIES:
         if type_name in family:
@@ -97,8 +108,10 @@ def _is_planned(event: Event) -> bool:
     return category == "WORKOUT" or category.startswith("RACE_")
 
 
-def _completion(planned: Event, activity: Activity) -> float | None:
-    if activity.compliance is not None:
+def _completion(planned: Event, activity: Activity, *, paired: bool) -> float | None:
+    # The hub's compliance scores its own pairing; a fallback match the hub did not
+    # score reads the load, duration and distance ratios instead.
+    if paired and activity.compliance is not None:
         return activity.compliance / 100.0
     for planned_value, actual_value in (
         (planned.icu_training_load, activity.icu_training_load),
@@ -128,6 +141,7 @@ def match_execution(
     usable = list(activities)
 
     matched: dict[int, Activity] = {}
+    paired_flags: dict[int, bool] = {}
     consumed: set[str] = set()
 
     by_id: dict[str, int] = {}
@@ -140,6 +154,7 @@ def match_execution(
         paired_index = by_id.get(str(activity.paired_event_id))
         if paired_index is not None and paired_index not in matched:
             matched[paired_index] = activity
+            paired_flags[paired_index] = True
             consumed.add(activity.id)
 
     pairs: list[tuple[int, int, Activity]] = []
@@ -169,11 +184,12 @@ def match_execution(
                 continue
             sessions.append(SessionMatch(event, None, "missed", None))
             continue
-        completion = _completion(event, matched_activity)
+        paired = paired_flags.get(index, False)
+        completion = _completion(event, matched_activity, paired=paired)
         status = _status(completion)
         if status == "missed" and event.start_date_local.date() == today:
             status = "partial"
-        sessions.append(SessionMatch(event, matched_activity, status, completion))
+        sessions.append(SessionMatch(event, matched_activity, status, completion, paired))
     unplanned = tuple(
         sorted(
             (
@@ -187,13 +203,16 @@ def match_execution(
     return ExecutionMatch(tuple(sessions), unplanned, tuple(pending))
 
 
-def aggregate_weeks(match: ExecutionMatch, *, today: date) -> tuple[WeekReview, ...]:
-    """Fold the judged sessions and unplanned activities into Monday weeks.
+def aggregate_weeks(
+    match: ExecutionMatch, *, today: date, origin: date | None = None
+) -> tuple[WeekReview, ...]:
+    """Fold the judged sessions and unplanned activities into weekly rows.
 
-    Weeks run contiguously from the first judged or unplanned day to the later
-    of the current week and that first week (a session done early can lie in a
-    later week), so a week with nothing due still shows its row — a prescribed
-    stop is not a failure. Loads are None when nothing carries one, adherence is
+    Weeks run contiguously on the block cadence when ``origin`` is given (Monday
+    otherwise), from the first judged or unplanned day to the later of the current
+    week and the last judged day — a session done early can lie in a later week.
+    A week with nothing due still shows its row: a prescribed stop is not a
+    failure. Loads are None when nothing carries one, adherence is
     ``completed / judged sessions`` and the share reads against all executed
     load. Pending sessions are not part of the fold: nothing is due yet.
     """
@@ -201,20 +220,20 @@ def aggregate_weeks(match: ExecutionMatch, *, today: date) -> tuple[WeekReview, 
     days.extend(activity.start_date_local.date() for activity in match.unplanned)
     if not days:
         return ()
-    first = _monday(min(days))
-    last = max(_monday(today), first)
+    first = _bucket(min(days), origin)
+    last = max(_bucket(today, origin), _bucket(max(days), origin))
     reviews = []
     week_start = first
     while week_start <= last:
         sessions = [
             session
             for session in match.sessions
-            if _monday(session.planned.start_date_local.date()) == week_start
+            if _bucket(session.planned.start_date_local.date(), origin) == week_start
         ]
         unplanned = [
             activity
             for activity in match.unplanned
-            if _monday(activity.start_date_local.date()) == week_start
+            if _bucket(activity.start_date_local.date(), origin) == week_start
         ]
         planned_loads = [
             session.planned.icu_training_load
@@ -248,7 +267,7 @@ def aggregate_weeks(match: ExecutionMatch, *, today: date) -> tuple[WeekReview, 
                 unplanned_share=sum(unplanned_loads) / executed_total
                 if executed_total > 0
                 else None,
-                current=week_start == _monday(today),
+                current=week_start == _bucket(today, origin),
             )
         )
         week_start += timedelta(days=7)
@@ -278,8 +297,8 @@ def compare_trajectory(
     re-derived); the executed load is the week's total, matched and unplanned;
     fitness and ramp are read from the hub rollup. A reviewed week missing from
     the block (before the block start) is skipped, and a week without a rollup
-    row keeps its empty movement. The join reads the exact week starts (Monday
-    on both sides) and the rows follow the reviews' order.
+    row keeps its empty movement. The join reads the exact week starts of the block
+    grid and the rows follow the reviews' order.
     """
     weeks = {row.week_start: row for row in block_plan}
     movements = {week.week_start: week for week in rollup}
@@ -305,3 +324,73 @@ def compare_trajectory(
             )
         )
     return tuple(rows)
+
+
+def build_review(
+    match: ExecutionMatch,
+    weeks: Sequence[WeekReview],
+    efficacy: Sequence[WeekEfficacy],
+) -> ExecutionReview:
+    """The compact digest: one row per judged block week, one line per session.
+
+    Every judged session keeps its exact planned/actual numbers whatever its
+    status, and unplanned activities are listed with their own numbers; the
+    week rows only cover weeks present in the adjusted block plan.
+    """
+    by_start = {row.week_start: row for row in efficacy}
+    week_rows = [
+        ReviewWeek(
+            week_start=week.week_start,
+            phase=efficacy_by_start.phase,
+            status=efficacy_by_start.status,
+            band_low=efficacy_by_start.band_low,
+            band_high=efficacy_by_start.band_high,
+            planned_load=week.planned_load,
+            executed_load=efficacy_by_start.executed_load,
+            completed=week.completed,
+            partial=week.partial,
+            missed=week.missed,
+            adherence=week.adherence,
+            unplanned_load=week.unplanned_load,
+            unplanned_share=week.unplanned_share,
+            fitness=efficacy_by_start.fitness,
+            ramp=efficacy_by_start.ramp,
+            current=week.current,
+        )
+        for week in weeks
+        if (efficacy_by_start := by_start.get(week.week_start)) is not None
+    ]
+    sessions = [
+        ReviewSession(
+            date=session.planned.start_date_local.date(),
+            status=session.status,
+            planned=session.planned.name,
+            planned_load=session.planned.icu_training_load,
+            planned_time_s=session.planned.moving_time,
+            planned_distance_m=session.planned.distance,
+            actual=session.activity.name if session.activity is not None else None,
+            actual_load=session.activity.icu_training_load
+            if session.activity is not None
+            else None,
+            actual_time_s=session.activity.moving_time if session.activity is not None else None,
+            actual_distance_m=session.activity.distance if session.activity is not None else None,
+            compliance=session.activity.compliance
+            if session.activity is not None and session.paired
+            else None,
+        )
+        for session in match.sessions
+    ]
+    sessions.extend(
+        ReviewSession(
+            date=activity.start_date_local.date(),
+            status="unplanned",
+            actual=activity.name,
+            actual_load=activity.icu_training_load,
+            actual_time_s=activity.moving_time,
+            actual_distance_m=activity.distance,
+            compliance=None,
+        )
+        for activity in match.unplanned
+    )
+    sessions.sort(key=lambda session: session.date)
+    return ExecutionReview(weeks=week_rows, sessions=sessions)

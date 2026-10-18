@@ -189,6 +189,8 @@ async def gather_context(
     user_feedback: str | None = None,
     max_tokens: int | None = None,
     today: date,
+    review_execution: bool = False,
+    review_default: bool = False,
 ) -> CoachContext:
     activities_raw = await client.list_activities(
         plan.activities.start.isoformat(), plan.activities.end.isoformat()
@@ -249,6 +251,36 @@ async def gather_context(
         (Event.model_validate(item) for item in events_raw),
         key=lambda event: event.start_date_local,
     )
+    block_plan = derive_block_plan(
+        goal_races, rollup, today=today, illness=plan.illness, elite=plan.elite
+    )
+    execution_review = None
+    if review_execution and block_plan:
+        # Local import: analysis imports this module (RIDE_TYPES), so a module-level
+        # import would be circular. The digest is computed on the full fetched data,
+        # before the budget eviction, so old weeks never depend on what survives it.
+        from open_endurance_coach.analysis.execution import (
+            aggregate_weeks,
+            build_review,
+            compare_trajectory,
+            match_execution,
+        )
+
+        block_start = block_plan[0].week_start if review_default else None
+        reviewed_events = [
+            event
+            for event in events
+            if block_start is None or event.start_date_local.date() >= block_start
+        ]
+        reviewed_activities = [
+            activity
+            for activity in activities
+            if block_start is None or activity.start_date_local.date() >= block_start
+        ]
+        match = match_execution(reviewed_events, reviewed_activities, today=today)
+        weeks = aggregate_weeks(match, today=today, origin=block_plan[0].week_start)
+        efficacy = compare_trajectory(weeks, block_plan, rollup)
+        execution_review = build_review(match, weeks, efficacy)
     return build_within_budget(
         focus=focus,
         recent_activities=activities,
@@ -262,9 +294,8 @@ async def gather_context(
             event for event in reversed(events) if event.start_date_local.date() < today
         ],
         goal_races=goal_races,
-        block_plan=derive_block_plan(
-            goal_races, rollup, today=today, illness=plan.illness, elite=plan.elite
-        ),
+        block_plan=block_plan,
+        execution_review=execution_review,
         training_rollup=rollup,
         sport_settings=[SportSettings.model_validate(item) for item in settings_raw],
         user_feedback=user_feedback,

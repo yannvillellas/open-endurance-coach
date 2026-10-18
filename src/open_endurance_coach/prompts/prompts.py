@@ -127,6 +127,12 @@ PROPOSAL_POLICY = (
     "workouts for the next 7-14 days only, inside the visible calendar window. Never "
     "restate macro phases from memory.\n"
     "Rows statused rest, repeat, step_back or omitted: follow their role.\n"
+    "When <execution_review> is present, answer the review from it: per week the "
+    "plan status, the executed load against the band and the hub's CTL/ramp; per "
+    "session the planned-vs-actual detail, always, whatever the status. Close on "
+    "whether the intended trajectory was accompanied by a comparable real movement "
+    "- suggestive, never causal, no composite score. Rest, repeat, step_back and "
+    "omitted weeks are the plan, not failures.\n"
     "An active injury or health fact is a hard constraint on the sessions: adapt the "
     "modality, never load the injured area, stay under the pain threshold, and accept "
     "missing the block band rather than violating the constraint.\n"
@@ -301,10 +307,13 @@ def _user_message(context: CoachContext) -> str:
     data = context.sections()
     focus = str(data.pop("focus", ""))
     block_plan = str(data.pop("block_plan", ""))
+    execution_review = str(data.pop("execution_review", ""))
     payload = _safe(json.dumps(_finite(data), indent=2, ensure_ascii=False))
     parts = [f"<athlete_data>\n{payload}\n</athlete_data>\n"]
     if block_plan:
         parts.append(f"<block_plan>\n{_safe(block_plan)}\n</block_plan>\n")
+    if execution_review:
+        parts.append(f"<execution_review>\n{_safe(execution_review)}\n</execution_review>\n")
     parts.append(f"<athlete_message>\n{_safe(focus)}\n</athlete_message>\n")
     parts.append("Respond per the contract.\n")
     return "".join(parts)

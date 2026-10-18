@@ -292,6 +292,8 @@ class CoachEngine:
             focus,
             user_feedback=user_feedback,
             today=current,
+            review_execution=resolution.review_execution,
+            review_default=resolution.review_default,
         )
 
     def _surface_unseen(self, context: CoachContext) -> CoachContext:

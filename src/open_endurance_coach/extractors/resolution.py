@@ -90,6 +90,7 @@ class PlanResolution:
     plan: ContextPlan
     notices: tuple[str, ...]
     review_execution: bool = False
+    review_default: bool = False
 
 
 def _messages_tokens(messages: Sequence[LlmMessage]) -> int:
@@ -177,7 +178,7 @@ def _apply_review(plan: ContextPlan, resolved: ResolvedContext, today: date) -> 
     if not resolved.review_execution:
         return plan
     window = DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today)
-    return replace(plan, activities=window, events=window)
+    return replace(plan, activities=window, events=DateRange(window.start, plan.events.end))
 
 
 def _plan_from_resolution(
@@ -197,6 +198,7 @@ def _plan_from_resolution(
             plan,
             (_announcement(label, resolved),),
             review_execution=resolved.review_execution,
+            review_default=resolved.review_execution,
         )
 
     start = resolved.window.start
@@ -211,6 +213,7 @@ def _plan_from_resolution(
                 + f" · invalid window ignored: {start} → {resolved.window.end}.",
             ),
             review_execution=resolved.review_execution,
+            review_default=resolved.review_execution,
         )
 
     scope = DateRange(start, end)

@@ -11,7 +11,7 @@ from open_endurance_coach.extractors.resolution import (
     _resolution_system,
     resolve_context_plan,
 )
-from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS
+from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS, UPCOMING_DAYS
 from open_endurance_coach.tokens import estimate_text_tokens
 
 from .fakes import FakeLlmProvider, RecordingSleep
@@ -344,9 +344,12 @@ async def test_a_review_signal_resolves_the_planning_horizon(settings: Settings)
     )
 
     assert resolution.review_execution is True
+    assert resolution.review_default is True
     horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
     assert resolution.plan.activities == horizon
-    assert resolution.plan.events == horizon
+    assert resolution.plan.events == DateRange(
+        TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)
+    )
     assert resolution.plan.wellness == ContextPlan.standard(TODAY).wellness
     assert resolution.notices[0].startswith("Fetch: 2023-06-22 → 2024-02-01")
 
@@ -365,6 +368,7 @@ async def test_a_review_with_an_explicit_period_keeps_the_window(settings: Setti
     resolution = await resolve_context_plan(client, "review 1-20 dec against the plan", today=TODAY)
 
     assert resolution.review_execution is True
+    assert resolution.review_default is False
     assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
     assert resolution.plan.events == DateRange(date(2023, 12, 1), date(2023, 12, 20))
 
@@ -386,9 +390,12 @@ async def test_an_invalid_window_review_gets_the_default_horizon(settings: Setti
     resolution = await resolve_context_plan(client, "review my block", today=TODAY)
 
     assert resolution.review_execution is True
+    assert resolution.review_default is True
     horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
     assert resolution.plan.activities == horizon
-    assert resolution.plan.events == horizon
+    assert resolution.plan.events == DateRange(
+        TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)
+    )
     assert "invalid window ignored" in resolution.notices[0]
     assert "Fetch: 2023-06-22 → 2024-02-01" in resolution.notices[0]
 

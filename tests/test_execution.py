@@ -3,6 +3,7 @@ from datetime import date, datetime
 from open_endurance_coach.analysis.execution import (
     WeekReview,
     aggregate_weeks,
+    build_review,
     compare_trajectory,
     match_execution,
 )
@@ -194,7 +195,7 @@ def test_today_and_the_future_sessions_are_pending_not_missed() -> None:
 
 def test_today_is_judged_when_the_session_is_already_done() -> None:
     events = [planned(1, TODAY)]
-    activities = [activity("a-today", TODAY, compliance=85.0)]
+    activities = [activity("a-today", TODAY, compliance=85.0, paired_event_id=1)]
 
     result = match_execution(events, activities, today=TODAY)
 
@@ -248,7 +249,7 @@ def test_an_activity_paired_outside_the_review_is_not_reused() -> None:
 
 def test_a_zero_compliance_is_read_as_zero() -> None:
     events = [planned(1, date(2024, 2, 10), load=100.0)]
-    activities = [activity("a1", date(2024, 2, 10), load=100.0, compliance=0.0)]
+    activities = [activity("a1", date(2024, 2, 10), load=100.0, compliance=0.0, paired_event_id=1)]
 
     result = match_execution(events, activities, today=TODAY)
 
@@ -268,7 +269,7 @@ def test_an_unmatched_activity_dated_today_is_not_unplanned() -> None:
 
 def test_compliance_classifies_first_even_when_the_load_matches() -> None:
     events = [planned(1, load=100.0)]
-    activities = [activity("a1", load=100.0, compliance=60.0)]
+    activities = [activity("a1", load=100.0, compliance=60.0, paired_event_id=1)]
 
     result = match_execution(events, activities, today=TODAY)
 
@@ -609,3 +610,92 @@ def test_efficacy_keeps_the_review_order_and_reads_zero_loads() -> None:
     assert rows[1].executed_load == 50.0
     assert (rows[1].fitness, rows[1].ramp) == (0.0, 0.0)
     assert rows[0].fitness is None
+
+
+def test_build_review_keeps_the_week_rows_and_the_session_detail() -> None:
+    events = [
+        planned(1, date(2024, 2, 5), load=100.0),
+        planned(2, TODAY, load=80.0),
+    ]
+    activities = [
+        activity("a1", date(2024, 2, 5), load=90.0, compliance=95.0, paired_event_id=1),
+        activity("a2", date(2024, 2, 7), activity_type="Run", load=40.0),
+        activity("a3", TODAY, load=80.0, compliance=0.0),
+    ]
+    match = match_execution(events, activities, today=TODAY)
+    weeks = aggregate_weeks(match, today=TODAY)
+    block = [
+        block_row(date(2024, 2, 5), status="done", low=90.0, high=110.0),
+        block_row(TODAY, status="current", low=60.0, high=90.0),
+    ]
+    rollup = [
+        rollup_week(date(2024, 2, 5), fitness=52.0, ramp=3.2),
+        rollup_week(TODAY, fitness=54.0, ramp=2.0),
+    ]
+    efficacy = compare_trajectory(weeks, block, rollup)
+
+    review = build_review(match, weeks, efficacy)
+
+    assert [week.status for week in review.weeks] == ["done", "current"]
+    assert review.weeks[0].band_low == 90.0
+    assert review.weeks[0].completed == 1
+    assert review.weeks[0].planned_load == 100.0
+    assert review.weeks[0].executed_load == 130.0  # matched 90 + unplanned 40
+    assert review.weeks[0].fitness == 52.0
+    assert [(session.date, session.status) for session in review.sessions] == [
+        (date(2024, 2, 5), "completed"),
+        (date(2024, 2, 7), "unplanned"),
+        (TODAY, "completed"),
+    ]
+    first = review.sessions[0]
+    assert (first.planned, first.planned_load) == ("Planned Session", 100.0)
+    assert (first.actual, first.actual_load) == ("Synthetic Workout", 90.0)
+    assert first.compliance == 95.0
+    assert review.sessions[-1].compliance is None  # unpaired sentinel never leaks
+
+
+def test_an_unscored_fallback_match_reads_the_load_ratio() -> None:
+    events = [planned(1, date(2024, 2, 10), load=100.0)]
+    activities = [activity("a1", date(2024, 2, 10), load=100.0, compliance=0.0)]
+
+    result = match_execution(events, activities, today=TODAY)
+
+    assert result.sessions[0].paired is False
+    assert result.sessions[0].status == "completed"
+    assert result.sessions[0].completion == 1.0
+
+
+def test_weeks_follow_the_block_cadence() -> None:
+    events = [planned(1, date(2024, 2, 5), load=100.0)]
+    activities = [activity("a1", date(2024, 2, 5), load=100.0)]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = aggregate_weeks(match, today=TODAY, origin=date(2024, 2, 4))
+
+    assert [review.week_start for review in reviews] == [
+        date(2024, 2, 4),
+        date(2024, 2, 11),
+    ]
+    assert reviews[1].current is True
+
+
+def test_a_done_early_session_is_counted_in_its_week() -> None:
+    events = [
+        planned(1, date(2024, 2, 5), load=100.0),
+        planned(5, date(2024, 2, 20), load=100.0),
+    ]
+    activities = [
+        activity("a1", date(2024, 2, 5), load=100.0),
+        activity("a2", TODAY, paired_event_id=5, load=100.0),
+    ]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = aggregate_weeks(match, today=TODAY)
+
+    assert [review.week_start for review in reviews] == [
+        date(2024, 2, 5),
+        date(2024, 2, 12),
+        date(2024, 2, 19),
+    ]
+    assert reviews[-1].completed == 1
+    assert reviews[-1].executed_load == 100.0

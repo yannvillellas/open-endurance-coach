@@ -24,7 +24,7 @@ from open_endurance_coach.schemas.decisions import (
 )
 from open_endurance_coach.tokens import estimate_text_tokens
 
-SYSTEM_PROMPT_TOKEN_BUDGET = 3700
+SYSTEM_PROMPT_TOKEN_BUDGET = 3850
 
 CONTEXT = CoachContext.model_validate(
     {
@@ -406,6 +406,79 @@ def test_user_message_renders_the_block_plan_as_a_markdown_table() -> None:
         "| 2024-02-12 | Base 6 | Base: aerobic volume, Z2; one long session."
         " | — | upcoming |" in user
     )
+
+
+def _context_with_execution_review() -> CoachContext:
+    return CoachContext.model_validate(
+        {
+            **CONTEXT.model_dump(),
+            "execution_review": {
+                "weeks": [
+                    {
+                        "week_start": "2024-01-22",
+                        "phase": "Base",
+                        "status": "done",
+                        "band_low": 300,
+                        "band_high": 400,
+                        "planned_load": 340,
+                        "executed_load": 350,
+                        "unplanned_load": 40,
+                        "unplanned_share": 0.3077,
+                        "completed": 2,
+                        "partial": 1,
+                        "missed": 1,
+                        "adherence": 0.5,
+                        "fitness": 52,
+                        "ramp": 3.2,
+                    }
+                ],
+                "sessions": [
+                    {
+                        "date": "2024-01-23",
+                        "status": "completed",
+                        "planned": "Tempo 3x12",
+                        "planned_load": 120,
+                        "actual": "Bike - tempo",
+                        "actual_load": 118,
+                        "compliance": 92,
+                    },
+                    {
+                        "date": "2024-01-25",
+                        "status": "missed",
+                        "planned": "Endurance 3 h",
+                        "planned_load": 180,
+                    },
+                    {
+                        "date": "2024-01-27",
+                        "status": "unplanned",
+                        "actual": "Bike - cafe",
+                        "actual_load": 90,
+                    },
+                ],
+            },
+        }
+    )
+
+
+def test_the_prompt_carries_the_execution_review_block() -> None:
+    user = build_messages(_context_with_execution_review(), make_settings())[1].content
+
+    assert "<execution_review>" in user
+    assert (
+        "| Week | Phase | Status | Band | Planned | Executed | C/P/M | Adherence"
+        " | Unplanned | CTL | Ramp |" in user
+    )
+    assert "planned Tempo 3x12 120 TSS → Bike - tempo 118 TSS, compliance 92% — completed" in user
+    assert "| 340 | 350 | 2/1/1 | 50% | 40 (31%) | 52 | +3.2 |" in user
+    assert "planned Endurance 3 h 180 TSS — missed" in user
+    assert "unplanned: Bike - cafe 90 TSS" in user
+    assert "execution_review" not in user.split("<execution_review>")[0]
+
+
+def test_the_prompt_explains_the_review_policy() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "When <execution_review> is present" in system
+    assert "suggestive, never causal" in system
 
 
 def test_the_block_plan_leaves_the_json_payload() -> None:
