@@ -14,7 +14,9 @@ sees the recent conversation and the active athlete facts, ranked and capped at 
 25 as the memory injection, and is itself fitted to the input budget
 (`extractors/resolution.py`): a strict JSON reply gives the exact past window (or none
 for tactical questions), the sport, the metric, whether one activity must be detailed,
-and the declared athlete state (illness, elite). The code validates the dates, caps the
+whether the question reviews past execution against the plan (`review_execution` —
+then a review without its own period reads the whole planning horizon), and the declared
+athlete state (illness, elite). The code validates the dates, caps the
 windows (activities 3650 days, wellness and events 365 days) and announces what was read
 with one `Fetch:` line (`state:` included when declared); a resolution failure falls back
 to the standard windows with a warning. A refinement sent while a proposal is open

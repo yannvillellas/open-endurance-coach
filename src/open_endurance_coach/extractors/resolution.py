@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from open_endurance_coach.chat.history import trim_history
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
 from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
+from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS
 from open_endurance_coach.tokens import estimate_text_tokens
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ _RESOLUTION_PROMPT = (
     '{"window": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"} or null, '
     '"sport": "<activity type or null>", '
     '"metric": "heart_rate" or "elevation" or null, '
-    '"detail": true or false}\n'
+    '"detail": true or false, "review_execution": true or false}\n'
     "- window: the exact past period the question is about; use null when the "
     "question only needs the recent context.\n"
     "- sport: set it only when the question names a sport (Ride, Run, Swim, ...).\n"
@@ -38,6 +39,9 @@ _RESOLUTION_PROMPT = (
     "or sick.\n"
     "- elite: true only when an active athlete fact says the athlete is professional or "
     "elite.\n"
+    "- review_execution: true only when the question asks to compare the past execution "
+    "against what was planned (did the athlete follow the plan, how did the weeks go "
+    "against it), whatever the wording; false otherwise.\n"
     "A follow-up or clarification keeps the period of the question it refers to."
 )
 
@@ -78,12 +82,14 @@ class ResolvedContext(BaseModel):
     detail: bool = False
     illness: bool = False
     elite: bool = False
+    review_execution: bool = False
 
 
 @dataclass(frozen=True)
 class PlanResolution:
     plan: ContextPlan
     notices: tuple[str, ...]
+    review_execution: bool = False
 
 
 def _messages_tokens(messages: Sequence[LlmMessage]) -> int:
@@ -162,6 +168,18 @@ def _with_state(plan: ContextPlan, resolved: ResolvedContext) -> ContextPlan:
     return replace(plan, illness=resolved.illness, elite=resolved.elite)
 
 
+def _range_label(window: DateRange) -> str:
+    return f"{window.start.isoformat()} → {window.end.isoformat()}"
+
+
+def _apply_review(plan: ContextPlan, resolved: ResolvedContext, today: date) -> ContextPlan:
+    """A review without its own period reads the whole planning horizon."""
+    if not resolved.review_execution:
+        return plan
+    window = DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today)
+    return replace(plan, activities=window, events=window)
+
+
 def _plan_from_resolution(
     resolved: ResolvedContext, today: date, standard: ContextPlan
 ) -> PlanResolution:
@@ -173,19 +191,26 @@ def _plan_from_resolution(
             reference=None,
             detail=resolved.detail,
         )
+        plan = _apply_review(_with_state(plan, resolved), resolved, today)
+        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
         return PlanResolution(
-            _with_state(plan, resolved), (_announcement("standard windows", resolved),)
+            plan,
+            (_announcement(label, resolved),),
+            review_execution=resolved.review_execution,
         )
 
     start = resolved.window.start
     end = min(resolved.window.end, today)
     if end < start:
+        plan = _apply_review(_with_state(standard, resolved), resolved, today)
+        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
         return PlanResolution(
-            _with_state(standard, resolved),
+            plan,
             (
-                _announcement("standard windows", resolved)
+                _announcement(label, resolved)
                 + f" · invalid window ignored: {start} → {resolved.window.end}.",
             ),
+            review_execution=resolved.review_execution,
         )
 
     scope = DateRange(start, end)
@@ -215,7 +240,7 @@ def _plan_from_resolution(
             "Window clipped: wellness and past events keep up to "
             f"{MAX_WELLNESS_WINDOW_DAYS + 1} dates."
         )
-    return PlanResolution(plan, tuple(notices))
+    return PlanResolution(plan, tuple(notices), review_execution=resolved.review_execution)
 
 
 async def resolve_context_plan(

@@ -11,6 +11,7 @@ from open_endurance_coach.extractors.resolution import (
     _resolution_system,
     resolve_context_plan,
 )
+from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS
 from open_endurance_coach.tokens import estimate_text_tokens
 
 from .fakes import FakeLlmProvider, RecordingSleep
@@ -333,3 +334,150 @@ async def test_a_clarification_sees_the_conversation(settings: Settings) -> None
         "A follow-up or clarification keeps the period of the question it refers to."
         in request["messages"][0].content
     )
+
+
+async def test_a_review_signal_resolves_the_planning_horizon(settings: Settings) -> None:
+    client = make_client(settings, [{"window": None, "review_execution": True}])
+
+    resolution = await resolve_context_plan(
+        client, "how did my weeks go against the plan?", today=TODAY
+    )
+
+    assert resolution.review_execution is True
+    horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
+    assert resolution.plan.activities == horizon
+    assert resolution.plan.events == horizon
+    assert resolution.plan.wellness == ContextPlan.standard(TODAY).wellness
+    assert resolution.notices[0].startswith("Fetch: 2023-06-22 → 2024-02-01")
+
+
+async def test_a_review_with_an_explicit_period_keeps_the_window(settings: Settings) -> None:
+    client = make_client(
+        settings,
+        [
+            {
+                "window": {"start": "2023-12-01", "end": "2023-12-20"},
+                "review_execution": True,
+            }
+        ],
+    )
+
+    resolution = await resolve_context_plan(client, "review 1-20 dec against the plan", today=TODAY)
+
+    assert resolution.review_execution is True
+    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    assert resolution.plan.events == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+
+
+async def test_review_execution_defaults_to_false(settings: Settings) -> None:
+    client = make_client(settings, [{"window": None}])
+
+    resolution = await resolve_context_plan(client, "status check", today=TODAY)
+
+    assert resolution.review_execution is False
+
+
+async def test_an_invalid_window_review_gets_the_default_horizon(settings: Settings) -> None:
+    client = make_client(
+        settings,
+        [{"window": {"start": "2024-01-20", "end": "2024-01-10"}, "review_execution": True}],
+    )
+
+    resolution = await resolve_context_plan(client, "review my block", today=TODAY)
+
+    assert resolution.review_execution is True
+    horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
+    assert resolution.plan.activities == horizon
+    assert resolution.plan.events == horizon
+    assert "invalid window ignored" in resolution.notices[0]
+    assert "Fetch: 2023-06-22 → 2024-02-01" in resolution.notices[0]
+
+
+async def test_the_resolution_prompt_asks_for_the_review_signal(settings: Settings) -> None:
+    provider = FakeLlmProvider(resolutions=['{"window": null}'])
+    client = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+
+    await resolve_context_plan(client, "status check", today=TODAY)
+
+    system = provider.resolution_calls[0]["messages"][0].content
+    assert '"review_execution": true or false' in system
+    assert "compare the past execution against what was planned" in system
+
+
+async def test_a_review_keeps_the_detail_reference_and_the_sport_filter(
+    settings: Settings,
+) -> None:
+    client = make_client(
+        settings,
+        [
+            {
+                "window": {"start": "2023-12-01", "end": "2023-12-20"},
+                "review_execution": True,
+                "sport": "Ride",
+                "metric": "heart_rate",
+                "detail": True,
+            }
+        ],
+    )
+
+    resolution = await resolve_context_plan(
+        client, "review that ride against the plan", today=TODAY
+    )
+
+    assert resolution.plan.detail is True
+    assert resolution.plan.reference == date(2023, 12, 20)
+    assert resolution.plan.activity_types == RIDE_TYPES
+    assert resolution.plan.metric_focus == "heart_rate"
+
+
+async def test_a_default_review_keeps_the_sport_filter(settings: Settings) -> None:
+    client = make_client(
+        settings,
+        [{"window": None, "review_execution": True, "sport": "Ride", "metric": "elevation"}],
+    )
+
+    resolution = await resolve_context_plan(
+        client, "how did my climbing go against the plan?", today=TODAY
+    )
+
+    assert resolution.plan.activities == DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
+    assert resolution.plan.activity_types == RIDE_TYPES
+    assert resolution.plan.metric_focus == "elevation"
+
+
+async def test_an_invalid_review_window_keeps_the_state_and_the_wellness(
+    settings: Settings,
+) -> None:
+    client = make_client(
+        settings,
+        [
+            {
+                "window": {"start": "2024-01-20", "end": "2024-01-10"},
+                "review_execution": True,
+                "illness": True,
+            }
+        ],
+    )
+
+    resolution = await resolve_context_plan(client, "review my block while I am ill", today=TODAY)
+
+    assert resolution.review_execution is True
+    assert resolution.plan.illness is True
+    horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
+    assert resolution.plan.activities == horizon
+    assert resolution.plan.wellness == ContextPlan.standard(TODAY).wellness
+    assert "state: illness" in resolution.notices[0]
+
+
+async def test_a_failed_resolution_does_not_flag_a_review(settings: Settings) -> None:
+    client = make_client(settings, ["not json", "still not json"])
+
+    resolution = await resolve_context_plan(client, "review my block", today=TODAY)
+
+    assert resolution.review_execution is False
+    assert resolution.plan == ContextPlan.standard(TODAY)
+    assert "resolution failed" in resolution.notices[0]
