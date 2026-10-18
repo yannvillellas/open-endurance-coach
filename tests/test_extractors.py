@@ -12,7 +12,14 @@ from open_endurance_coach.extractors.context import (
     gather_context,
 )
 from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS, training_rollup
-from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
+from open_endurance_coach.schemas.context import (
+    BlockWeek,
+    CoachContext,
+    ExecutionReview,
+    GoalRace,
+    ReviewWeek,
+    TrainingWeek,
+)
 from open_endurance_coach.schemas.intervals import (
     Activity,
     ActivitySplit,
@@ -652,3 +659,61 @@ async def test_budget_keeps_the_activity_detail_over_the_splits() -> None:
 
     assert context.activity_detail is not None
     assert context.activity_splits == []
+
+
+def test_the_execution_review_is_evicted_after_the_block_plan(settings: Settings) -> None:
+    review = ExecutionReview(
+        weeks=[
+            ReviewWeek(
+                week_start=date(2024, 1, 29),
+                phase="Base",
+                status="done",
+                band_low=300.0,
+                band_high=400.0,
+                executed_load=350.0,
+                completed=3,
+                adherence=1.0,
+            )
+        ],
+        sessions=[],
+    )
+    base = build_within_budget(
+        focus="review",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        execution_review=review,
+        user_feedback=None,
+        activity_detail=None,
+        today=date(2024, 2, 1),
+        max_tokens=100_000,
+    )
+
+    context = build_within_budget(
+        focus="review",
+        recent_activities=[],
+        wellness=[],
+        upcoming_events=[],
+        sport_settings=[],
+        execution_review=review,
+        user_feedback=None,
+        activity_detail=None,
+        today=date(2024, 2, 1),
+        block_plan=[
+            BlockWeek(
+                week_start=date(2024, 1, 1) + timedelta(days=7 * index),
+                phase="Base",
+                week_in_phase=(index % 12) + 1,
+                role="Endurance",
+                target_tss_low=300.0,
+                target_tss_high=400.0,
+                status="upcoming",
+            )
+            for index in range(30)
+        ],
+        max_tokens=base.data_tokens(),
+    )
+
+    assert context.block_plan == []
+    assert context.execution_review is not None

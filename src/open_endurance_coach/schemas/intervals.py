@@ -33,6 +33,8 @@ class Activity(BaseModel):
     icu_training_load: float | None = None
     moving_time: int | None = None
     distance: float | None = None
+    compliance: float | None = None
+    paired_event_id: int | None = None
     total_elevation_gain: float | None = None
     icu_average_watts: float | None = None
     icu_weighted_avg_watts: float | None = None

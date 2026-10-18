@@ -14,7 +14,7 @@ from open_endurance_coach.extractors.standard import (
     WELLNESS_LOOKBACK_DAYS,
 )
 
-from .fakes import make_activity, make_intervals_client
+from .fakes import FakeIntervalsClient, make_activity, make_intervals_client, make_summary_week
 
 TODAY = date(2024, 2, 1)
 
@@ -283,3 +283,161 @@ async def test_unexpected_stream_errors_keep_the_detail(
 
     assert context.activity_detail is not None
     assert context.activity_splits == []
+
+
+def _review_client() -> FakeIntervalsClient:
+    weeks = [date(2024, 1, 1) + timedelta(days=7 * index) for index in range(7)]
+    activities = [
+        {
+            "id": f"a-{day.isoformat()}",
+            "start_date_local": f"{day.isoformat()}T08:00:00",
+            "type": "Ride",
+            "name": f"Ride {day.isoformat()}",
+            "icu_training_load": 100.0,
+            "moving_time": 3600,
+        }
+        for day in weeks[:-1]
+        if day != date(2024, 1, 29)
+    ]
+    activities.append(
+        {
+            "id": "a-2024-02-06",
+            "start_date_local": "2024-02-06T08:00:00",
+            "type": "Run",
+            "name": "Lunch run",
+            "icu_training_load": 40.0,
+            "moving_time": 1800,
+        }
+    )
+    events = [
+        {
+            "id": index + 1,
+            "name": f"Workout {index + 1}",
+            "start_date_local": f"{day.isoformat()}T00:00:00",
+            "category": "WORKOUT",
+            "type": "Ride",
+            "icu_training_load": 100.0,
+        }
+        for index, day in enumerate(weeks[:-1])
+    ]
+    events.append(
+        {
+            "id": 99,
+            "name": "Summer Race",
+            "start_date_local": "2024-07-08T00:00:00",
+            "category": "RACE_A",
+            "type": "Run",
+            "icu_training_load": 300.0,
+        }
+    )
+    summary = [
+        make_summary_week(day.isoformat(), fitness=50.0 + index, ramp_rate=2.0)
+        for index, day in enumerate(weeks)
+    ]
+    return make_intervals_client(activities=activities, events=events, athlete_summary=summary)
+
+
+async def test_gather_context_builds_the_execution_review() -> None:
+    today = date(2024, 2, 12)
+    plan = replace(
+        ContextPlan.standard(today),
+        activities=DateRange(today - timedelta(days=45), today),
+        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+    )
+
+    context = await gather_context(
+        _review_client(),
+        plan,
+        "how did my weeks go against the plan?",
+        today=today,
+        review_execution=True,
+        review_default=True,
+    )
+
+    review = context.execution_review
+    assert review is not None
+    reviewed = [session.date for session in review.sessions]
+    assert min(reviewed) >= date(2024, 1, 22)
+    assert date(2024, 1, 1) not in reviewed
+    assert date(2024, 1, 15) not in reviewed
+    assert any(session.status == "missed" for session in review.sessions)
+    assert any(session.status == "unplanned" for session in review.sessions)
+    assert review.weeks[0].week_start == date(2024, 1, 22)
+    assert review.weeks[-1].current is True
+
+
+async def test_gather_context_skips_the_review_without_the_signal() -> None:
+    today = date(2024, 2, 12)
+    plan = replace(
+        ContextPlan.standard(today),
+        activities=DateRange(today - timedelta(days=45), today),
+        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+    )
+
+    context = await gather_context(_review_client(), plan, "status check", today=today)
+
+    assert context.execution_review is None
+
+
+async def test_an_explicit_review_period_is_not_clipped_at_the_block() -> None:
+    today = date(2024, 2, 12)
+    plan = replace(
+        ContextPlan.standard(today),
+        activities=DateRange(today - timedelta(days=60), today),
+        events=DateRange(today - timedelta(days=60), today + timedelta(days=14)),
+    )
+
+    context = await gather_context(
+        _review_client(),
+        plan,
+        "review January against the plan",
+        today=today,
+        review_execution=True,
+    )
+
+    review = context.execution_review
+    assert review is not None
+    assert date(2024, 1, 1) in [session.date for session in review.sessions]
+    assert review.weeks[0].week_start == date(2024, 1, 22)
+
+
+async def test_a_review_without_a_race_reads_no_digest() -> None:
+    today = date(2024, 2, 12)
+    client = make_intervals_client(
+        athlete_summary=[make_summary_week("2024-02-05"), make_summary_week("2024-02-12")]
+    )
+    plan = replace(
+        ContextPlan.standard(today),
+        activities=DateRange(today - timedelta(days=45), today),
+        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+    )
+
+    context = await gather_context(
+        client, plan, "review my block", today=today, review_execution=True, review_default=True
+    )
+
+    assert context.execution_review is None
+
+
+async def test_the_digest_is_computed_before_the_budget_eviction() -> None:
+    today = date(2024, 2, 12)
+    plan = replace(
+        ContextPlan.standard(today),
+        activities=DateRange(today - timedelta(days=45), today),
+        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+    )
+
+    context = await gather_context(
+        _review_client(),
+        plan,
+        "how did my weeks go against the plan?",
+        today=today,
+        max_tokens=1200,
+        review_execution=True,
+        review_default=True,
+    )
+
+    assert context.execution_review is not None
+    oldest = date(2024, 1, 22)
+    assert oldest in [session.date for session in context.execution_review.sessions]
+    assert all(activity.start_date_local.date() > oldest for activity in context.recent_activities)

@@ -43,6 +43,7 @@ _SECTION_KEYS = (
     "upcoming_events",
     "goal_races",
     "block_plan",
+    "execution_review",
     "training_rollup",
     "sport_settings",
     "activity_splits",
@@ -93,6 +94,8 @@ def _section_payload(key: str, value: Any) -> Any:
         return [_event_payload(event) for event in value]
     if key == "block_plan":
         return block_plan_table(value)
+    if key == "execution_review":
+        return execution_review_text(value)
     if key in _MODEL_LIST_KEYS:
         return [item.model_dump(mode="json", exclude_none=True) for item in value]
     if key in ("activity_detail", "current_proposal"):
@@ -181,6 +184,122 @@ def block_plan_table(rows: list[BlockWeek]) -> str:
     return "\n".join(lines)
 
 
+class ReviewWeek(BaseModel):
+    """One judged week of the execution review, joined with its adjusted plan row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    week_start: date
+    phase: BlockPhase
+    status: BlockWeekStatus
+    band_low: float | None = None
+    band_high: float | None = None
+    planned_load: float | None = None
+    executed_load: float | None = None
+    completed: int = Field(default=0, ge=0)
+    partial: int = Field(default=0, ge=0)
+    missed: int = Field(default=0, ge=0)
+    adherence: float | None = None
+    unplanned_load: float | None = None
+    unplanned_share: float | None = None
+    fitness: float | None = None
+    ramp: float | None = None
+    current: bool = False
+
+
+class ReviewSession(BaseModel):
+    """One judged session (or unplanned activity) with its exact planned/actual numbers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    date: date
+    status: Literal["completed", "partial", "missed", "unplanned"]
+    planned: str | None = None
+    planned_load: float | None = None
+    planned_time_s: int | None = None
+    planned_distance_m: float | None = None
+    actual: str | None = None
+    actual_load: float | None = None
+    actual_time_s: int | None = None
+    actual_distance_m: float | None = None
+    compliance: float | None = None
+
+
+class ExecutionReview(BaseModel):
+    """The compact execution digest injected for a review turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    weeks: list[ReviewWeek] = Field(default_factory=list)
+    sessions: list[ReviewSession] = Field(default_factory=list)
+
+
+def _quantity(load: float | None, time_s: int | None, distance_m: float | None) -> str:
+    if load is not None:
+        return f"{load:.0f} TSS"
+    if time_s is not None:
+        return f"{time_s / 3600:.1f} h"
+    if distance_m is not None:
+        return f"{distance_m / 1000:.1f} km"
+    return "—"
+
+
+def execution_review_text(review: ExecutionReview) -> str:
+    """The execution review as a compact Markdown table plus one line per session."""
+    if not review.weeks and not review.sessions:
+        return ""
+    lines: list[str] = []
+    if review.weeks:
+        lines.extend(
+            (
+                "| Week | Phase | Status | Band | Planned | Executed | C/P/M | Adherence"
+                " | Unplanned | CTL | Ramp |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            )
+        )
+    for week in review.weeks:
+        band = (
+            "—"
+            if week.band_low is None or week.band_high is None
+            else f"{week.band_low:.0f}-{week.band_high:.0f}"
+        )
+        planned = "—" if week.planned_load is None else f"{week.planned_load:.0f}"
+        executed = "—" if week.executed_load is None else f"{week.executed_load:.0f}"
+        adherence = "—" if week.adherence is None else f"{week.adherence:.0%}"
+        fitness = "—" if week.fitness is None else f"{week.fitness:.0f}"
+        ramp = "—" if week.ramp is None else f"{week.ramp:+.1f}"
+        if week.unplanned_load is None:
+            unplanned = "—"
+        elif week.unplanned_share is None:
+            unplanned = f"{week.unplanned_load:.0f}"
+        else:
+            unplanned = f"{week.unplanned_load:.0f} ({week.unplanned_share:.0%})"
+        lines.append(
+            f"| {week.week_start.isoformat()} | {week.phase} | {week.status} | {band}"
+            f" | {planned} | {executed} | {week.completed}/{week.partial}/{week.missed}"
+            f" | {adherence} | {unplanned} | {fitness} | {ramp} |"
+        )
+    for session in review.sessions:
+        actual_q = _quantity(session.actual_load, session.actual_time_s, session.actual_distance_m)
+        name = _table_cell(session.actual or "")
+        if session.status == "unplanned":
+            lines.append(f"- {session.date.isoformat()} unplanned: {name} {actual_q}")
+            continue
+        planned_q = _quantity(
+            session.planned_load, session.planned_time_s, session.planned_distance_m
+        )
+        planned = f"{_table_cell(session.planned or '')} {planned_q}"
+        if session.status == "missed":
+            lines.append(f"- {session.date.isoformat()} planned {planned} — missed")
+            continue
+        share = f", compliance {session.compliance:.0f}%" if session.compliance is not None else ""
+        lines.append(
+            f"- {session.date.isoformat()} planned {planned} → {name} {actual_q}"
+            f"{share} — {session.status}"
+        )
+    return "\n".join(lines)
+
+
 class CoachContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -195,6 +314,7 @@ class CoachContext(BaseModel):
     upcoming_events: list[Event] = Field(default_factory=list)
     goal_races: list[GoalRace] = Field(default_factory=list)
     block_plan: list[BlockWeek] = Field(default_factory=list)
+    execution_review: ExecutionReview | None = None
     training_rollup: list[TrainingWeek] = Field(default_factory=list)
     sport_settings: list[SportSettings] = Field(default_factory=list)
     user_feedback: str | None = None
@@ -214,6 +334,8 @@ class CoachContext(BaseModel):
         }
         if self.block_plan:
             raw["block_plan"] = self.block_plan
+        if self.execution_review is not None:
+            raw["execution_review"] = self.execution_review
         raw["training_rollup"] = self.training_rollup
         raw["sport_settings"] = self.sport_settings
         if self.activity_splits:

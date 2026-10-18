@@ -230,6 +230,7 @@ def test_section_tokens_reports_per_section() -> None:
         "upcoming_events",
         "goal_races",
         "block_plan",
+        "execution_review",
         "training_rollup",
         "sport_settings",
         "user_feedback",
