@@ -61,7 +61,8 @@ Applied:
   JSON call), announces what it read (`Fetch: …`) and gathers only what is needed from
   Intervals.icu (recent activities, the calendar, wellness, sport settings, goal races,
   a weekly rollup), budgeted to the model's token limit; an explicit past window is
-  read exactly, with per-source caps. See [docs/architecture.md](docs/architecture.md).
+  read exactly, with per-source caps; several scattered cited days each get their own
+  narrow window. See [docs/architecture.md](docs/architecture.md).
 - **Analysis** — the model answers through a strict JSON schema (invalid output is
   retried, then rejected) using periodization and power analytics, comparing planned
   against executed and current readiness (CTL/ATL, HRV, sleep).

@@ -1,16 +1,20 @@
 import logging
 from datetime import date, timedelta
+from typing import Any
 
 import pytest
 
+from open_endurance_coach.clients.llm import LlmClient
 from open_endurance_coach.config import Settings
 from open_endurance_coach.errors import InternalError
 from open_endurance_coach.extractors.budget import build_within_budget
 from open_endurance_coach.extractors.context import (
     ContextPlan,
+    DateRange,
     _warn_on_split_coverage,
     gather_context,
 )
+from open_endurance_coach.extractors.resolution import resolve_context_plan
 from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS, training_rollup
 from open_endurance_coach.schemas.context import (
     BlockWeek,
@@ -31,6 +35,8 @@ from open_endurance_coach.schemas.intervals import (
 from .fakes import (
     TODAY,
     FakeIntervalsClient,
+    FakeLlmProvider,
+    RecordingSleep,
     make_activity,
     make_event,
     make_intervals_client,
@@ -717,3 +723,104 @@ def test_the_execution_review_is_evicted_after_the_block_plan(settings: Settings
 
     assert context.block_plan == []
     assert context.execution_review is not None
+
+
+async def test_a_multi_date_question_keeps_the_cited_past_races(settings: Settings) -> None:
+    today = date(2026, 10, 16)
+    start = date(2025, 10, 28)
+
+    def session(activity_id: str, day: date, activity_type: str = "Ride") -> dict[str, Any]:
+        return {
+            "id": activity_id,
+            "start_date_local": f"{day.isoformat()}T08:00:00",
+            "type": activity_type,
+            "name": "Synthetic Workout",
+            "icu_training_load": 80.0,
+            "moving_time": 3600,
+            "icu_average_watts": 240.0,
+            "average_heartrate": 150.0,
+            "total_elevation_gain": 800.0,
+        }
+
+    activities: list[dict[str, Any]] = []
+    cursor = start + timedelta(days=2)
+    while cursor <= today:
+        activities.append(session(f"s-{cursor.isoformat()}", cursor))
+        cursor += timedelta(days=3)
+    races = {
+        "race-2025-11-15": date(2025, 11, 15),
+        "race-2025-12-06": date(2025, 12, 6),
+        "race-2026-01-17": date(2026, 1, 17),
+    }
+    activities.extend(session(activity_id, day, "Run") for activity_id, day in races.items())
+
+    wellness: list[dict[str, Any]] = []
+    cursor = start
+    while cursor <= today:
+        wellness.append({"id": cursor.isoformat(), "ctl": 40.0, "hrv": 90.0, "sleepSecs": 28000})
+        cursor += timedelta(days=1)
+
+    provider = FakeLlmProvider(
+        resolutions=['{"dates": ["2025-11-15", "2025-12-06", "2026-01-17"]}']
+    )
+    llm = LlmClient(
+        settings.model_copy(update={"llm_provider": "fake"}),
+        {"fake": provider},
+        sleep=RecordingSleep(),
+    )
+    resolution = await resolve_context_plan(llm, "fetch each of them one by one", today=today)
+
+    assert resolution.plan.activities == (
+        DateRange(date(2025, 11, 12), date(2025, 11, 18)),
+        DateRange(date(2025, 12, 3), date(2025, 12, 9)),
+        DateRange(date(2026, 1, 14), date(2026, 1, 20)),
+    )
+
+    class WindowedClient(FakeIntervalsClient):
+        """The hub returns only the requested window; the fake mirrors that here."""
+
+        async def list_activities(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+            self.calls.append(("activities", oldest, newest))
+            return [
+                activity
+                for activity in self.activities
+                if oldest <= activity["start_date_local"][:10] <= newest
+            ]
+
+        async def list_wellness(self, oldest: str, newest: str) -> list[dict[str, Any]]:
+            self.calls.append(("wellness", oldest, newest))
+            return [row for row in self.wellness if oldest <= row["id"] <= newest]
+
+    client = WindowedClient(
+        activities=activities,
+        wellness=wellness,
+        events=[
+            {
+                "id": 900,
+                "name": "Winter race",
+                "start_date_local": "2025-12-06T00:00:00",
+                "category": "RACE_A",
+                "type": "Run",
+            }
+        ],
+        sport_settings=[{"id": 1, "ftp": 250.0}],
+        athlete_summary=[],
+    )
+    context = await gather_context(
+        client,
+        resolution.plan,
+        "fetch each of them one by one",
+        today=today,
+        # The original 1500 was sized for a year-wide span; the three narrow windows fit
+        # a slightly larger budget, and the real default is far above both.
+        max_tokens=1800,
+    )
+
+    assert [call for call in client.calls if call[0] == "activities"] == [
+        ("activities", "2025-11-12", "2025-11-18"),
+        ("activities", "2025-12-03", "2025-12-09"),
+        ("activities", "2026-01-14", "2026-01-20"),
+    ]
+    kept = {activity.id for activity in context.recent_activities}
+    assert {"race-2025-11-15", "race-2025-12-06", "race-2026-01-17"} <= kept
+    assert [event.name for event in context.recent_events] == ["Winter race"]
