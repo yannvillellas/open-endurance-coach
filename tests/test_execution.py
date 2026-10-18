@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from open_endurance_coach.analysis.execution import match_execution
+from open_endurance_coach.analysis.execution import aggregate_weeks, match_execution
 from open_endurance_coach.schemas.intervals import Activity, Event
 
 TODAY = date(2024, 2, 12)
@@ -357,3 +357,122 @@ def test_duplicate_pairing_is_deterministic() -> None:
     assert result.sessions[0].activity is not None
     assert result.sessions[0].activity.id == "a1"
     assert [unplanned.id for unplanned in result.unplanned] == ["a9"]
+
+
+def test_weeks_fold_sessions_loads_and_adherence() -> None:
+    events = [
+        planned(1, date(2024, 2, 5), load=100.0),
+        planned(2, date(2024, 2, 6), load=100.0),
+        planned(3, date(2024, 2, 7), load=100.0),
+        planned(4, TODAY, load=80.0),
+    ]
+    activities = [
+        activity("a1", date(2024, 2, 5), load=100.0),
+        activity("a2", date(2024, 2, 6), load=50.0),
+        activity("a4", TODAY, load=80.0),
+    ]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = {review.week_start: review for review in aggregate_weeks(match, today=TODAY)}
+
+    past = reviews[date(2024, 2, 5)]
+    assert past.planned_load == 300.0
+    assert past.executed_load == 150.0
+    assert (past.completed, past.partial, past.missed) == (1, 1, 1)
+    assert past.adherence == 1 / 3
+    assert past.current is False
+
+    current = reviews[date(2024, 2, 12)]
+    assert current.planned_load == 80.0
+    assert current.executed_load == 80.0
+    assert (current.completed, current.partial, current.missed) == (1, 0, 0)
+    assert current.adherence == 1.0
+    assert current.current is True
+
+
+def test_a_gap_week_shows_its_empty_row() -> None:
+    events = [planned(1, date(2024, 1, 29), load=100.0), planned(2, TODAY, load=80.0)]
+    activities = [activity("a1", date(2024, 1, 29), load=100.0), activity("a2", TODAY, load=80.0)]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = aggregate_weeks(match, today=TODAY)
+
+    assert [review.week_start for review in reviews] == [
+        date(2024, 1, 29),
+        date(2024, 2, 5),
+        date(2024, 2, 12),
+    ]
+    gap = reviews[1]
+    assert gap.planned_load is None
+    assert gap.executed_load is None
+    assert (gap.completed, gap.partial, gap.missed) == (0, 0, 0)
+    assert gap.adherence is None
+    assert gap.current is False
+
+
+def test_unplanned_load_and_share() -> None:
+    events = [planned(1, date(2024, 2, 5), load=100.0)]
+    activities = [
+        activity("a1", date(2024, 2, 5), load=100.0),
+        activity("a2", date(2024, 2, 6), activity_type="Run", load=50.0),
+    ]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = {review.week_start: review for review in aggregate_weeks(match, today=TODAY)}
+
+    week = reviews[date(2024, 2, 5)]
+    assert week.unplanned_load == 50.0
+    assert week.unplanned_share == 1 / 3
+
+
+def test_pending_sessions_are_not_folded() -> None:
+    events = [
+        planned(1, date(2024, 2, 5), load=100.0),
+        planned(2, TODAY),
+        planned(3, date(2024, 2, 20)),
+    ]
+    activities = [activity("a1", date(2024, 2, 5), load=100.0)]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = aggregate_weeks(match, today=TODAY)
+
+    assert [review.week_start for review in reviews] == [date(2024, 2, 5), date(2024, 2, 12)]
+    current = reviews[-1]
+    assert current.current is True
+    assert current.planned_load is None
+    assert (current.completed, current.partial, current.missed) == (0, 0, 0)
+    assert current.adherence is None
+
+
+def test_only_a_future_judged_session_spans_that_future_week() -> None:
+    events = [planned(5, date(2024, 2, 20), load=100.0)]
+    activities = [activity("a1", TODAY, paired_event_id=5, load=100.0)]
+    match = match_execution(events, activities, today=TODAY)
+
+    reviews = aggregate_weeks(match, today=TODAY)
+
+    assert [review.week_start for review in reviews] == [date(2024, 2, 19)]
+    assert reviews[0].current is False
+
+
+def test_a_fully_missed_week_reads_zero_adherence() -> None:
+    events = [planned(1, date(2024, 2, 5), load=100.0)]
+    match = match_execution(events, [], today=TODAY)
+
+    reviews = {review.week_start: review for review in aggregate_weeks(match, today=TODAY)}
+
+    week = reviews[date(2024, 2, 5)]
+    assert week.missed == 1
+    assert week.adherence == 0.0
+
+
+def test_an_unplanned_only_week_has_no_adherence_and_a_full_share() -> None:
+    activities = [activity("a2", date(2024, 2, 8), activity_type="Run", load=50.0)]
+    match = match_execution([], activities, today=TODAY)
+
+    reviews = {review.week_start: review for review in aggregate_weeks(match, today=TODAY)}
+
+    week = reviews[date(2024, 2, 5)]
+    assert week.adherence is None
+    assert week.unplanned_load == 50.0
+    assert week.unplanned_share == 1.0

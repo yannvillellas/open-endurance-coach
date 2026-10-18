@@ -55,6 +55,24 @@ class ExecutionMatch:
     pending: tuple[Event, ...]
 
 
+@dataclass(frozen=True)
+class WeekReview:
+    week_start: date
+    planned_load: float | None
+    executed_load: float | None
+    completed: int
+    partial: int
+    missed: int
+    adherence: float | None
+    unplanned_load: float | None
+    unplanned_share: float | None
+    current: bool
+
+
+def _monday(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 def _family_of(type_name: str) -> frozenset[str]:
     for family in TYPE_FAMILIES:
         if type_name in family:
@@ -161,3 +179,71 @@ def match_execution(
         )
     )
     return ExecutionMatch(tuple(sessions), unplanned, tuple(pending))
+
+
+def aggregate_weeks(match: ExecutionMatch, *, today: date) -> tuple[WeekReview, ...]:
+    """Fold the judged sessions and unplanned activities into Monday weeks.
+
+    Weeks run contiguously from the first judged or unplanned day to the later
+    of the current week and that first week (a session done early can lie in a
+    later week), so a week with nothing due still shows its row — a prescribed
+    stop is not a failure. Loads are None when nothing carries one, adherence is
+    ``completed / judged sessions`` and the share reads against all executed
+    load. Pending sessions are not part of the fold: nothing is due yet.
+    """
+    days = [session.planned.start_date_local.date() for session in match.sessions]
+    days.extend(activity.start_date_local.date() for activity in match.unplanned)
+    if not days:
+        return ()
+    first = _monday(min(days))
+    last = max(_monday(today), first)
+    reviews = []
+    week_start = first
+    while week_start <= last:
+        sessions = [
+            session
+            for session in match.sessions
+            if _monday(session.planned.start_date_local.date()) == week_start
+        ]
+        unplanned = [
+            activity
+            for activity in match.unplanned
+            if _monday(activity.start_date_local.date()) == week_start
+        ]
+        planned_loads = [
+            session.planned.icu_training_load
+            for session in sessions
+            if session.planned.icu_training_load is not None
+        ]
+        executed_loads = [
+            session.activity.icu_training_load
+            for session in sessions
+            if session.activity is not None and session.activity.icu_training_load is not None
+        ]
+        unplanned_loads = [
+            activity.icu_training_load
+            for activity in unplanned
+            if activity.icu_training_load is not None
+        ]
+        completed = sum(1 for session in sessions if session.status == "completed")
+        partial = sum(1 for session in sessions if session.status == "partial")
+        missed = sum(1 for session in sessions if session.status == "missed")
+        executed_total = sum(executed_loads) + sum(unplanned_loads)
+        reviews.append(
+            WeekReview(
+                week_start=week_start,
+                planned_load=sum(planned_loads) if planned_loads else None,
+                executed_load=sum(executed_loads) if executed_loads else None,
+                completed=completed,
+                partial=partial,
+                missed=missed,
+                adherence=completed / len(sessions) if sessions else None,
+                unplanned_load=sum(unplanned_loads) if unplanned_loads else None,
+                unplanned_share=sum(unplanned_loads) / executed_total
+                if executed_total > 0
+                else None,
+                current=week_start == _monday(today),
+            )
+        )
+        week_start += timedelta(days=7)
+    return tuple(reviews)
