@@ -1,0 +1,163 @@
+"""Match the executed activities against the planned calendar, purely.
+
+The plan is the whole calendar: every workout and race event, whoever wrote it.
+The hub's pairing leads — an activity whose ``paired_event_id`` points at a
+planned event is that session, whatever the dates (a pairing outside the review
+is never reused for another session). The remaining sessions take the nearest
+unused unpaired activity within one day, by type family.
+
+Sessions dated after yesterday are judged only once an executed activity
+matches them: the hub's pairing may settle a future session (done early), and a
+session dated today with its activity done is judged — never `missed` today
+though, the day is still open, so its floor is `partial` — while unmatched
+sessions dated today or later are pending. Executed activities may settle past
+sessions; an unmatched activity dated today is not reported as unplanned, the
+day is not over. Completion reads the hub's ``compliance`` first, then the
+load, duration and distance ratios; a match without comparable numbers counts
+as completed. The classes are ``completed`` (>= 80%), ``partial`` (20-80%) and
+``missed`` (< 20% or no match); an executed activity with no planned session is
+``unplanned``.
+"""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date, timedelta
+from typing import Literal
+
+from open_endurance_coach.extractors.context import RIDE_TYPES
+from open_endurance_coach.schemas.intervals import Activity, Event
+
+COMPLETED_THRESHOLD = 0.8
+PARTIAL_THRESHOLD = 0.2
+
+TYPE_FAMILIES: tuple[frozenset[str], ...] = (
+    RIDE_TYPES,
+    frozenset({"Run", "TrailRun", "VirtualRun"}),
+    frozenset({"Swim"}),
+    frozenset({"Walk", "Hike"}),
+)
+
+Status = Literal["completed", "partial", "missed"]
+
+
+@dataclass(frozen=True)
+class SessionMatch:
+    planned: Event
+    activity: Activity | None
+    status: Status
+    completion: float | None
+
+
+@dataclass(frozen=True)
+class ExecutionMatch:
+    sessions: tuple[SessionMatch, ...]
+    unplanned: tuple[Activity, ...]
+    pending: tuple[Event, ...]
+
+
+def _family_of(type_name: str) -> frozenset[str]:
+    for family in TYPE_FAMILIES:
+        if type_name in family:
+            return family
+    return frozenset({type_name})
+
+
+def _compatible(planned_type: str | None, activity_type: str) -> bool:
+    if planned_type is None or planned_type == activity_type:
+        return True
+    return activity_type in _family_of(planned_type)
+
+
+def _is_planned(event: Event) -> bool:
+    category = event.category or ""
+    return category == "WORKOUT" or category.startswith("RACE_")
+
+
+def _completion(planned: Event, activity: Activity) -> float | None:
+    if activity.compliance is not None:
+        return activity.compliance / 100.0
+    for planned_value, actual_value in (
+        (planned.icu_training_load, activity.icu_training_load),
+        (planned.moving_time, activity.moving_time),
+        (planned.distance, activity.distance),
+    ):
+        if planned_value and actual_value is not None:
+            return actual_value / planned_value
+    return None
+
+
+def _status(completion: float | None) -> Status:
+    if completion is None or completion >= COMPLETED_THRESHOLD:
+        return "completed"
+    if completion >= PARTIAL_THRESHOLD:
+        return "partial"
+    return "missed"
+
+
+def match_execution(
+    events: Sequence[Event], activities: Sequence[Activity], *, today: date
+) -> ExecutionMatch:
+    judged_until = today - timedelta(days=1)
+    planned = sorted(
+        (event for event in events if _is_planned(event)), key=lambda e: e.start_date_local
+    )
+    usable = list(activities)
+
+    matched: dict[int, Activity] = {}
+    consumed: set[str] = set()
+
+    by_id: dict[str, int] = {}
+    for index, event in enumerate(planned):
+        if event.id is not None:
+            by_id.setdefault(str(event.id), index)
+    for activity in sorted(usable, key=lambda a: a.id):
+        if activity.paired_event_id is None or activity.id in consumed:
+            continue
+        paired_index = by_id.get(str(activity.paired_event_id))
+        if paired_index is not None and paired_index not in matched:
+            matched[paired_index] = activity
+            consumed.add(activity.id)
+
+    pairs: list[tuple[int, int, Activity]] = []
+    for index, event in enumerate(planned):
+        if index in matched or event.start_date_local.date() > today:
+            continue
+        for activity in usable:
+            if activity.paired_event_id is not None or activity.id in consumed:
+                continue
+            distance = abs((activity.start_date_local.date() - event.start_date_local.date()).days)
+            if distance <= 1 and _compatible(event.type, activity.type):
+                pairs.append((distance, index, activity))
+    pairs.sort(key=lambda item: (item[0], planned[item[1]].start_date_local, item[1], item[2].id))
+    for _, index, activity in pairs:
+        if index in matched or activity.id in consumed:
+            continue
+        matched[index] = activity
+        consumed.add(activity.id)
+
+    sessions = []
+    pending = []
+    for index, event in enumerate(planned):
+        matched_activity = matched.get(index)
+        if matched_activity is None:
+            if event.start_date_local.date() >= today:
+                pending.append(event)
+                continue
+            sessions.append(SessionMatch(event, None, "missed", None))
+            continue
+        completion = _completion(event, matched_activity)
+        status = _status(completion)
+        if status == "missed" and event.start_date_local.date() == today:
+            status = "partial"
+        sessions.append(SessionMatch(event, matched_activity, status, completion))
+    unplanned = tuple(
+        sorted(
+            (
+                activity
+                for activity in usable
+                if activity.id not in consumed and activity.start_date_local.date() <= judged_until
+            ),
+            key=lambda a: a.start_date_local,
+        )
+    )
+    return ExecutionMatch(tuple(sessions), unplanned, tuple(pending))
