@@ -178,7 +178,11 @@ def _apply_review(plan: ContextPlan, resolved: ResolvedContext, today: date) -> 
     if not resolved.review_execution:
         return plan
     window = DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today)
-    return replace(plan, activities=window, events=DateRange(window.start, plan.events.end))
+    return replace(
+        plan,
+        activities=(window,),
+        events=(DateRange(window.start, max(w.end for w in plan.events)),),
+    )
 
 
 def _plan_from_resolution(
@@ -186,14 +190,16 @@ def _plan_from_resolution(
 ) -> PlanResolution:
     if resolved.window is None:
         plan = standard.for_activities(
-            window=standard.activities,
+            windows=standard.activities,
             activity_types=_sport_types(resolved.sport),
             metric_focus=resolved.metric,
             reference=None,
             detail=resolved.detail,
         )
         plan = _apply_review(_with_state(plan, resolved), resolved, today)
-        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
+        label = (
+            _range_label(plan.activities[0]) if resolved.review_execution else "standard windows"
+        )
         return PlanResolution(
             plan,
             (_announcement(label, resolved),),
@@ -205,7 +211,9 @@ def _plan_from_resolution(
     end = min(resolved.window.end, today)
     if end < start:
         plan = _apply_review(_with_state(standard, resolved), resolved, today)
-        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
+        label = (
+            _range_label(plan.activities[0]) if resolved.review_execution else "standard windows"
+        )
         return PlanResolution(
             plan,
             (
@@ -220,18 +228,19 @@ def _plan_from_resolution(
     activities = scope.clamped(MAX_ACTIVITY_WINDOW_DAYS)
     wellness = scope.clamped(MAX_WELLNESS_WINDOW_DAYS)
     events_scope = scope.clamped(MAX_EVENT_WINDOW_DAYS)
+    standard_events = standard.events[0]
     events = (
-        events_scope.union(standard.events)
-        if _overlaps(events_scope, standard.events)
+        events_scope.union(standard_events)
+        if _overlaps(events_scope, standard_events)
         else events_scope
     )
     plan = standard.for_activities(
-        window=activities,
+        windows=(activities,),
         activity_types=_sport_types(resolved.sport),
         metric_focus=resolved.metric,
         reference=end if resolved.detail else None,
         detail=resolved.detail,
-    ).with_windows(wellness=wellness, events=events)
+    ).with_windows(wellness=(wellness,), events=(events,))
     plan = _with_state(plan, resolved)
     notices = [_announcement(f"{start.isoformat()} → {end.isoformat()}", resolved)]
     if activities != scope:

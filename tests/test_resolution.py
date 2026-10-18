@@ -43,9 +43,9 @@ async def test_a_resolved_window_builds_the_plan(settings: Settings) -> None:
 
     resolution = await resolve_context_plan(client, "average heart rate", today=TODAY)
 
-    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
-    assert resolution.plan.wellness == DateRange(date(2023, 12, 1), date(2023, 12, 20))
-    assert resolution.plan.events == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    assert resolution.plan.activities == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
+    assert resolution.plan.wellness == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
+    assert resolution.plan.events == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
     assert resolution.plan.activity_types == RIDE_TYPES
     assert resolution.plan.metric_focus == "heart_rate"
     assert resolution.plan.detail is False
@@ -82,7 +82,7 @@ async def test_a_window_ending_in_the_future_is_clamped_to_today(settings: Setti
 
     resolution = await resolve_context_plan(client, "this week so far", today=TODAY)
 
-    assert resolution.plan.activities == DateRange(date(2024, 1, 25), TODAY)
+    assert resolution.plan.activities == (DateRange(date(2024, 1, 25), TODAY),)
 
 
 async def test_long_windows_are_capped_and_announced(settings: Settings) -> None:
@@ -94,10 +94,10 @@ async def test_long_windows_are_capped_and_announced(settings: Settings) -> None
 
     resolution = await resolve_context_plan(client, "the last 4000 days", today=TODAY)
 
-    assert resolution.plan.activities == DateRange(TODAY - timedelta(days=3650), TODAY)
-    assert resolution.plan.wellness == DateRange(TODAY - timedelta(days=365), TODAY)
-    assert resolution.plan.events == DateRange(
-        TODAY - timedelta(days=365), TODAY + timedelta(days=14)
+    assert resolution.plan.activities == (DateRange(TODAY - timedelta(days=3650), TODAY),)
+    assert resolution.plan.wellness == (DateRange(TODAY - timedelta(days=365), TODAY),)
+    assert resolution.plan.events == (
+        DateRange(TODAY - timedelta(days=365), TODAY + timedelta(days=14)),
     )
     assert any("3651 dates" in notice for notice in resolution.notices)
     assert any("366 dates" in notice for notice in resolution.notices)
@@ -326,7 +326,7 @@ async def test_a_clarification_sees_the_conversation(settings: Settings) -> None
         client, "sorry I meant resting hr", today=TODAY, history=history
     )
 
-    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    assert resolution.plan.activities == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
     request = provider.resolution_calls[0]
     assert "Conversation so far:" in request["messages"][1].content
     assert "what was my average hr 1-20 dec 2023" in request["messages"][1].content
@@ -346,9 +346,9 @@ async def test_a_review_signal_resolves_the_planning_horizon(settings: Settings)
     assert resolution.review_execution is True
     assert resolution.review_default is True
     horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
-    assert resolution.plan.activities == horizon
-    assert resolution.plan.events == DateRange(
-        TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)
+    assert resolution.plan.activities == (horizon,)
+    assert resolution.plan.events == (
+        DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)),
     )
     assert resolution.plan.wellness == ContextPlan.standard(TODAY).wellness
     assert resolution.notices[0].startswith("Fetch: 2023-06-22 → 2024-02-01")
@@ -369,8 +369,8 @@ async def test_a_review_with_an_explicit_period_keeps_the_window(settings: Setti
 
     assert resolution.review_execution is True
     assert resolution.review_default is False
-    assert resolution.plan.activities == DateRange(date(2023, 12, 1), date(2023, 12, 20))
-    assert resolution.plan.events == DateRange(date(2023, 12, 1), date(2023, 12, 20))
+    assert resolution.plan.activities == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
+    assert resolution.plan.events == (DateRange(date(2023, 12, 1), date(2023, 12, 20)),)
 
 
 async def test_review_execution_defaults_to_false(settings: Settings) -> None:
@@ -392,9 +392,9 @@ async def test_an_invalid_window_review_gets_the_default_horizon(settings: Setti
     assert resolution.review_execution is True
     assert resolution.review_default is True
     horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
-    assert resolution.plan.activities == horizon
-    assert resolution.plan.events == DateRange(
-        TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)
+    assert resolution.plan.activities == (horizon,)
+    assert resolution.plan.events == (
+        DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY + timedelta(days=UPCOMING_DAYS)),
     )
     assert "invalid window ignored" in resolution.notices[0]
     assert "Fetch: 2023-06-22 → 2024-02-01" in resolution.notices[0]
@@ -451,7 +451,9 @@ async def test_a_default_review_keeps_the_sport_filter(settings: Settings) -> No
         client, "how did my climbing go against the plan?", today=TODAY
     )
 
-    assert resolution.plan.activities == DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
+    assert resolution.plan.activities == (
+        DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY),
+    )
     assert resolution.plan.activity_types == RIDE_TYPES
     assert resolution.plan.metric_focus == "elevation"
 
@@ -475,7 +477,7 @@ async def test_an_invalid_review_window_keeps_the_state_and_the_wellness(
     assert resolution.review_execution is True
     assert resolution.plan.illness is True
     horizon = DateRange(TODAY - timedelta(days=PLAN_HORIZON_DAYS), TODAY)
-    assert resolution.plan.activities == horizon
+    assert resolution.plan.activities == (horizon,)
     assert resolution.plan.wellness == ContextPlan.standard(TODAY).wellness
     assert "state: illness" in resolution.notices[0]
 
