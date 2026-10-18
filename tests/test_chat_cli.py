@@ -58,6 +58,7 @@ def patched(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path)
             provider,
             calendar=calendar if calendar is not None else FakeCalendarClient(),
             intervals=intervals,
+            clock=lambda: CLOCK,
         )
         monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
         monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
@@ -106,7 +107,7 @@ def test_chat_provider_option_threads_to_engine(
 ) -> None:
     from open_endurance_coach.cli import chat as cli_chat
 
-    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider())
+    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider(), clock=lambda: CLOCK)
     captured: dict[str, Any] = {}
 
     async def fake_with_engine(
@@ -240,7 +241,7 @@ def test_bare_coach_forwards_provider_option(
 ) -> None:
     from collections.abc import Awaitable, Callable
 
-    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider())
+    engine, _ = make_engine(settings, tmp_path, FakeLlmProvider(), clock=lambda: CLOCK)
     captured: dict[str, Any] = {}
 
     async def fake_with_engine(
@@ -685,7 +686,7 @@ def test_chat_warns_when_memory_is_filling(
     transcript_chars = 24_000
     settings = settings.model_copy(update={"llm_input_budget": budget})
     provider = FakeLlmProvider([completion(report_json())])
-    engine, store = make_engine(settings, tmp_path, provider)
+    engine, store = make_engine(settings, tmp_path, provider, clock=lambda: CLOCK)
     store.add_message(MessageRole.USER, "x" * transcript_chars)
     monkeypatch.setattr(cli_main, "_with_engine", FakeRunner(engine))
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
