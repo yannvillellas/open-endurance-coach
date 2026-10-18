@@ -11,12 +11,18 @@ from pydantic import BaseModel, ConfigDict
 
 from open_endurance_coach.chat.history import trim_history
 from open_endurance_coach.clients.llm import LlmClient, LlmError, LlmMessage
-from open_endurance_coach.extractors.context import RIDE_TYPES, ContextPlan, DateRange
+from open_endurance_coach.extractors.context import (
+    REFERENCE_WINDOW_DAYS,
+    RIDE_TYPES,
+    ContextPlan,
+    DateRange,
+)
 from open_endurance_coach.extractors.standard import PLAN_HORIZON_DAYS
 from open_endurance_coach.tokens import estimate_text_tokens
 
 logger = logging.getLogger(__name__)
 
+MAX_ACTIVITY_WINDOWS = 10
 MAX_ACTIVITY_WINDOW_DAYS = 3650
 MAX_WELLNESS_WINDOW_DAYS = 365
 MAX_EVENT_WINDOW_DAYS = 365
@@ -25,16 +31,20 @@ _RESOLUTION_PROMPT = (
     "You pick which athlete data an endurance coach must read before answering the "
     "next question. Reply with one json object and nothing else:\n"
     '{"window": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"} or null, '
+    '"dates": ["YYYY-MM-DD", ...] or [], '
     '"sport": "<activity type or null>", '
     '"metric": "heart_rate" or "elevation" or null, '
     '"detail": true or false, "review_execution": true or false}\n'
     "- window: the exact past period the question is about; use null when the "
     "question only needs the recent context.\n"
+    "- dates: the distinct past days the question names when it cites several specific "
+    "days (races, sessions, incidents) instead of a continuous period; empty "
+    "otherwise. When dates is non-empty, window is ignored.\n"
     "- sport: set it only when the question names a sport (Ride, Run, Swim, ...).\n"
     "- metric: set it only when the question is about heart rate or elevation.\n"
     "- detail: true only when the question asks to inspect one specific activity "
     "(splits, per kilometre, a cited session); when true, the window end must be that "
-    "activity's date.\n"
+    "activity's date (with dates, detail uses the latest cited day).\n"
     "- illness: true only when an active athlete fact says the athlete is currently ill "
     "or sick.\n"
     "- elite: true only when an active athlete fact says the athlete is professional or "
@@ -77,6 +87,7 @@ class ResolvedContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     window: ResolvedWindow | None = None
+    dates: list[date] | None = None
     sport: str | None = None
     metric: Literal["heart_rate", "elevation"] | None = None
     detail: bool = False
@@ -173,27 +184,111 @@ def _range_label(window: DateRange) -> str:
     return f"{window.start.isoformat()} → {window.end.isoformat()}"
 
 
-def _apply_review(plan: ContextPlan, resolved: ResolvedContext, today: date) -> ContextPlan:
-    """A review without its own period reads the whole planning horizon."""
-    if not resolved.review_execution:
-        return plan
-    window = DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today)
-    return replace(plan, activities=window, events=DateRange(window.start, plan.events.end))
+def _ranges_label(windows: tuple[DateRange, ...]) -> str:
+    return ", ".join(_range_label(window) for window in windows)
 
 
-def _plan_from_resolution(
+def _merge_windows(windows: list[DateRange]) -> list[DateRange]:
+    merged: list[DateRange] = []
+    for window in sorted(windows, key=lambda item: item.start):
+        if merged and window.start <= merged[-1].end + timedelta(days=1):
+            merged[-1] = DateRange(merged[-1].start, max(merged[-1].end, window.end))
+        else:
+            merged.append(window)
+    return merged
+
+
+def _plan_from_dates(
     resolved: ResolvedContext, today: date, standard: ContextPlan
 ) -> PlanResolution:
-    if resolved.window is None:
+    dates = resolved.dates or []
+    past = sorted({day for day in dates if day <= today})
+    if not past:
         plan = standard.for_activities(
-            window=standard.activities,
+            windows=standard.activities,
             activity_types=_sport_types(resolved.sport),
             metric_focus=resolved.metric,
             reference=None,
             detail=resolved.detail,
         )
         plan = _apply_review(_with_state(plan, resolved), resolved, today)
-        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
+        label = _ranges_label(plan.activities) if resolved.review_execution else "standard windows"
+        return PlanResolution(
+            plan,
+            (_announcement(label, resolved) + " · cited dates ignored: all in the future.",),
+            review_execution=resolved.review_execution,
+            review_default=resolved.review_execution,
+        )
+    padded = [
+        DateRange(
+            day - timedelta(days=REFERENCE_WINDOW_DAYS),
+            min(day + timedelta(days=REFERENCE_WINDOW_DAYS), today),
+        )
+        for day in past
+    ]
+    merged = _merge_windows(padded)
+    clipped = len(merged) > MAX_ACTIVITY_WINDOWS
+    if clipped:
+        merged = merged[-MAX_ACTIVITY_WINDOWS:]
+    scopes = tuple(merged)
+    standard_events = standard.events[0]
+    event_windows = tuple(
+        _merge_windows(
+            [
+                scope.union(standard_events) if _overlaps(scope, standard_events) else scope
+                for scope in scopes
+            ]
+        )
+    )
+    plan = standard.for_activities(
+        windows=scopes,
+        activity_types=_sport_types(resolved.sport),
+        metric_focus=resolved.metric,
+        reference=max(past) if resolved.detail else None,
+        detail=resolved.detail,
+    ).with_windows(wellness=scopes, events=event_windows)
+    notice = _announcement(_ranges_label(scopes), resolved)
+    future = {day for day in dates if day > today}
+    if future:
+        notice += f" · future dates ignored: {len(future)}."
+    if clipped:
+        notice += f" · cited windows clipped to the {MAX_ACTIVITY_WINDOWS} most recent."
+    return PlanResolution(
+        _with_state(plan, resolved),
+        (notice,),
+        review_execution=resolved.review_execution,
+    )
+
+
+def _apply_review(plan: ContextPlan, resolved: ResolvedContext, today: date) -> ContextPlan:
+    """A review without its own period reads the whole planning horizon."""
+    if not resolved.review_execution:
+        return plan
+    window = DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today)
+    return replace(
+        plan,
+        activities=(window,),
+        events=(DateRange(window.start, max(w.end for w in plan.events)),),
+    )
+
+
+def _plan_from_resolution(
+    resolved: ResolvedContext, today: date, standard: ContextPlan
+) -> PlanResolution:
+    if resolved.dates:
+        return _plan_from_dates(resolved, today, standard)
+    if resolved.window is None:
+        plan = standard.for_activities(
+            windows=standard.activities,
+            activity_types=_sport_types(resolved.sport),
+            metric_focus=resolved.metric,
+            reference=None,
+            detail=resolved.detail,
+        )
+        plan = _apply_review(_with_state(plan, resolved), resolved, today)
+        label = (
+            _range_label(plan.activities[0]) if resolved.review_execution else "standard windows"
+        )
         return PlanResolution(
             plan,
             (_announcement(label, resolved),),
@@ -205,7 +300,9 @@ def _plan_from_resolution(
     end = min(resolved.window.end, today)
     if end < start:
         plan = _apply_review(_with_state(standard, resolved), resolved, today)
-        label = _range_label(plan.activities) if resolved.review_execution else "standard windows"
+        label = (
+            _range_label(plan.activities[0]) if resolved.review_execution else "standard windows"
+        )
         return PlanResolution(
             plan,
             (
@@ -220,18 +317,19 @@ def _plan_from_resolution(
     activities = scope.clamped(MAX_ACTIVITY_WINDOW_DAYS)
     wellness = scope.clamped(MAX_WELLNESS_WINDOW_DAYS)
     events_scope = scope.clamped(MAX_EVENT_WINDOW_DAYS)
+    standard_events = standard.events[0]
     events = (
-        events_scope.union(standard.events)
-        if _overlaps(events_scope, standard.events)
+        events_scope.union(standard_events)
+        if _overlaps(events_scope, standard_events)
         else events_scope
     )
     plan = standard.for_activities(
-        window=activities,
+        windows=(activities,),
         activity_types=_sport_types(resolved.sport),
         metric_focus=resolved.metric,
         reference=end if resolved.detail else None,
         detail=resolved.detail,
-    ).with_windows(wellness=wellness, events=events)
+    ).with_windows(wellness=(wellness,), events=(events,))
     plan = _with_state(plan, resolved)
     notices = [_announcement(f"{start.isoformat()} → {end.isoformat()}", resolved)]
     if activities != scope:

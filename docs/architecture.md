@@ -12,22 +12,28 @@ the model's token limit (`extractors/budget.py`).
 Before each new question the analysis window is resolved with a small model call that
 sees the recent conversation and the active athlete facts, ranked and capped at the same
 25 as the memory injection, and is itself fitted to the input budget
-(`extractors/resolution.py`): a strict JSON reply gives the exact past window (or none
-for tactical questions), the sport, the metric, whether one activity must be detailed,
+(`extractors/resolution.py`): a strict JSON reply gives the exact past window or the
+cited past days (or none for tactical questions), the sport, the metric, whether one
+activity must be detailed,
 whether the question reviews past execution against the plan (`review_execution` —
 then a review without its own period reads the whole planning horizon), and the declared
 athlete state (illness, elite). The code validates the dates, caps the
 windows (activities 3650 days, wellness and events 365 days) and announces what was read
 with one `Fetch:` line (`state:` included when declared); a resolution failure falls back
-to the standard windows with a warning. A refinement sent while a proposal is open
+to the standard windows with a warning. The day/period caps apply to a resolved period;
+cited-day windows are bounded by count (`MAX_ACTIVITY_WINDOWS`) instead, and a very
+tight budget still trims data oldest-first. A refinement sent while a proposal is open
 rebuilds that proposal's snapshot instead, with no resolution call.
 
 - **Tactical plan** — recent activities (14 days), wellness (7 days), a ±14-day
   calendar window split into recent and upcoming events, sport settings, goal races and
   a weekly training rollup with CTL/ATL/ramp and per-sport load, both over a 224-day
   horizon (`PLAN_HORIZON_DAYS`).
-- **Question window** — activities and wellness cover exactly the resolved window;
-  events add the tactical ±14-day window when the two overlap, so a mixed question
+- **Question window** — activities and wellness cover exactly the resolved window(s);
+  when the question cites several scattered past days, each day gets its own ±3-day
+  window (touching windows merge, at most ten keep the most recent), so the fetch stays
+  exact instead of spanning the gap. Events add the tactical ±14-day window when the
+  two overlap, so a mixed question
   ("that session three weeks ago, should I repeat it next week?") sees both, and goal
   races and the rollup stay tactical. A named sport ranks matching activities first and
   guides the detail pin without dropping any activity; a detailed activity carries its

@@ -14,7 +14,13 @@ from open_endurance_coach.extractors.standard import (
     WELLNESS_LOOKBACK_DAYS,
 )
 
-from .fakes import FakeIntervalsClient, make_activity, make_intervals_client, make_summary_week
+from .fakes import (
+    FakeIntervalsClient,
+    make_activity,
+    make_intervals_client,
+    make_summary_week,
+    make_wellness,
+)
 
 TODAY = date(2024, 2, 1)
 
@@ -22,12 +28,12 @@ TODAY = date(2024, 2, 1)
 def test_standard_plan_windows() -> None:
     plan = ContextPlan.standard(TODAY)
 
-    assert (TODAY - plan.activities.start).days == ACTIVITY_LOOKBACK_DAYS
-    assert (plan.activities.end - TODAY).days == 1
-    assert (TODAY - plan.wellness.start).days == WELLNESS_LOOKBACK_DAYS
-    assert (plan.wellness.end - TODAY).days == 1
-    assert (TODAY - plan.events.start).days == RECENT_EVENT_DAYS
-    assert (plan.events.end - TODAY).days == UPCOMING_DAYS
+    assert (TODAY - plan.activities[0].start).days == ACTIVITY_LOOKBACK_DAYS
+    assert (plan.activities[0].end - TODAY).days == 1
+    assert (TODAY - plan.wellness[0].start).days == WELLNESS_LOOKBACK_DAYS
+    assert (plan.wellness[0].end - TODAY).days == 1
+    assert (TODAY - plan.events[0].start).days == RECENT_EVENT_DAYS
+    assert (plan.events[0].end - TODAY).days == UPCOMING_DAYS
     assert plan.races.start == TODAY
     assert (plan.races.end - TODAY).days == PLAN_HORIZON_DAYS
     assert (TODAY - plan.rollup.start).days == PLAN_HORIZON_DAYS
@@ -41,14 +47,14 @@ def test_standard_plan_windows() -> None:
 def test_for_activities_overrides_only_the_activity_selection() -> None:
     window = DateRange(date(2023, 11, 3), date(2024, 1, 20))
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=window,
+        windows=(window,),
         activity_types=frozenset({"Ride"}),
         metric_focus="heart_rate",
         reference=date(2024, 1, 17),
         detail=True,
     )
 
-    assert plan.activities == window
+    assert plan.activities == (window,)
     assert plan.activity_types == frozenset({"Ride"})
     assert plan.metric_focus == "heart_rate"
     assert plan.reference == date(2024, 1, 17)
@@ -61,12 +67,12 @@ def test_for_activities_overrides_only_the_activity_selection() -> None:
 
 def test_with_windows_replaces_only_the_question_windows() -> None:
     plan = ContextPlan.standard(TODAY).with_windows(
-        wellness=DateRange(date(2024, 1, 14), date(2024, 1, 20)),
-        events=DateRange(date(2024, 1, 14), date(2024, 2, 15)),
+        wellness=(DateRange(date(2024, 1, 14), date(2024, 1, 20)),),
+        events=(DateRange(date(2024, 1, 14), date(2024, 2, 15)),),
     )
 
-    assert plan.wellness == DateRange(date(2024, 1, 14), date(2024, 1, 20))
-    assert plan.events == DateRange(date(2024, 1, 14), date(2024, 2, 15))
+    assert plan.wellness == (DateRange(date(2024, 1, 14), date(2024, 1, 20)),)
+    assert plan.events == (DateRange(date(2024, 1, 14), date(2024, 2, 15)),)
     assert plan.activities == ContextPlan.standard(TODAY).activities
 
 
@@ -105,8 +111,8 @@ async def test_a_question_window_drives_every_source() -> None:
     window = DateRange(date(2023, 12, 1), date(2023, 12, 20))
     plan = (
         ContextPlan.standard(TODAY)
-        .for_activities(window=window)
-        .with_windows(wellness=window, events=window)
+        .for_activities(windows=(window,))
+        .with_windows(wellness=(window,), events=(window,))
     )
     client = make_intervals_client()
 
@@ -120,7 +126,7 @@ async def test_a_question_window_drives_every_source() -> None:
 async def test_a_detail_plan_pins_the_referenced_activity() -> None:
     client = make_intervals_client(activities=[make_activity("fx-old", 30)])
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 30), date(2024, 1, 30)),
+        windows=(DateRange(date(2024, 1, 30), date(2024, 1, 30)),),
         reference=date(2024, 1, 30),
         detail=True,
     )
@@ -161,7 +167,7 @@ async def test_a_detail_plan_includes_the_splits() -> None:
     }
     client = make_intervals_client(streams=streams)
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        windows=(DateRange(date(2024, 1, 18), date(2024, 1, 20)),),
         reference=date(2024, 1, 20),
         detail=True,
     )
@@ -181,7 +187,7 @@ async def test_a_streams_failure_keeps_the_detail(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(client, "get_activity_streams", boom)
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        windows=(DateRange(date(2024, 1, 18), date(2024, 1, 20)),),
         reference=date(2024, 1, 20),
         detail=True,
     )
@@ -200,7 +206,7 @@ async def test_a_named_sport_ranks_first_without_dropping() -> None:
         ]
     )
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 1), date(2024, 2, 2)),
+        windows=(DateRange(date(2024, 1, 1), date(2024, 2, 2)),),
         activity_types=frozenset({"Ride"}),
     )
 
@@ -217,7 +223,7 @@ async def test_the_detail_pin_prefers_the_named_sport_then_the_nearest() -> None
         ]
     )
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 15), date(2024, 1, 23)),
+        windows=(DateRange(date(2024, 1, 15), date(2024, 1, 23)),),
         reference=date(2024, 1, 20),
         activity_types=frozenset({"Ride"}),
         detail=True,
@@ -232,7 +238,7 @@ async def test_the_detail_pin_prefers_the_named_sport_then_the_nearest() -> None
 async def test_the_detail_pin_falls_back_to_any_sport() -> None:
     client = make_intervals_client(activities=[make_activity("fx-run", 20, activity_type="Run")])
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 15), date(2024, 1, 23)),
+        windows=(DateRange(date(2024, 1, 15), date(2024, 1, 23)),),
         reference=date(2024, 1, 20),
         activity_types=frozenset({"Ride"}),
         detail=True,
@@ -252,7 +258,7 @@ async def test_a_detail_failure_keeps_the_context(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(client, "get_activity", boom)
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        windows=(DateRange(date(2024, 1, 18), date(2024, 1, 20)),),
         reference=date(2024, 1, 20),
         detail=True,
     )
@@ -274,7 +280,7 @@ async def test_unexpected_stream_errors_keep_the_detail(
 
     monkeypatch.setattr(client, "get_activity_streams", boom)
     plan = ContextPlan.standard(TODAY).for_activities(
-        window=DateRange(date(2024, 1, 18), date(2024, 1, 20)),
+        windows=(DateRange(date(2024, 1, 18), date(2024, 1, 20)),),
         reference=date(2024, 1, 20),
         detail=True,
     )
@@ -341,8 +347,8 @@ async def test_gather_context_builds_the_execution_review() -> None:
     today = date(2024, 2, 12)
     plan = replace(
         ContextPlan.standard(today),
-        activities=DateRange(today - timedelta(days=45), today),
-        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+        activities=(DateRange(today - timedelta(days=45), today),),
+        events=(DateRange(today - timedelta(days=45), today + timedelta(days=14)),),
     )
 
     context = await gather_context(
@@ -370,8 +376,8 @@ async def test_gather_context_skips_the_review_without_the_signal() -> None:
     today = date(2024, 2, 12)
     plan = replace(
         ContextPlan.standard(today),
-        activities=DateRange(today - timedelta(days=45), today),
-        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+        activities=(DateRange(today - timedelta(days=45), today),),
+        events=(DateRange(today - timedelta(days=45), today + timedelta(days=14)),),
     )
 
     context = await gather_context(_review_client(), plan, "status check", today=today)
@@ -383,8 +389,8 @@ async def test_an_explicit_review_period_is_not_clipped_at_the_block() -> None:
     today = date(2024, 2, 12)
     plan = replace(
         ContextPlan.standard(today),
-        activities=DateRange(today - timedelta(days=60), today),
-        events=DateRange(today - timedelta(days=60), today + timedelta(days=14)),
+        activities=(DateRange(today - timedelta(days=60), today),),
+        events=(DateRange(today - timedelta(days=60), today + timedelta(days=14)),),
     )
 
     context = await gather_context(
@@ -408,8 +414,8 @@ async def test_a_review_without_a_race_reads_no_digest() -> None:
     )
     plan = replace(
         ContextPlan.standard(today),
-        activities=DateRange(today - timedelta(days=45), today),
-        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+        activities=(DateRange(today - timedelta(days=45), today),),
+        events=(DateRange(today - timedelta(days=45), today + timedelta(days=14)),),
     )
 
     context = await gather_context(
@@ -423,8 +429,8 @@ async def test_the_digest_is_computed_before_the_budget_eviction() -> None:
     today = date(2024, 2, 12)
     plan = replace(
         ContextPlan.standard(today),
-        activities=DateRange(today - timedelta(days=45), today),
-        events=DateRange(today - timedelta(days=45), today + timedelta(days=14)),
+        activities=(DateRange(today - timedelta(days=45), today),),
+        events=(DateRange(today - timedelta(days=45), today + timedelta(days=14)),),
     )
 
     context = await gather_context(
@@ -441,3 +447,66 @@ async def test_the_digest_is_computed_before_the_budget_eviction() -> None:
     oldest = date(2024, 1, 22)
     assert oldest in [session.date for session in context.execution_review.sessions]
     assert all(activity.start_date_local.date() > oldest for activity in context.recent_activities)
+
+
+async def test_multiple_windows_fetch_each_and_merge_by_id() -> None:
+    early = DateRange(date(2024, 1, 1), date(2024, 1, 10))
+    late = DateRange(date(2024, 1, 5), date(2024, 1, 15))
+    plan = replace(
+        ContextPlan.standard(TODAY),
+        activities=(early, late),
+        wellness=(early, late),
+        events=(early, late),
+    )
+    client = make_intervals_client(
+        activities=[make_activity("fx-a", 3), make_activity("fx-b", 7), make_activity("fx-c", 12)],
+        wellness=[make_wellness(3), make_wellness(7), make_wellness(12)],
+        events=[
+            {"id": 1, "name": "A", "start_date_local": "2024-01-03T00:00:00"},
+            {"id": 2, "name": "B", "start_date_local": "2024-01-12T00:00:00"},
+            {"id": 3, "name": "C", "start_date_local": "2024-01-07T00:00:00"},
+            {"name": "D", "start_date_local": "2024-01-04T00:00:00"},
+            {"name": "D", "start_date_local": "2024-01-04T00:00:00"},
+        ],
+    )
+
+    context = await gather_context(client, plan, "both windows", today=TODAY)
+
+    assert [call for call in client.calls if call[0] == "activities"] == [
+        ("activities", "2024-01-01", "2024-01-10"),
+        ("activities", "2024-01-05", "2024-01-15"),
+    ]
+    assert [call for call in client.calls if call[0] == "wellness"] == [
+        ("wellness", "2024-01-01", "2024-01-10"),
+        ("wellness", "2024-01-05", "2024-01-15"),
+    ]
+    assert [call for call in client.calls if call[0] == "events" and call[3] is None] == [
+        ("events", "2024-01-01", "2024-01-10", None),
+        ("events", "2024-01-05", "2024-01-15", None),
+    ]
+    # The overlapping day (7) is fetched twice and kept once.
+    assert [activity.id for activity in context.recent_activities] == ["fx-c", "fx-b", "fx-a"]
+    assert [row.id for row in context.wellness] == [
+        date(2024, 1, 12),
+        date(2024, 1, 7),
+        date(2024, 1, 3),
+    ]
+    # The id-bearing overlap (C, day 7) is kept once; the id-less duplicate (D)
+    # collapses on its fields; the order stays chronological.
+    assert [event.name for event in context.recent_events] == ["B", "C", "D", "A"]
+
+
+async def test_empty_windows_fetch_nothing() -> None:
+    plan = replace(ContextPlan.standard(TODAY), activities=(), wellness=(), events=())
+    client = make_intervals_client()
+
+    context = await gather_context(client, plan, "nothing", today=TODAY)
+
+    assert not [
+        call
+        for call in client.calls
+        if call[0] in ("activities", "wellness") or (call[0] == "events" and call[3] is None)
+    ]
+    assert context.recent_activities == []
+    assert context.wellness == []
+    assert context.recent_events == []

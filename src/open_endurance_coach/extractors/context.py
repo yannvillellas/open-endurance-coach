@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 from open_endurance_coach.clients.intervals import IntervalsApiError
 from open_endurance_coach.clients.protocols import IntervalsReadClient
@@ -22,7 +22,7 @@ from open_endurance_coach.extractors.standard import (
     fetch_goal_races,
     fetch_training_rollup,
 )
-from open_endurance_coach.schemas.context import CoachContext
+from open_endurance_coach.schemas.context import CoachContext, GoalRace, TrainingWeek
 from open_endurance_coach.schemas.intervals import (
     Activity,
     ActivitySplit,
@@ -82,9 +82,9 @@ def _warn_on_split_coverage(
 class ContextPlan:
     """Windows and activity selection for one gather."""
 
-    activities: DateRange
-    wellness: DateRange
-    events: DateRange
+    activities: tuple[DateRange, ...]
+    wellness: tuple[DateRange, ...]
+    events: tuple[DateRange, ...]
     races: DateRange
     rollup: DateRange
     activity_types: frozenset[str] = frozenset()
@@ -97,15 +97,20 @@ class ContextPlan:
     @classmethod
     def standard(cls, today: date) -> "ContextPlan":
         return cls(
-            activities=DateRange(
-                today - timedelta(days=ACTIVITY_LOOKBACK_DAYS), today + timedelta(days=1)
+            activities=(
+                DateRange(
+                    today - timedelta(days=ACTIVITY_LOOKBACK_DAYS), today + timedelta(days=1)
+                ),
             ),
-            wellness=DateRange(
-                today - timedelta(days=WELLNESS_LOOKBACK_DAYS), today + timedelta(days=1)
+            wellness=(
+                DateRange(
+                    today - timedelta(days=WELLNESS_LOOKBACK_DAYS), today + timedelta(days=1)
+                ),
             ),
-            events=DateRange(
-                today - timedelta(days=RECENT_EVENT_DAYS),
-                today + timedelta(days=UPCOMING_DAYS),
+            events=(
+                DateRange(
+                    today - timedelta(days=RECENT_EVENT_DAYS), today + timedelta(days=UPCOMING_DAYS)
+                ),
             ),
             races=DateRange(today, today + timedelta(days=PLAN_HORIZON_DAYS)),
             rollup=DateRange(today - timedelta(days=PLAN_HORIZON_DAYS), today),
@@ -114,7 +119,7 @@ class ContextPlan:
     def for_activities(
         self,
         *,
-        window: DateRange,
+        windows: tuple[DateRange, ...],
         activity_types: frozenset[str] = frozenset(),
         metric_focus: str | None = None,
         reference: date | None = None,
@@ -122,7 +127,7 @@ class ContextPlan:
     ) -> "ContextPlan":
         return replace(
             self,
-            activities=window,
+            activities=windows,
             activity_types=activity_types,
             metric_focus=metric_focus,
             reference=reference,
@@ -130,7 +135,10 @@ class ContextPlan:
         )
 
     def with_windows(
-        self, *, wellness: DateRange | None = None, events: DateRange | None = None
+        self,
+        *,
+        wellness: tuple[DateRange, ...] | None = None,
+        events: tuple[DateRange, ...] | None = None,
     ) -> "ContextPlan":
         return replace(
             self,
@@ -181,6 +189,35 @@ async def _load_detail(
     return detail, []
 
 
+def _merge_wellness(batches: list[list[dict[str, Any]]]) -> list[Wellness]:
+    seen: set[date] = set()
+    merged: list[Wellness] = []
+    for batch in batches:
+        for item in batch:
+            row = Wellness.model_validate(item)
+            if row.id not in seen:
+                seen.add(row.id)
+                merged.append(row)
+    return merged
+
+
+def _merge_events(batches: list[list[dict[str, Any]]]) -> list[Event]:
+    seen: set[tuple[object, ...]] = set()
+    merged: list[Event] = []
+    for batch in batches:
+        for item in batch:
+            event = Event.model_validate(item)
+            key = (
+                ("id", event.id)
+                if event.id is not None
+                else ("fields", event.name, event.start_date_local.isoformat(), event.category)
+            )
+            if key not in seen:
+                seen.add(key)
+                merged.append(event)
+    return merged
+
+
 async def gather_context(
     client: IntervalsReadClient,
     plan: ContextPlan,
@@ -192,10 +229,24 @@ async def gather_context(
     review_execution: bool = False,
     review_default: bool = False,
 ) -> CoachContext:
-    activities_raw = await client.list_activities(
-        plan.activities.start.isoformat(), plan.activities.end.isoformat()
-    )
-    activities = [Activity.model_validate(item) for item in activities_raw]
+    async def fetch_activities() -> list[Activity]:
+        batches = await asyncio.gather(
+            *(
+                client.list_activities(window.start.isoformat(), window.end.isoformat())
+                for window in plan.activities
+            )
+        )
+        seen: set[str] = set()
+        merged: list[Activity] = []
+        for batch in batches:
+            for item in batch:
+                activity = Activity.model_validate(item)
+                if activity.id not in seen:
+                    seen.add(activity.id)
+                    merged.append(activity)
+        return merged
+
+    activities = await fetch_activities()
     keep_ids: set[str] = set()
     if plan.detail and plan.reference is not None:
         reference = plan.reference
@@ -231,26 +282,35 @@ async def gather_context(
             return None, []
         return await _load_detail(client, detail_source)
 
-    (
-        detail_result,
-        wellness_raw,
-        events_raw,
-        goal_races,
-        rollup,
-        settings_raw,
-    ) = await asyncio.gather(
+    wellness_calls = [
+        client.list_wellness(window.start.isoformat(), window.end.isoformat())
+        for window in plan.wellness
+    ]
+    event_calls = [
+        client.list_events(window.start.isoformat(), window.end.isoformat())
+        for window in plan.events
+    ]
+    results = await asyncio.gather(
         load_detail(),
-        client.list_wellness(plan.wellness.start.isoformat(), plan.wellness.end.isoformat()),
-        client.list_events(plan.events.start.isoformat(), plan.events.end.isoformat()),
+        *wellness_calls,
+        *event_calls,
         fetch_goal_races(client, today, start=plan.races.start, end=plan.races.end),
         fetch_training_rollup(client, today, start=plan.rollup.start, end=plan.rollup.end),
         client.get_sport_settings(),
     )
-    activity_detail, activity_splits = detail_result
-    events = sorted(
-        (Event.model_validate(item) for item in events_raw),
-        key=lambda event: event.start_date_local,
+    detail_result = cast("tuple[Activity | None, list[ActivitySplit]]", results[0])
+    wellness_batches = cast("list[list[dict[str, Any]]]", results[1 : 1 + len(wellness_calls)])
+    event_batches = cast(
+        "list[list[dict[str, Any]]]",
+        results[1 + len(wellness_calls) : 1 + len(wellness_calls) + len(event_calls)],
     )
+    goal_races = cast("list[GoalRace]", results[-3])
+    rollup = cast("list[TrainingWeek]", results[-2])
+    settings_raw = cast("list[dict[str, Any]]", results[-1])
+    wellness = _merge_wellness(wellness_batches)
+    events = _merge_events(event_batches)
+    activity_detail, activity_splits = detail_result
+    events = sorted(events, key=lambda event: event.start_date_local)
     block_plan = derive_block_plan(
         goal_races, rollup, today=today, illness=plan.illness, elite=plan.elite
     )
@@ -284,11 +344,7 @@ async def gather_context(
     return build_within_budget(
         focus=focus,
         recent_activities=activities,
-        wellness=sorted(
-            (Wellness.model_validate(item) for item in wellness_raw),
-            key=lambda row: row.id,
-            reverse=True,
-        ),
+        wellness=sorted(wellness, key=lambda row: row.id, reverse=True),
         upcoming_events=[event for event in events if event.start_date_local.date() >= today],
         recent_events=[
             event for event in reversed(events) if event.start_date_local.date() < today
