@@ -31,3 +31,13 @@ jobs:
         uses: ./.github/actions/tests
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Warn when the tests could not run
+        if: failure() && steps.tests.outcome == 'skipped'
+        run: |
+          message="the tests could not run (setup failed?); see the job log"
+          echo "::warning title=Tests could not run::${message}"
+          {
+            echo "### Tests could not run (Python ${{ matrix.python-version }})"
+            echo
+            echo "${message}"
+          } >> "$GITHUB_STEP_SUMMARY"
