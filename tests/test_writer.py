@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date
 from typing import Any, cast
@@ -950,3 +951,248 @@ async def test_non_dict_read_back_keeps_the_log_on_one_line(
     messages = [record.getMessage() for record in caplog.records]
     assert messages
     assert all("\n" not in message for message in messages)
+
+
+class SlowCreateClient(FakeCalendarClient):
+    """Yields before creating, so concurrent writers overlap their find."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await asyncio.sleep(0)
+        return await super().create_event(payload)
+
+
+class LostResponseClient(FakeCalendarClient):
+    """Persists the event but loses the response, like a timed-out create."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await super().create_event(payload)
+        raise IntervalsApiError(0, "transport error after retries")
+
+
+class RejectedCreateClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise IntervalsApiError(422, "invalid event")
+
+
+async def test_concurrent_creates_keep_a_single_event() -> None:
+    client = SlowCreateClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+    proposal = make_proposal(mutation)
+
+    outcomes = await asyncio.gather(
+        writer.apply_proposal(proposal), writer.apply_proposal(proposal)
+    )
+
+    assert len(client.created) == 1
+    assert len(client.events) == 1
+    assert sorted(outcome[0].target for outcome in outcomes) == ["created", "unchanged"]
+
+
+async def test_a_lost_create_response_is_reconciled() -> None:
+    client = LostResponseClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert len(client.created) == 1
+    assert len(client.events) == 1
+    assert outcomes[0].target == "created"
+    assert outcomes[0].event_id == client.events[0]["id"]
+
+
+async def test_a_rejected_create_is_not_reconciled() -> None:
+    client = RejectedCreateClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    with pytest.raises(IntervalsApiError):
+        await writer.apply_proposal(make_proposal(mutation))
+
+
+class FiveHundredLostClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await super().create_event(payload)
+        raise IntervalsApiError(500, "server error")
+
+
+class CreateFailsClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise IntervalsApiError(0, "transport error")
+
+
+class PersistDifferentClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = dict(payload)
+        created["description"] = "someone else's session"
+        created["id"] = 30000
+        self.events.append(created)
+        raise IntervalsApiError(0, "transport error")
+
+
+class PersistUnlabelledClient(FakeCalendarClient):
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = {key: value for key, value in payload.items() if key != "category"}
+        created["id"] = 30000
+        self.events.append(created)
+        raise IntervalsApiError(0, "transport error")
+
+
+class ListFailsAfterCreateClient(FakeCalendarClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_calls = 0
+
+    async def list_events(
+        self, oldest: str, newest: str, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.list_calls += 1
+        if self.list_calls > 1:
+            raise IntervalsApiError(500, "list down")
+        return await super().list_events(oldest, newest, category)
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raise IntervalsApiError(0, "transport error")
+
+
+async def test_a_lost_create_response_is_reconciled_after_a_server_error() -> None:
+    client = FiveHundredLostClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert len(client.created) == 1
+    assert outcomes[0].target == "created"
+    assert outcomes[0].event_id == client.events[0]["id"]
+
+
+async def test_a_lost_race_create_response_is_reconciled() -> None:
+    client = LostResponseClient()
+    writer = CalendarWriter(client)
+    mutation = CreateRace(
+        action="create_race",
+        name="Spring Race",
+        category="RACE_B",
+        start_date_local=date(2024, 4, 7),
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert len(client.created) == 1
+    assert outcomes[0].action == "create_race"
+    assert outcomes[0].target == "created"
+    assert outcomes[0].event_id == client.events[0]["id"]
+
+
+async def test_an_ambiguous_create_that_did_not_land_reraises_the_original_error() -> None:
+    client = CreateFailsClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await writer.apply_proposal(make_proposal(mutation))
+
+    assert error.value.status_code == 0
+    assert client.events == []
+
+
+async def test_a_reconciled_event_with_different_values_is_refused() -> None:
+    client = PersistDifferentClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create",
+        name="Tempo Session",
+        start_date_local=date(2024, 2, 5),
+        description="tempo 3x12",
+    )
+
+    with pytest.raises(WriterError):
+        await writer.apply_proposal(make_proposal(mutation))
+
+
+async def test_a_reconciled_unlabelled_event_is_adopted() -> None:
+    client = PersistUnlabelledClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert outcomes[0].target == "updated"
+    assert len(client.events) == 1
+
+
+async def test_a_failing_relist_keeps_the_create_error() -> None:
+    client = ListFailsAfterCreateClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await writer.apply_proposal(make_proposal(mutation))
+
+    assert error.value.status_code == 0
+    assert client.list_calls == 2
+
+
+async def test_a_rejected_create_does_not_relist() -> None:
+    class CountingRejectedClient(RejectedCreateClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.list_calls = 0
+
+        async def list_events(
+            self, oldest: str, newest: str, category: str | None = None
+        ) -> list[dict[str, Any]]:
+            self.list_calls += 1
+            return await super().list_events(oldest, newest, category)
+
+    client = CountingRejectedClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    with pytest.raises(IntervalsApiError):
+        await writer.apply_proposal(make_proposal(mutation))
+
+    assert client.list_calls == 1
+
+
+class RecomputedLostClient(_RecomputingCalendar):
+    """Loses the response after the hub recomputed the duration and load."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await super().create_event(payload)
+        raise IntervalsApiError(0, "transport error")
+
+
+async def test_a_lost_response_reconciles_despite_recomputed_fields() -> None:
+    client = RecomputedLostClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create",
+        name="Tempo Session",
+        start_date_local=date(2024, 2, 5),
+        moving_time=3600,
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert len(client.events) == 1
+    assert outcomes[0].target == "created"
+    assert client.events[0]["moving_time"] == 4464

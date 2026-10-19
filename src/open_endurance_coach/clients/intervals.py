@@ -144,6 +144,7 @@ class IntervalsClient:
         *,
         params: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
+        retry_ambiguous: bool = True,
     ) -> httpx.Response:
         await self._throttle()
         response: httpx.Response | None = None
@@ -158,9 +159,15 @@ class IntervalsClient:
                     retry_after = parse_retry_after(response.headers, default=60.0)
                     await self._sleep(retry_after)
                     continue
-                if response.status_code >= 500 and attempt < self._settings.max_retries:
+                if (
+                    response.status_code >= 500
+                    and attempt < self._settings.max_retries
+                    and retry_ambiguous
+                ):
                     await self._sleep(self._settings.retry_base_delay * 2**attempt)
                     continue
+                break
+            if not retry_ambiguous:
                 break
             if attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
@@ -250,7 +257,11 @@ class IntervalsClient:
         return self._json_object(response, "event")
 
     async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await self._request("POST", self._athlete_path("/events"), payload=payload)
+        # A create is not idempotent: a retried POST can duplicate the event when the
+        # first one persisted but its response was lost. The writer reconciles instead.
+        response = await self._request(
+            "POST", self._athlete_path("/events"), payload=payload, retry_ambiguous=False
+        )
         return self._json_object(response, "event")
 
     async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:

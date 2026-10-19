@@ -575,3 +575,63 @@ async def test_concurrent_calls_share_one_cooldown(settings: Settings) -> None:
 
     assert max(sleep.calls) == pytest.approx(RATE_LIMIT_COOLDOWN_SECONDS, abs=1.0)
     await client.aclose()
+
+
+async def test_a_create_is_not_retried_after_an_ambiguous_failure(settings: Settings) -> None:
+    attempts: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        raise httpx.ReadError("connection reset after the request was sent")
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await client.create_event({"name": "Tempo"})
+
+    assert error.value.status_code == 0
+    assert len(attempts) == 1
+    await client.aclose()
+
+
+async def test_a_create_is_not_retried_after_a_server_error(settings: Settings) -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await client.create_event({"name": "Tempo"})
+
+    assert error.value.status_code == 503
+    assert len(captured) == 1
+    await client.aclose()
+
+
+async def test_a_create_still_retries_after_a_rate_limit(settings: Settings) -> None:
+    captured: list[httpx.Request] = []
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "1"}, json={"error": "slow down"}),
+        httpx.Response(200, json={"id": 7}),
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return responses.pop(0)
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    created = await client.create_event({"name": "Tempo"})
+
+    assert created == {"id": 7}
+    assert len(captured) == 2
+    await client.aclose()
