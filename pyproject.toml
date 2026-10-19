@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pip-audit>=2.7",
+    "hypothesis>=6",
 ]
 
 [project.scripts]
