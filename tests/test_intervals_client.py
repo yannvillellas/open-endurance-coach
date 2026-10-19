@@ -1,11 +1,13 @@
 import asyncio
 import base64
+from typing import Any
 
 import httpx
 import pytest
 
 from open_endurance_coach.clients.intervals import (
     BROWSER_USER_AGENT,
+    RATE_LIMIT_COOLDOWN_SECONDS,
     IntervalsApiError,
     IntervalsClient,
     RateLimits,
@@ -19,6 +21,7 @@ def make_client(
     settings: Settings,
     responses: list[httpx.Response],
     sleep: RecordingSleep | None = None,
+    clock: Any = None,
 ) -> tuple[IntervalsClient, list[httpx.Request]]:
     captured: list[httpx.Request] = []
 
@@ -31,6 +34,7 @@ def make_client(
         settings,
         transport=httpx.MockTransport(handler),
         sleep=sleep or RecordingSleep(),
+        clock=clock,
     )
     return client, captured
 
@@ -477,4 +481,204 @@ async def test_concurrent_throttles_do_not_hold_the_lock_while_sleeping(
     await asyncio.gather(client._throttle(), client._throttle())
 
     assert max_active == 2, "the lock must be released before sleeping"
+    await client.aclose()
+
+
+def test_the_pacing_interval_follows_the_remaining_quota(settings: Settings) -> None:
+    client, _ = make_client(settings, [])
+    base = 1.0 / settings.requests_per_second
+    cases = [
+        (RateLimits(), base),
+        (RateLimits(limit_15m=100, remaining_15m=50), base),
+        (RateLimits(limit_15m=100, remaining_15m=20), base * 2),
+        (RateLimits(limit_15m=100, remaining_15m=10), base * 4),
+        (RateLimits(limit_15m=100, remaining_15m=0), base * 4),
+        (RateLimits(limit_15m=100, remaining_15m=150), base),
+        (RateLimits(limit_15m=0, remaining_15m=0), base),
+        (RateLimits(limit_15m=None, remaining_15m=None), base),
+        (RateLimits(limit_daily=1000, remaining_daily=100), base * 4),
+        (
+            RateLimits(limit_15m=100, remaining_15m=50, limit_daily=1000, remaining_daily=50),
+            base * 4,
+        ),
+    ]
+    for limits, expected in cases:
+        client.rate_limits = limits
+        assert client._pacing_interval() == pytest.approx(expected)
+
+
+async def test_an_exhausted_quota_waits_before_the_next_call(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, _ = make_client(
+        settings,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "0,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    await client.list_activities("2026-08-01", "2026-08-02")
+
+    assert any(delay >= RATE_LIMIT_COOLDOWN_SECONDS - 0.5 for delay in sleep.calls)
+    await client.aclose()
+
+
+async def test_a_healthy_quota_never_waits_the_cooldown(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    paced = settings.model_copy(update={"requests_per_second": 2.0})
+    client, _ = make_client(
+        paced,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "2000,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    await client.list_activities("2026-08-01", "2026-08-02")
+
+    assert len(sleep.calls) == 1
+    assert sleep.calls[0] == pytest.approx(0.5, abs=0.01)
+    await client.aclose()
+
+
+async def test_concurrent_calls_share_one_cooldown(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    responses = [
+        httpx.Response(
+            200,
+            json=[],
+            headers={
+                "X-RateLimit-Limit": "2500,5000",
+                "X-RateLimit-Remaining": "0,4000",
+            },
+        ),
+        *[httpx.Response(200, json=[]) for _ in range(4)],
+    ]
+    client, _ = make_client(settings, responses, sleep=sleep)
+
+    await asyncio.gather(*(client.list_activities("2026-08-01", "2026-08-02") for _ in range(5)))
+
+    assert max(sleep.calls) == pytest.approx(RATE_LIMIT_COOLDOWN_SECONDS, abs=1.0)
+    await client.aclose()
+
+
+async def test_a_create_is_not_retried_after_an_ambiguous_failure(settings: Settings) -> None:
+    attempts: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        raise httpx.ReadError("connection reset after the request was sent")
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await client.create_event({"name": "Tempo"})
+
+    assert error.value.status_code == 0
+    assert len(attempts) == 1
+    await client.aclose()
+
+
+async def test_a_create_is_not_retried_after_a_server_error(settings: Settings) -> None:
+    captured: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    with pytest.raises(IntervalsApiError) as error:
+        await client.create_event({"name": "Tempo"})
+
+    assert error.value.status_code == 503
+    assert len(captured) == 1
+    await client.aclose()
+
+
+async def test_a_create_still_retries_after_a_rate_limit(settings: Settings) -> None:
+    captured: list[httpx.Request] = []
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "1"}, json={"error": "slow down"}),
+        httpx.Response(200, json={"id": 7}),
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return responses.pop(0)
+
+    client = IntervalsClient(
+        settings, transport=httpx.MockTransport(handler), sleep=RecordingSleep()
+    )
+
+    created = await client.create_event({"name": "Tempo"})
+
+    assert created == {"id": 7}
+    assert len(captured) == 2
+    await client.aclose()
+
+
+class FakeMonotonic:
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_a_late_caller_only_waits_the_remaining_cooldown(settings: Settings) -> None:
+    clock = FakeMonotonic()
+    sleep = RecordingSleep()
+    client, _ = make_client(
+        settings,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "0,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+        clock=clock,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    armed = sleep.calls[-1] if sleep.calls else 0.0
+    assert armed < 1.0
+
+    clock.now = 30.0
+    await client.list_activities("2026-08-01", "2026-08-02")
+    assert sleep.calls[-1] == pytest.approx(30.0, abs=0.01)
+
+    clock.now = 70.0
+    before = len(sleep.calls)
+    await client.list_activities("2026-08-01", "2026-08-02")
+    assert all(delay < 1.0 for delay in sleep.calls[before:])
     await client.aclose()

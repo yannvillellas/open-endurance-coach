@@ -133,6 +133,12 @@ Approved proposals are applied by `writer/calendar.py`:
 - workout mutations only touch `WORKOUT` events, race mutations only `RACE_*`; an
   unlabelled event matched by name+date is adopted by the mutation's family;
 - a create that would overwrite a different existing event is **refused**;
+- writes are **serialized per writer instance** (the CLI creates one per process), so
+  two concurrent approvals on the same writer cannot interleave their find and create;
+  when a create fails ambiguously
+  (lost response or 5xx) the writer **re-lists** by name+date and reconciles with the
+  event that did land instead of duplicating it — cross-process writes are the store
+  concurrency model (#69);
 - updates and deletes never cross families, and every write is read back and compared,
   with any drift reported to the operator.
 
@@ -140,7 +146,9 @@ Approved proposals are applied by `writer/calendar.py`:
 
 The CLI (`coach`) drives the loop today. Webhook triggers (activity uploaded/analyzed,
 calendar updated) and a wellness poller are planned behind the same engine; an
-Intervals.icu OAuth app has been created for that step.
+Intervals.icu OAuth app has been created for that step. The LLM client keeps a
+per-provider circuit breaker: after N consecutive failures it fails fast, and a
+half-open probe closes it again once the provider recovers.
 
 ## Source map
 

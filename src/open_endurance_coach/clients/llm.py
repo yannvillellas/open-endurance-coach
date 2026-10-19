@@ -1,10 +1,12 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+from open_endurance_coach.clients.breaker import BreakerOpenError, CircuitBreaker
 from open_endurance_coach.config import Settings, describe_providers
 from open_endurance_coach.sanitize import single_line
 from open_endurance_coach.tokens import estimate_text_tokens
@@ -97,10 +99,13 @@ class LlmClient:
         settings: Settings,
         providers: Mapping[str, LlmProvider],
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._settings = settings
         self._providers = providers
         self._sleep = sleep or asyncio.sleep
+        self._clock = clock or time.monotonic
+        self._breakers: dict[str, CircuitBreaker] = {}
         if settings.llm_provider not in providers:
             available = describe_providers(providers, settings)
             raise LlmError(
@@ -115,6 +120,17 @@ class LlmClient:
                 settings.llm_reasoning_effort,
                 settings.llm_provider,
             )
+
+    def _breaker(self, name: str) -> CircuitBreaker:
+        breaker = self._breakers.get(name)
+        if breaker is None:
+            breaker = CircuitBreaker(
+                failures=self._settings.llm_breaker_failures,
+                cooldown=self._settings.llm_breaker_cooldown_seconds,
+                now=self._clock,
+            )
+            self._breakers[name] = breaker
+        return breaker
 
     @property
     def provider_name(self) -> str:
@@ -145,20 +161,38 @@ class LlmClient:
         temperature: float | None = None,
         reasoning_effort: str | None = None,
     ) -> LlmCompletion:
-        provider = self._providers[self._settings.llm_provider]
-        completion = await provider.complete(
-            model=self._settings.llm_model,
-            messages=messages,
-            thinking=self._settings.llm_thinking if thinking is None else thinking,
-            json_mode=json_mode,
-            max_tokens=max_tokens if max_tokens is not None else self._settings.llm_max_tokens,
-            temperature=self._settings.llm_temperature if temperature is None else temperature,
-            reasoning_effort=(
-                self._settings.llm_reasoning_effort
-                if reasoning_effort is None
-                else reasoning_effort
-            ),
-        )
+        name = self._settings.llm_provider
+        provider = self._providers[name]
+        breaker = self._breaker(name)
+        try:
+            breaker.allow()
+        except BreakerOpenError as exc:
+            raise LlmError(f"provider {name!r} is unavailable: {exc}") from None
+        try:
+            completion = await provider.complete(
+                model=self._settings.llm_model,
+                messages=messages,
+                thinking=self._settings.llm_thinking if thinking is None else thinking,
+                json_mode=json_mode,
+                max_tokens=(
+                    max_tokens if max_tokens is not None else self._settings.llm_max_tokens
+                ),
+                temperature=(
+                    self._settings.llm_temperature if temperature is None else temperature
+                ),
+                reasoning_effort=(
+                    self._settings.llm_reasoning_effort
+                    if reasoning_effort is None
+                    else reasoning_effort
+                ),
+            )
+        except LlmError:
+            breaker.record_failure()
+            raise
+        except BaseException:
+            breaker.abort_probe()
+            raise
+        breaker.record_success()
         usage = completion.usage if isinstance(completion.usage, Mapping) else {}
         cached = usage.get("prompt_cache_hit_tokens")
         if cached is not None:

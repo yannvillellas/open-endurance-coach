@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from typing import Any, assert_never
 
@@ -66,6 +68,19 @@ _NUMERIC_FIELDS = frozenset(
     }
 )
 _DATE_FIELDS = frozenset({"start_date_local"})
+
+# Intervals rewrites moving_time (and the computed load) after a parsed workout, so the
+# reconcile after an ambiguous create only trusts the fields it keeps stable.
+_RECONCILE_FIELDS = (
+    "category",
+    "name",
+    "start_date_local",
+    "description",
+    "type",
+    "time_target",
+    "distance_target",
+    "distance",
+)
 
 
 def _same_text(actual: Any, requested: Any) -> bool:
@@ -153,6 +168,12 @@ def _matches(payload: dict[str, Any], stored: dict[str, Any]) -> bool:
     return True
 
 
+def _reconciled(payload: dict[str, Any], stored: dict[str, Any]) -> bool:
+    """True when the stored event carries the durable fields the create sent."""
+    wanted = {field: payload[field] for field in _RECONCILE_FIELDS if field in payload}
+    return _matches(wanted, stored)
+
+
 def _drift(stored: dict[str, Any], mutation: Mutation) -> list[str]:
     """Fields that differ from the plan after the write, so it cannot diverge silently."""
     notes: list[str] = []
@@ -175,18 +196,25 @@ class WriterError(RuntimeError):
     pass
 
 
+def _ambiguous_create(exc: IntervalsApiError) -> bool:
+    """A create that may have landed server-side: lost, 5xx, or an unreadable 2xx."""
+    return exc.status_code == 0 or 200 <= exc.status_code < 300 or exc.status_code >= 500
+
+
 class CalendarWriter:
     def __init__(self, client: IntervalsCalendarClient) -> None:
         self._client = client
+        self._write_lock = asyncio.Lock()
 
     async def apply_proposal(
         self, proposal: Proposal, *, mutations: list[Mutation] | None = None
     ) -> list[MutationOutcome]:
         approved = proposal.approved_report or proposal.report
-        outcomes = []
-        for mutation in mutations if mutations is not None else approved.mutations:
-            outcomes.append(await self._apply_mutation(mutation))
-        return outcomes
+        async with self._write_lock:
+            outcomes = []
+            for mutation in mutations if mutations is not None else approved.mutations:
+                outcomes.append(await self._apply_mutation(mutation))
+            return outcomes
 
     async def _apply_mutation(self, mutation: Mutation) -> MutationOutcome:
         if isinstance(mutation, CreateWorkout):
@@ -295,55 +323,99 @@ class CalendarWriter:
     async def _find_workout_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
         return await self._find_by_name_and_date(name, day, family=frozenset({WORKOUT_CATEGORY}))
 
+    async def _resolve_existing_workout(
+        self, existing: dict[str, Any], mutation: CreateWorkout, payload: dict[str, Any]
+    ) -> MutationOutcome:
+        category = existing.get("category")
+        if category not in (None, WORKOUT_CATEGORY):
+            raise WriterError(
+                f"refusing to update non-WORKOUT event {existing.get('id')}"
+                f" (category: {existing.get('category')})"
+            )
+        if _matches(payload, existing):
+            return MutationOutcome(
+                action="create",
+                target="unchanged",
+                event_id=existing["id"],
+                name=mutation.name,
+            )
+        if category is None:
+            await self._client.update_event(str(existing["id"]), payload)
+            return MutationOutcome(
+                action="create",
+                target="updated",
+                event_id=existing["id"],
+                name=mutation.name,
+                drift=await self._drift_after_write(existing["id"], mutation),
+            )
+        raise WriterError(
+            f"refusing to overwrite existing WORKOUT {existing['id']}:"
+            f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+            " with different values; ask the coach for an update"
+        )
+
+    async def _created_outcome(
+        self, created: dict[str, Any], mutation: CreateWorkout | CreateRace, action: str
+    ) -> MutationOutcome:
+        event_id = created.get("id")
+        if event_id is None:
+            logger.warning("create returned no id for %r; values were not verified", mutation.name)
+            return MutationOutcome(
+                action=action,
+                target="created",
+                name=mutation.name,
+                drift=["create returned no id; planned values were not verified"],
+            )
+        return MutationOutcome(
+            action=action,
+            target="created",
+            event_id=event_id,
+            name=mutation.name,
+            drift=await self._drift_after_write(event_id, mutation),
+        )
+
+    async def _create_with_reconcile(
+        self,
+        payload: dict[str, Any],
+        mutation: CreateWorkout | CreateRace,
+        *,
+        action: str,
+        find: Callable[[], Awaitable[dict[str, Any] | None]],
+        resolve: Callable[[dict[str, Any]], Awaitable[MutationOutcome]],
+    ) -> MutationOutcome:
+        """Create, and reconcile by re-listing when the response is ambiguous."""
+        try:
+            created = await self._client.create_event(payload)
+        except IntervalsApiError as exc:
+            if not _ambiguous_create(exc):
+                raise
+            try:
+                existing = await find()
+            except IntervalsApiError as list_exc:
+                logger.warning("re-list after an ambiguous create failed: %r", list_exc)
+                raise exc from list_exc
+            if existing is None:
+                raise
+            if _reconciled(payload, existing):
+                return await self._created_outcome(existing, mutation, action)
+            return await resolve(existing)
+        return await self._created_outcome(created, mutation, action)
+
     async def _apply_create(self, mutation: CreateWorkout) -> MutationOutcome:
         payload = self._create_payload(mutation)
         existing = await self._find_workout_by_name_and_date(
             mutation.name, mutation.start_date_local
         )
         if existing is not None:
-            category = existing.get("category")
-            if category not in (None, WORKOUT_CATEGORY):
-                raise WriterError(
-                    f"refusing to update non-WORKOUT event {existing.get('id')}"
-                    f" (category: {existing.get('category')})"
-                )
-            if _matches(payload, existing):
-                return MutationOutcome(
-                    action="create",
-                    target="unchanged",
-                    event_id=existing["id"],
-                    name=mutation.name,
-                )
-            if category is None:
-                await self._client.update_event(str(existing["id"]), payload)
-                return MutationOutcome(
-                    action="create",
-                    target="updated",
-                    event_id=existing["id"],
-                    name=mutation.name,
-                    drift=await self._drift_after_write(existing["id"], mutation),
-                )
-            raise WriterError(
-                f"refusing to overwrite existing WORKOUT {existing['id']}:"
-                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
-                " with different values; ask the coach for an update"
-            )
-        created = await self._client.create_event(payload)
-        event_id = created.get("id")
-        if event_id is None:
-            logger.warning("create returned no id for %r; values were not verified", mutation.name)
-            return MutationOutcome(
-                action="create",
-                target="created",
-                name=mutation.name,
-                drift=["create returned no id; planned values were not verified"],
-            )
-        return MutationOutcome(
+            return await self._resolve_existing_workout(existing, mutation, payload)
+        return await self._create_with_reconcile(
+            payload,
+            mutation,
             action="create",
-            target="created",
-            event_id=event_id,
-            name=mutation.name,
-            drift=await self._drift_after_write(event_id, mutation),
+            find=lambda: self._find_workout_by_name_and_date(
+                mutation.name, mutation.start_date_local
+            ),
+            resolve=lambda found: self._resolve_existing_workout(found, mutation, payload),
         )
 
     async def _fetch_event(
@@ -398,53 +470,48 @@ class CalendarWriter:
     async def _find_race_by_name_and_date(self, name: str, day: date) -> dict[str, Any] | None:
         return await self._find_by_name_and_date(name, day, family=frozenset(RACE_CATEGORIES))
 
+    async def _resolve_existing_race(
+        self, existing: dict[str, Any], mutation: CreateRace, payload: dict[str, Any]
+    ) -> MutationOutcome:
+        category = existing.get("category")
+        if category is not None and category not in RACE_CATEGORIES:
+            raise WriterError(
+                f"refusing to update non-RACE event {existing.get('id')}"
+                f" (category: {existing.get('category')})"
+            )
+        if _matches(payload, existing):
+            return MutationOutcome(
+                action="create_race",
+                target="unchanged",
+                event_id=existing["id"],
+                name=mutation.name,
+            )
+        if category is None:
+            await self._client.update_event(str(existing["id"]), payload)
+            return MutationOutcome(
+                action="create_race",
+                target="updated",
+                event_id=existing["id"],
+                name=mutation.name,
+                drift=await self._drift_after_write(existing["id"], mutation),
+            )
+        raise WriterError(
+            f"refusing to overwrite existing RACE {existing['id']}:"
+            f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
+            " with different values; ask the coach for an update"
+        )
+
     async def _apply_create_race(self, mutation: CreateRace) -> MutationOutcome:
         payload = self._race_create_payload(mutation)
         existing = await self._find_race_by_name_and_date(mutation.name, mutation.start_date_local)
         if existing is not None:
-            category = existing.get("category")
-            if category is not None and category not in RACE_CATEGORIES:
-                raise WriterError(
-                    f"refusing to update non-RACE event {existing.get('id')}"
-                    f" (category: {existing.get('category')})"
-                )
-            if _matches(payload, existing):
-                return MutationOutcome(
-                    action="create_race",
-                    target="unchanged",
-                    event_id=existing["id"],
-                    name=mutation.name,
-                )
-            if category is None:
-                await self._client.update_event(str(existing["id"]), payload)
-                return MutationOutcome(
-                    action="create_race",
-                    target="updated",
-                    event_id=existing["id"],
-                    name=mutation.name,
-                    drift=await self._drift_after_write(existing["id"], mutation),
-                )
-            raise WriterError(
-                f"refusing to overwrite existing RACE {existing['id']}:"
-                f" {mutation.name!r} already exists on {mutation.start_date_local.isoformat()}"
-                " with different values; ask the coach for an update"
-            )
-        created = await self._client.create_event(payload)
-        event_id = created.get("id")
-        if event_id is None:
-            logger.warning("create returned no id for %r; values were not verified", mutation.name)
-            return MutationOutcome(
-                action="create_race",
-                target="created",
-                name=mutation.name,
-                drift=["create returned no id; planned values were not verified"],
-            )
-        return MutationOutcome(
+            return await self._resolve_existing_race(existing, mutation, payload)
+        return await self._create_with_reconcile(
+            payload,
+            mutation,
             action="create_race",
-            target="created",
-            event_id=event_id,
-            name=mutation.name,
-            drift=await self._drift_after_write(event_id, mutation),
+            find=lambda: self._find_race_by_name_and_date(mutation.name, mutation.start_date_local),
+            resolve=lambda found: self._resolve_existing_race(found, mutation, payload),
         )
 
     async def _apply_update_race(self, mutation: UpdateRace) -> MutationOutcome:

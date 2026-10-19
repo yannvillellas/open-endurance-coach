@@ -23,6 +23,11 @@ BROWSER_USER_AGENT = (
 )
 
 
+RATE_LIMIT_SLOW_RATIO = 0.2
+RATE_LIMIT_CRAWL_RATIO = 0.1
+RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+
+
 @dataclass
 class RateLimits:
     limit_15m: int | None = None
@@ -53,6 +58,15 @@ class RateLimits:
             remaining_daily=remaining_daily,
         )
 
+    def pressure(self) -> float | None:
+        """The tightest remaining/limit ratio across the windows, None when unknown."""
+        ratios: list[float] = []
+        if self.limit_15m and self.remaining_15m is not None:
+            ratios.append(self.remaining_15m / self.limit_15m)
+        if self.limit_daily and self.remaining_daily is not None:
+            ratios.append(self.remaining_daily / self.limit_daily)
+        return min(ratios) if ratios else None
+
 
 class IntervalsApiError(RuntimeError):
     def __init__(
@@ -73,9 +87,11 @@ class IntervalsClient:
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._settings = settings
         self._sleep = sleep or asyncio.sleep
+        self._clock = clock or time.monotonic
         self._client = httpx.AsyncClient(
             base_url=settings.intervals_base_url,
             auth=httpx.BasicAuth("API_KEY", settings.intervals_api_key),
@@ -89,16 +105,41 @@ class IntervalsClient:
         )
         self._min_interval = 1.0 / settings.requests_per_second
         self._last_request_at = 0.0
+        self._cooldown_until = 0.0
         self._throttle_lock = asyncio.Lock()
         self.rate_limits = RateLimits()
 
     def _athlete_path(self, path: str) -> str:
         return f"/athlete/{self._settings.intervals_athlete_id}{path}"
 
+    def _pacing_interval(self) -> float:
+        """Slow down before the quota runs out, from the last observed headers."""
+        pressure = self.rate_limits.pressure()
+        if pressure is None:
+            return self._min_interval
+        if pressure <= RATE_LIMIT_CRAWL_RATIO:
+            return self._min_interval * 4
+        if pressure <= RATE_LIMIT_SLOW_RATIO:
+            return self._min_interval * 2
+        return self._min_interval
+
+    def _exhausted(self) -> bool:
+        pressure = self.rate_limits.pressure()
+        return pressure is not None and pressure <= 0
+
+    def _note_limits(self, response: httpx.Response) -> None:
+        """Track the quota; an exhausted observation arms the shared cooldown once."""
+        self.rate_limits = RateLimits.from_headers(response.headers)
+        if self._exhausted():
+            self._cooldown_until = max(
+                self._cooldown_until, self._clock() + RATE_LIMIT_COOLDOWN_SECONDS
+            )
+
     async def _throttle(self) -> None:
         async with self._throttle_lock:
-            now = time.monotonic()
-            wait = max(0.0, self._last_request_at + self._min_interval - now)
+            now = self._clock()
+            ready_at = max(self._last_request_at + self._pacing_interval(), self._cooldown_until)
+            wait = max(0.0, ready_at - now)
             self._last_request_at = now + wait
         if wait > 0:
             await self._sleep(wait)
@@ -110,6 +151,7 @@ class IntervalsClient:
         *,
         params: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
+        retry_ambiguous: bool = True,
     ) -> httpx.Response:
         await self._throttle()
         response: httpx.Response | None = None
@@ -119,14 +161,20 @@ class IntervalsClient:
             except httpx.TransportError:
                 response = None
             if response is not None:
-                self.rate_limits = RateLimits.from_headers(response.headers)
+                self._note_limits(response)
                 if response.status_code == 429 and attempt < self._settings.max_retries:
                     retry_after = parse_retry_after(response.headers, default=60.0)
                     await self._sleep(retry_after)
                     continue
-                if response.status_code >= 500 and attempt < self._settings.max_retries:
+                if (
+                    response.status_code >= 500
+                    and attempt < self._settings.max_retries
+                    and retry_ambiguous
+                ):
                     await self._sleep(self._settings.retry_base_delay * 2**attempt)
                     continue
+                break
+            if not retry_ambiguous:
                 break
             if attempt < self._settings.max_retries:
                 await self._sleep(self._settings.retry_base_delay * 2**attempt)
@@ -216,7 +264,11 @@ class IntervalsClient:
         return self._json_object(response, "event")
 
     async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await self._request("POST", self._athlete_path("/events"), payload=payload)
+        # A create is not idempotent: a retried POST can duplicate the event when the
+        # first one persisted but its response was lost. The writer reconciles instead.
+        response = await self._request(
+            "POST", self._athlete_path("/events"), payload=payload, retry_ambiguous=False
+        )
         return self._json_object(response, "event")
 
     async def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
