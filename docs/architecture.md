@@ -116,7 +116,11 @@ still-fetchable markers survive (`tests/test_store.py`).
 observed) and seven categories. The model writes them on every turn through the
 report's `memory` operations — `remember`, `update` (only the changed fields; an
 explicit null clears one), `close` and `forget` — outside the calendar approval gate.
-Closure follows the category in code: `injury_niggle` and `health_medical` are kept as
+Only durable facts are accepted: one-off requests, single-session decisions, questions,
+hypotheticals and lone examples stay in the calendar or the reply, a
+`preferences_tolerance` fact needs an explicit preference, and a `forget` request
+targets every active fact matching the description (asking when ambiguous). Closure
+follows the category in code: `injury_niggle` and `health_medical` are kept as
 `resolved` history (with `valid_to`), everything else is deleted, and a passed
 `expires_on` is swept at startup. Memory is never pruned by age; `/forget all` erases
 it. Injection happens in the engine after extraction: active facts are ranked by

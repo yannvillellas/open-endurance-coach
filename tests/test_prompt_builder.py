@@ -253,6 +253,27 @@ def test_contract_documents_memory_operations() -> None:
     assert "trigger_keywords" in system
 
 
+def test_contract_excludes_one_off_requests_and_questions_from_memory() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "Record only durable facts" in system
+    assert "Never remember a one-off request" in system
+    assert "single-session decision" in system
+    assert "a question, a hypothetical or a lone example" in system
+
+
+def test_contract_requires_an_explicit_preference_for_tolerance_facts() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "A preferences_tolerance fact needs an explicit preference" in system
+    assert "(like/dislike, prefer, always/never, tolerate)" in system
+    assert "not an inference" in system
+
+
+def test_contract_forgets_every_matching_fact_or_asks() -> None:
+    system = build_messages(CONTEXT, make_settings())[0].content
+    assert "forget every active fact matching the description" in system
+    assert "ask which one" in system
+
+
 def test_memory_example_validates_against_the_contract() -> None:
     report = DecisionReport.model_validate(MEMORY_EXAMPLE)
     assert [op.action.value for op in report.memory] == ["remember"]
