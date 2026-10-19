@@ -24,6 +24,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pip-audit>=2.7",
+    "hypothesis>=6",
+    "pytest-cov>=5",
 ]
 
 [project.scripts]
@@ -37,6 +40,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["open_endurance_coach"]
+
+[tool.coverage.report]
+fail_under = 95
 
 [tool.ruff]
 line-length = 100

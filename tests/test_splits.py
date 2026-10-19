@@ -1,4 +1,9 @@
+import re
+from itertools import pairwise
 from typing import Any
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from open_endurance_coach.extractors.splits import MAX_SPLITS, per_km_splits
 
@@ -253,3 +258,78 @@ def test_a_thousand_kilometres_stays_within_the_cap() -> None:
     splits = per_km_splits(steady(1_000_000))
     assert 0 < len(splits) <= MAX_SPLITS
     assert sum(split.distance_m for split in splits) == 1_000_000.0
+
+
+def _label_range(label: str) -> tuple[int, int]:
+    match = re.match(r"km (\d+)(?:-(\d+))?", label)
+    assert match is not None
+    start = int(match.group(1))
+    return start, int(match.group(2) or start)
+
+
+@settings(max_examples=50, deadline=None, derandomize=True)
+@given(
+    gaps=st.lists(
+        st.floats(min_value=0, max_value=200, allow_nan=False, allow_infinity=False),
+        min_size=2,
+        max_size=150,
+    ),
+    durations=st.lists(st.integers(min_value=1, max_value=120), min_size=2, max_size=150),
+)
+def test_property_the_rows_are_ordered_non_overlapping_and_bounded(
+    gaps: list[float], durations: list[int]
+) -> None:
+    count = min(len(gaps), len(durations))
+    distances = [0.0]
+    for gap in gaps[:count]:
+        distances.append(distances[-1] + gap)
+    times = [0]
+    for duration in durations[:count]:
+        times.append(times[-1] + duration)
+
+    splits = per_km_splits({"time": times, "distance": distances})
+
+    assert len(splits) <= MAX_SPLITS
+    ranges = [_label_range(split.label) for split in splits]
+    for (_, end), (next_start, _) in pairwise(ranges):
+        assert next_start > end
+    assert all(split.distance_m > 0 and split.time_s >= 1 for split in splits)
+    # distance_m is rounded to the decimetre, so allow half a decimetre per row
+    assert sum(split.distance_m for split in splits) <= distances[-1] + 0.05 * len(splits) + 1e-6
+
+
+@settings(max_examples=40, deadline=None, derandomize=True)
+@given(total=st.floats(min_value=100.0, max_value=200_000.0, allow_nan=False, allow_infinity=False))
+def test_property_a_stream_stopping_mid_kilometre_ends_partial(total: float) -> None:
+    distances = [float(metres) for metres in range(0, int(total) + 1, 10)]
+    times = [index * 3 for index in range(len(distances))]
+
+    splits = per_km_splits({"time": times, "distance": distances})
+
+    stream_total = distances[-1]
+    assert splits
+    if stream_total - (int(stream_total) // 1000) * 1000 > 0.5:
+        assert splits[-1].label.endswith("(partial)")
+    # A dense stream has a sample in every kilometre: the rows must add up to it.
+    assert (
+        stream_total - 0.05 * len(splits) - 1e-6
+        <= sum(split.distance_m for split in splits)
+        <= stream_total + 0.05 * len(splits) + 1e-6
+    )
+
+
+@settings(max_examples=30, deadline=None, derandomize=True)
+@given(gap_km=st.integers(min_value=2, max_value=8))
+def test_property_a_sample_gap_leaves_the_skipped_kilometres_out(gap_km: int) -> None:
+    resume = gap_km * 1000.0 + 100.0
+    distances = [0.0, 250.0, 500.0, resume, resume + 100.0, resume + 250.0]
+    times = [index * 10 for index in range(len(distances))]
+
+    splits = per_km_splits({"time": times, "distance": distances})
+
+    covered: set[int] = set()
+    for split in splits:
+        start, end = _label_range(split.label)
+        covered.update(range(start, end + 1))
+    assert set(range(2, gap_km + 1)).isdisjoint(covered)
+    assert gap_km + 1 in covered  # the stream resumes after the gap

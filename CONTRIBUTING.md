@@ -22,8 +22,15 @@ cp .env.example .env   # fill in INTERVALS_API_KEY and INTERVALS_ATHLETE_ID
 ruff check .
 ruff format --check .
 mypy src tests
-pytest -q
+pytest -q --cov=open_endurance_coach
+pip-audit
 ```
+
+The CI fails the tests job below **95% total coverage**.
+
+The CI audits the dependencies on every pull request. Dependabot watches unchanged pins
+(security alerts and version-update PRs), and every dependency PR goes through the same
+checks.
 
 ## Pull requests
 
