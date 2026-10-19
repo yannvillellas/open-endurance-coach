@@ -28,8 +28,9 @@ pip-audit
 
 The CI fails the tests job below **95% total coverage**.
 
-The CI audits the dependencies on every pull request. Re-run `pip-audit` periodically (for
-example monthly) to catch advisories that affect unchanged pins.
+The CI audits the dependencies on every pull request. Dependabot watches unchanged pins
+(security alerts and version-update PRs), and every dependency PR goes through the same
+checks.
 
 ## Pull requests
 
