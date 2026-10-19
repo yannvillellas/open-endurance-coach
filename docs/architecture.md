@@ -146,7 +146,9 @@ Approved proposals are applied by `writer/calendar.py`:
 
 The CLI (`coach`) drives the loop today. Webhook triggers (activity uploaded/analyzed,
 calendar updated) and a wellness poller are planned behind the same engine; an
-Intervals.icu OAuth app has been created for that step.
+Intervals.icu OAuth app has been created for that step. The LLM client keeps a
+per-provider circuit breaker: after N consecutive failures it fails fast, and a
+half-open probe closes it again once the provider recovers.
 
 ## Source map
 

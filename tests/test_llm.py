@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -22,8 +23,31 @@ def make_client(
     settings: Settings,
     provider: FakeLlmProvider,
     sleep: RecordingSleep | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> LlmClient:
-    return LlmClient(settings, {"fake": provider}, sleep=sleep or RecordingSleep())
+    return LlmClient(settings, {"fake": provider}, sleep=sleep or RecordingSleep(), clock=clock)
+
+
+class BreakerClock:
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class FailingProvider:
+    name = "fake"
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    async def complete(self, **kwargs: Any) -> LlmCompletion:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise LlmError("provider down")
+        return completion("ok")
 
 
 async def test_provider_selected_from_settings(settings: Settings) -> None:
@@ -1121,3 +1145,137 @@ def test_completion_diagnostics_stay_on_one_line() -> None:
 def test_completion_diagnostics_tolerate_a_non_mapping_usage() -> None:
     completion = LlmCompletion(content="", usage=["x"])  # type: ignore[arg-type]
     assert "completion_tokens=unknown" in _completion_diagnostics(completion)
+
+
+def breaker_settings(settings: Settings, *, failures: int = 2, cooldown: float = 10.0) -> Settings:
+    return settings.model_copy(
+        update={
+            "llm_provider": "fake",
+            "llm_breaker_failures": failures,
+            "llm_breaker_cooldown_seconds": cooldown,
+        }
+    )
+
+
+async def test_a_down_provider_stops_being_called_while_the_breaker_is_open(
+    settings: Settings,
+) -> None:
+    clock = BreakerClock()
+    provider = FailingProvider(failures=99)
+    client = make_client(breaker_settings(settings), provider, clock=clock)  # type: ignore[arg-type]
+    message = [LlmMessage(role="user", content="hi")]
+
+    for _ in range(2):
+        with pytest.raises(LlmError, match="provider down"):
+            await client.complete(message)
+    with pytest.raises(LlmError, match="unavailable"):
+        await client.complete(message)
+    assert provider.calls == 2
+
+    clock.now += 5.0
+    with pytest.raises(LlmError, match="unavailable"):
+        await client.complete(message)
+    assert provider.calls == 2
+
+    clock.now += 5.0
+    with pytest.raises(LlmError, match="provider down"):
+        await client.complete(message)
+    assert provider.calls == 3  # the half-open probe reached the provider
+
+
+async def test_a_successful_probe_closes_the_breaker(settings: Settings) -> None:
+    clock = BreakerClock()
+    provider = FailingProvider(failures=2)
+    client = make_client(breaker_settings(settings), provider, clock=clock)  # type: ignore[arg-type]
+    message = [LlmMessage(role="user", content="hi")]
+
+    for _ in range(2):
+        with pytest.raises(LlmError, match="provider down"):
+            await client.complete(message)
+
+    clock.now += 10.0
+    result = await client.complete(message)
+
+    assert result.content == "ok"
+    await client.complete(message)
+    assert provider.calls == 4
+
+
+async def test_a_json_validation_error_does_not_trip_the_breaker(settings: Settings) -> None:
+    provider = FakeLlmProvider(
+        [completion("not json"), completion("still not json"), completion("ok")]
+    )
+    client = make_client(breaker_settings(settings), provider)
+
+    with pytest.raises(LlmError, match="JSON completion failed"):
+        await client.complete_json([LlmMessage(role="user", content="parse")], max_attempts=2)
+
+    result = await client.complete([LlmMessage(role="user", content="still fine")])
+    assert result.content == "ok"
+    assert len(provider.calls) == 3
+
+
+class ExplodingProbeProvider:
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def complete(self, **kwargs: Any) -> LlmCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            raise LlmError("provider down")
+        raise RuntimeError("unexpected client failure")
+
+
+async def test_a_probe_that_raises_unexpectedly_reopens_the_breaker(settings: Settings) -> None:
+    clock = BreakerClock()
+    provider = ExplodingProbeProvider()
+    client = make_client(breaker_settings(settings, failures=1), provider, clock=clock)  # type: ignore[arg-type]
+    message = [LlmMessage(role="user", content="hi")]
+
+    with pytest.raises(LlmError, match="provider down"):
+        await client.complete(message)
+    clock.now += 10.0
+    with pytest.raises(RuntimeError, match="unexpected"):
+        await client.complete(message)
+
+    clock.now += 9.0
+    with pytest.raises(LlmError, match="unavailable"):
+        await client.complete(message)
+
+
+class NamedProvider:
+    def __init__(self, name: str, *, fails: bool) -> None:
+        self.name = name
+        self.fails = fails
+        self.calls = 0
+
+    async def complete(self, **kwargs: Any) -> LlmCompletion:
+        self.calls += 1
+        if self.fails:
+            raise LlmError("provider down")
+        return completion("ok")
+
+
+async def test_breakers_are_independent_per_provider(settings: Settings) -> None:
+    clock = BreakerClock()
+    down = NamedProvider("down", fails=True)
+    up = NamedProvider("up", fails=False)
+    settings = breaker_settings(settings, failures=1).model_copy(update={"llm_provider": "down"})
+    client = LlmClient(
+        settings,
+        {"down": down, "up": up},  # type: ignore[dict-item]
+        sleep=RecordingSleep(),
+        clock=clock,
+    )
+    message = [LlmMessage(role="user", content="hi")]
+
+    with pytest.raises(LlmError, match="provider down"):
+        await client.complete(message)
+    client.select(provider="up")
+    assert (await client.complete(message)).content == "ok"
+    client.select(provider="down")
+    with pytest.raises(LlmError, match="unavailable"):
+        await client.complete(message)
+    assert down.calls == 1

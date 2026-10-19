@@ -291,3 +291,29 @@ def test_settings_errors_do_not_echo_input_values(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ValidationError) as excinfo:
         Settings(_env_file=None)
     assert "FAKE-SECRET-VALUE" not in str(excinfo.value)
+
+
+def test_breaker_defaults_and_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INTERVALS_API_KEY", "test")
+    monkeypatch.delenv("LLM_BREAKER_FAILURES", raising=False)
+    monkeypatch.delenv("LLM_BREAKER_COOLDOWN_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.llm_breaker_failures == 5
+    assert settings.llm_breaker_cooldown_seconds == 60.0
+    with pytest.raises(ValidationError):
+        Settings(llm_breaker_failures=0)
+    with pytest.raises(ValidationError):
+        Settings(llm_breaker_cooldown_seconds=0)
+
+
+def test_breaker_settings_read_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INTERVALS_API_KEY", "test")
+    monkeypatch.setenv("LLM_BREAKER_FAILURES", "3")
+    monkeypatch.setenv("LLM_BREAKER_COOLDOWN_SECONDS", "15")
+
+    settings = Settings()
+
+    assert settings.llm_breaker_failures == 3
+    assert settings.llm_breaker_cooldown_seconds == 15.0

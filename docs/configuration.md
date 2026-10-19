@@ -19,6 +19,8 @@ limit and the options (wait, set `OVH_API_KEY`, or select another provider with
 | `LLM_CONTEXT_WINDOW`               | provider default | Override the model's context window; required for a model the app does not know (rejected without it)                            |
 | `LLM_MAX_OUTPUT_TOKENS`            | provider default | Override the model's output cap (only needed for a model the app does not know)                                                  |
 | `LLM_TIMEOUT_SECONDS`              | `180`            | Per-call timeout                                                                                                                 |
+| `LLM_BREAKER_FAILURES`             | `5`              | Consecutive provider failures that open the circuit breaker                                                                      |
+| `LLM_BREAKER_COOLDOWN_SECONDS`     | `60`             | Wait before the half-open probe that can close the breaker                                                                       |
 | `APP_TIMEZONE`                     | `Europe/Paris`   | Training-day boundaries; must match the Intervals.icu account timezone                                                           |
 | `DATABASE_PATH`                    | `data/coach.db`  | Local SQLite state (proposals, messages, seen activities)                                                                        |
 | `MAX_RETRIES` / `RETRY_BASE_DELAY` | `3` / `1`        | HTTP retry policy                                                                                                                |
@@ -36,7 +38,10 @@ provider and model are printed on startup and `/provider [name]` / `/model [name
 switch them mid-session. A provider can only be selected when it is usable: an unknown
 name (e.g. `ova`) lists the available providers with their credential status, and
 DeepSeek without a key reports `No API key for provider 'deepseek'; set
-DEEPSEEK_API_KEY` immediately.
+DEEPSEEK_API_KEY` immediately. A provider that keeps failing trips its circuit breaker:
+after `LLM_BREAKER_FAILURES` consecutive failures the client stops calling it and
+answers immediately (`provider 'ovh' is unavailable: retry in N s`); after the cooldown
+one probe goes through, and a success closes the breaker.
 
 ```text
 Unknown LLM provider: 'ova'

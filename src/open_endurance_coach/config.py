@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int | None = None
     llm_temperature: float | None = None
     llm_timeout_seconds: float = 180.0
+    llm_breaker_failures: int = Field(default=5, ge=1)
+    llm_breaker_cooldown_seconds: float = Field(default=60.0, gt=0)
 
     # Training-day boundaries and calendar dates are written as midnight in this zone;
     # it must match the athlete's Intervals.icu account timezone.
