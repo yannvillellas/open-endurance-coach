@@ -23,7 +23,11 @@ ruff check .
 ruff format --check .
 mypy src tests
 pytest -q
+pip-audit
 ```
+
+The CI audits the dependencies on every pull request. Re-run `pip-audit` periodically (for
+example monthly) to catch advisories that affect unchanged pins.
 
 ## Pull requests
 

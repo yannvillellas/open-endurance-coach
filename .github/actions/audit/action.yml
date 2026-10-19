@@ -1,0 +1,12 @@
+name: Audit
+description: Upgrade pip and audit the installed dependencies with pip-audit
+
+runs:
+  using: composite
+  steps:
+    - name: Upgrade pip
+      shell: bash
+      run: python -m pip install --upgrade pip
+    - name: Audit (pip-audit)
+      shell: bash
+      run: pip-audit

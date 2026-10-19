@@ -15,6 +15,15 @@ jobs:
           python-version: "3.12"
       - uses: ./.github/actions/lint
 
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/audit
+
   tests:
     name: Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
