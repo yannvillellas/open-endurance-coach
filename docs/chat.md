@@ -56,9 +56,10 @@ assumes the full athlete-data reserve and no current message, so a very large me
 can trim slightly before the notice. At startup, messages older than
 `CHAT_HISTORY_MAX_AGE_DAYS` (default 90) are pruned and seen-activity markers older
 than the widest fetch window are deleted; proposals and coach memory are never pruned
-by age. Facts the athlete states or the coach observes are kept in a local coach
+by age. Durable facts the athlete states or the coach observes are kept in a local coach
 memory, written and announced as they appear (no approval needed) and consulted before
-questions are asked; `/forget all` erases that memory too.
+questions are asked; one-off requests stay in the calendar, and `/forget all` erases
+that memory too.
 
 `/forget` deletes the conversation (the `messages` log) now, `/forget N` deletes only
 the messages older than N days, and `/forget all` deletes all local state
