@@ -1189,6 +1189,7 @@ async def test_a_lost_response_reconciles_despite_recomputed_fields() -> None:
         name="Tempo Session",
         start_date_local=date(2024, 2, 5),
         moving_time=3600,
+        icu_training_load=60,
     )
 
     outcomes = await writer.apply_proposal(make_proposal(mutation))
@@ -1196,3 +1197,25 @@ async def test_a_lost_response_reconciles_despite_recomputed_fields() -> None:
     assert len(client.events) == 1
     assert outcomes[0].target == "created"
     assert client.events[0]["moving_time"] == 4464
+
+
+class UnreadableCreatedClient(FakeCalendarClient):
+    """Persists the event but returns an unparseable 2xx body."""
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        await super().create_event(payload)
+        raise IntervalsApiError(201, "unexpected event payload")
+
+
+async def test_a_created_but_unreadable_response_is_reconciled() -> None:
+    client = UnreadableCreatedClient()
+    writer = CalendarWriter(client)
+    mutation = CreateWorkout(
+        action="create", name="Tempo Session", start_date_local=date(2024, 2, 5)
+    )
+
+    outcomes = await writer.apply_proposal(make_proposal(mutation))
+
+    assert len(client.events) == 1
+    assert outcomes[0].target == "created"
+    assert outcomes[0].event_id == client.events[0]["id"]

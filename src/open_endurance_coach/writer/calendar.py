@@ -197,8 +197,8 @@ class WriterError(RuntimeError):
 
 
 def _ambiguous_create(exc: IntervalsApiError) -> bool:
-    """A create that may have landed server-side: a lost response or a 5xx."""
-    return exc.status_code == 0 or exc.status_code >= 500
+    """A create that may have landed server-side: lost, 5xx, or an unreadable 2xx."""
+    return exc.status_code == 0 or 200 <= exc.status_code < 300 or exc.status_code >= 500
 
 
 class CalendarWriter:
