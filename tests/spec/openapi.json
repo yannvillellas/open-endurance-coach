@@ -13987,6 +13987,13 @@
             "type": "integer",
             "format": "int32"
           },
+          "cho_used_calc": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "ROTHSCHILD_2024"
+            ]
+          },
           "load_order": {
             "type": "string",
             "enum": [
