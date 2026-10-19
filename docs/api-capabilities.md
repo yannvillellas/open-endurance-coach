@@ -101,7 +101,7 @@ Verified 2026-08-16 against official documentation: Intervals.icu API docs threa
 
 ## 5. Design implications recorded for later iterations
 
-- HTTP client: browser-like `User-Agent`, Basic auth, retry with `Retry-After` respect, rate-limit header tracking (budgeting for historical queries).
+- HTTP client: browser-like `User-Agent`, Basic auth, retry with `Retry-After` respect, rate-limit header tracking with proactive pacing — ×2 at or below 20% remaining, ×4 at or below 10%, and a shared 60 s cooldown when the quota is exhausted (concurrent calls wait it once, then resume spaced) — so calls slow down before a 429 instead of after it.
 - Token budgets: prefer `fields` filtering, interval summaries over raw streams; wellness has 46 fields — select columns via `cols`/`fields` params.
 - When a webhook adapter is added later (OAuth app), ack-first + in-process queue is confirmed correct: ACTIVITY_ANALYZED already has a 60 s consolidation delay, so processing after ack is the native pattern.
 - **Polling cadence (rate-limit math, for the optional background poller):** activities list every 5 min ≈ 288 calls/day; wellness every 30 min ≈ 48/day; per-analysis extraction ≈ 5–10 calls; total stays far below the 5000/day limit. Polling is also self-healing for missed webhooks — no separate reconciliation job needed.

@@ -23,6 +23,11 @@ BROWSER_USER_AGENT = (
 )
 
 
+RATE_LIMIT_SLOW_RATIO = 0.2
+RATE_LIMIT_CRAWL_RATIO = 0.1
+RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+
+
 @dataclass
 class RateLimits:
     limit_15m: int | None = None
@@ -52,6 +57,15 @@ class RateLimits:
             limit_daily=limit_daily,
             remaining_daily=remaining_daily,
         )
+
+    def pressure(self) -> float | None:
+        """The tightest remaining/limit ratio across the windows, None when unknown."""
+        ratios: list[float] = []
+        if self.limit_15m and self.remaining_15m is not None:
+            ratios.append(self.remaining_15m / self.limit_15m)
+        if self.limit_daily and self.remaining_daily is not None:
+            ratios.append(self.remaining_daily / self.limit_daily)
+        return min(ratios) if ratios else None
 
 
 class IntervalsApiError(RuntimeError):
@@ -89,16 +103,36 @@ class IntervalsClient:
         )
         self._min_interval = 1.0 / settings.requests_per_second
         self._last_request_at = 0.0
+        self._cooldown_until = 0.0
         self._throttle_lock = asyncio.Lock()
         self.rate_limits = RateLimits()
 
     def _athlete_path(self, path: str) -> str:
         return f"/athlete/{self._settings.intervals_athlete_id}{path}"
 
+    def _pacing_interval(self) -> float:
+        """Slow down before the quota runs out, from the last observed headers."""
+        pressure = self.rate_limits.pressure()
+        if pressure is None:
+            return self._min_interval
+        if pressure <= RATE_LIMIT_CRAWL_RATIO:
+            return self._min_interval * 4
+        if pressure <= RATE_LIMIT_SLOW_RATIO:
+            return self._min_interval * 2
+        return self._min_interval
+
+    def _exhausted(self) -> bool:
+        pressure = self.rate_limits.pressure()
+        return pressure is not None and pressure <= 0
+
     async def _throttle(self) -> None:
         async with self._throttle_lock:
             now = time.monotonic()
-            wait = max(0.0, self._last_request_at + self._min_interval - now)
+            if self._exhausted():
+                # One shared cooldown: concurrent callers wait it once, then pace.
+                self._cooldown_until = max(self._cooldown_until, now + RATE_LIMIT_COOLDOWN_SECONDS)
+            ready_at = max(self._last_request_at + self._pacing_interval(), self._cooldown_until)
+            wait = max(0.0, ready_at - now)
             self._last_request_at = now + wait
         if wait > 0:
             await self._sleep(wait)

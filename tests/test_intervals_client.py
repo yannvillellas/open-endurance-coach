@@ -6,6 +6,7 @@ import pytest
 
 from open_endurance_coach.clients.intervals import (
     BROWSER_USER_AGENT,
+    RATE_LIMIT_COOLDOWN_SECONDS,
     IntervalsApiError,
     IntervalsClient,
     RateLimits,
@@ -477,4 +478,100 @@ async def test_concurrent_throttles_do_not_hold_the_lock_while_sleeping(
     await asyncio.gather(client._throttle(), client._throttle())
 
     assert max_active == 2, "the lock must be released before sleeping"
+    await client.aclose()
+
+
+def test_the_pacing_interval_follows_the_remaining_quota(settings: Settings) -> None:
+    client, _ = make_client(settings, [])
+    base = 1.0 / settings.requests_per_second
+    cases = [
+        (RateLimits(), base),
+        (RateLimits(limit_15m=100, remaining_15m=50), base),
+        (RateLimits(limit_15m=100, remaining_15m=20), base * 2),
+        (RateLimits(limit_15m=100, remaining_15m=10), base * 4),
+        (RateLimits(limit_15m=100, remaining_15m=0), base * 4),
+        (RateLimits(limit_15m=100, remaining_15m=150), base),
+        (RateLimits(limit_15m=0, remaining_15m=0), base),
+        (RateLimits(limit_15m=None, remaining_15m=None), base),
+        (RateLimits(limit_daily=1000, remaining_daily=100), base * 4),
+        (
+            RateLimits(limit_15m=100, remaining_15m=50, limit_daily=1000, remaining_daily=50),
+            base * 4,
+        ),
+    ]
+    for limits, expected in cases:
+        client.rate_limits = limits
+        assert client._pacing_interval() == pytest.approx(expected)
+
+
+async def test_an_exhausted_quota_waits_before_the_next_call(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    client, _ = make_client(
+        settings,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "0,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    await client.list_activities("2026-08-01", "2026-08-02")
+
+    assert any(delay >= RATE_LIMIT_COOLDOWN_SECONDS - 0.5 for delay in sleep.calls)
+    await client.aclose()
+
+
+async def test_a_healthy_quota_never_waits_the_cooldown(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    paced = settings.model_copy(update={"requests_per_second": 2.0})
+    client, _ = make_client(
+        paced,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "2000,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    await client.list_activities("2026-08-01", "2026-08-02")
+
+    assert len(sleep.calls) == 1
+    assert sleep.calls[0] == pytest.approx(0.5, abs=0.01)
+    await client.aclose()
+
+
+async def test_concurrent_calls_share_one_cooldown(settings: Settings) -> None:
+    sleep = RecordingSleep()
+    responses = [
+        httpx.Response(
+            200,
+            json=[],
+            headers={
+                "X-RateLimit-Limit": "2500,5000",
+                "X-RateLimit-Remaining": "0,4000",
+            },
+        ),
+        *[httpx.Response(200, json=[]) for _ in range(4)],
+    ]
+    client, _ = make_client(settings, responses, sleep=sleep)
+
+    await asyncio.gather(*(client.list_activities("2026-08-01", "2026-08-02") for _ in range(5)))
+
+    assert max(sleep.calls) == pytest.approx(RATE_LIMIT_COOLDOWN_SECONDS, abs=1.0)
     await client.aclose()
