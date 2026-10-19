@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from typing import Any
 
 import httpx
 import pytest
@@ -20,6 +21,7 @@ def make_client(
     settings: Settings,
     responses: list[httpx.Response],
     sleep: RecordingSleep | None = None,
+    clock: Any = None,
 ) -> tuple[IntervalsClient, list[httpx.Request]]:
     captured: list[httpx.Request] = []
 
@@ -32,6 +34,7 @@ def make_client(
         settings,
         transport=httpx.MockTransport(handler),
         sleep=sleep or RecordingSleep(),
+        clock=clock,
     )
     return client, captured
 
@@ -634,4 +637,48 @@ async def test_a_create_still_retries_after_a_rate_limit(settings: Settings) -> 
 
     assert created == {"id": 7}
     assert len(captured) == 2
+    await client.aclose()
+
+
+class FakeMonotonic:
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_a_late_caller_only_waits_the_remaining_cooldown(settings: Settings) -> None:
+    clock = FakeMonotonic()
+    sleep = RecordingSleep()
+    client, _ = make_client(
+        settings,
+        [
+            httpx.Response(
+                200,
+                json=[],
+                headers={
+                    "X-RateLimit-Limit": "2500,5000",
+                    "X-RateLimit-Remaining": "0,4000",
+                },
+            ),
+            httpx.Response(200, json=[]),
+            httpx.Response(200, json=[]),
+        ],
+        sleep=sleep,
+        clock=clock,
+    )
+
+    await client.list_activities("2026-08-01", "2026-08-02")
+    armed = sleep.calls[-1] if sleep.calls else 0.0
+    assert armed < 1.0
+
+    clock.now = 30.0
+    await client.list_activities("2026-08-01", "2026-08-02")
+    assert sleep.calls[-1] == pytest.approx(30.0, abs=0.01)
+
+    clock.now = 70.0
+    before = len(sleep.calls)
+    await client.list_activities("2026-08-01", "2026-08-02")
+    assert all(delay < 1.0 for delay in sleep.calls[before:])
     await client.aclose()

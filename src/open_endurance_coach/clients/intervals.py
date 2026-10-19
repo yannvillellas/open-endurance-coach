@@ -87,9 +87,11 @@ class IntervalsClient:
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._settings = settings
         self._sleep = sleep or asyncio.sleep
+        self._clock = clock or time.monotonic
         self._client = httpx.AsyncClient(
             base_url=settings.intervals_base_url,
             auth=httpx.BasicAuth("API_KEY", settings.intervals_api_key),
@@ -125,12 +127,17 @@ class IntervalsClient:
         pressure = self.rate_limits.pressure()
         return pressure is not None and pressure <= 0
 
+    def _note_limits(self, response: httpx.Response) -> None:
+        """Track the quota; an exhausted observation arms the shared cooldown once."""
+        self.rate_limits = RateLimits.from_headers(response.headers)
+        if self._exhausted():
+            self._cooldown_until = max(
+                self._cooldown_until, self._clock() + RATE_LIMIT_COOLDOWN_SECONDS
+            )
+
     async def _throttle(self) -> None:
         async with self._throttle_lock:
-            now = time.monotonic()
-            if self._exhausted():
-                # One shared cooldown: concurrent callers wait it once, then pace.
-                self._cooldown_until = max(self._cooldown_until, now + RATE_LIMIT_COOLDOWN_SECONDS)
+            now = self._clock()
             ready_at = max(self._last_request_at + self._pacing_interval(), self._cooldown_until)
             wait = max(0.0, ready_at - now)
             self._last_request_at = now + wait
@@ -154,7 +161,7 @@ class IntervalsClient:
             except httpx.TransportError:
                 response = None
             if response is not None:
-                self.rate_limits = RateLimits.from_headers(response.headers)
+                self._note_limits(response)
                 if response.status_code == 429 and attempt < self._settings.max_retries:
                     retry_after = parse_retry_after(response.headers, default=60.0)
                     await self._sleep(retry_after)
