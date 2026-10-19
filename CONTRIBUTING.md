@@ -22,9 +22,11 @@ cp .env.example .env   # fill in INTERVALS_API_KEY and INTERVALS_ATHLETE_ID
 ruff check .
 ruff format --check .
 mypy src tests
-pytest -q
+pytest -q --cov=open_endurance_coach
 pip-audit
 ```
+
+The CI fails the tests job below **95% total coverage**.
 
 The CI audits the dependencies on every pull request. Re-run `pip-audit` periodically (for
 example monthly) to catch advisories that affect unchanged pins.

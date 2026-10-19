@@ -40,6 +40,7 @@ jobs:
         uses: ./.github/actions/tests
         with:
           python-version: ${{ matrix.python-version }}
+          args: --cov=open_endurance_coach --cov-report=term-missing
       - name: Warn when the tests could not run
         if: failure() && steps.tests.outcome == 'skipped'
         run: |
