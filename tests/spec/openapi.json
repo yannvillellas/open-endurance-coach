@@ -991,6 +991,46 @@
       }
     },
     "/api/v1/athlete/{id}/folders/{folderId}/workouts": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "listFolderWorkouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Workout"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Library"
@@ -2938,6 +2978,48 @@
         }
       }
     },
+    "/api/v1/athlete/{id}/folders/{folderId}/share-with-me": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "shareFolderWithMe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Folder"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/athlete/{id}/folders/{folderId}/import-workout": {
       "post": {
         "tags": [
@@ -4134,6 +4216,187 @@
               "*/*": {
                 "schema": {
                   "$ref": "#/components/schemas/PaceDistancesDTO"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/folder-search": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "searchForFolders",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "FOLDER",
+                "PLAN"
+              ]
+            }
+          },
+          {
+            "name": "activity_types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Ride",
+                  "Run",
+                  "Swim",
+                  "WeightTraining",
+                  "Hike",
+                  "Walk",
+                  "AlpineSki",
+                  "BackcountrySki",
+                  "Badminton",
+                  "Canoeing",
+                  "Crossfit",
+                  "EBikeRide",
+                  "EMountainBikeRide",
+                  "Elliptical",
+                  "Golf",
+                  "GravelRide",
+                  "TrackRide",
+                  "Handcycle",
+                  "HighIntensityIntervalTraining",
+                  "Hockey",
+                  "IceSkate",
+                  "InlineSkate",
+                  "Kayaking",
+                  "Kitesurf",
+                  "MountainBikeRide",
+                  "Cyclocross",
+                  "NordicSki",
+                  "OpenWaterSwim",
+                  "Padel",
+                  "Pilates",
+                  "Pickleball",
+                  "Racquetball",
+                  "Rugby",
+                  "RockClimbing",
+                  "RollerSki",
+                  "Rowing",
+                  "Sail",
+                  "Skateboard",
+                  "Snowboard",
+                  "Snowshoe",
+                  "Soccer",
+                  "Squash",
+                  "StairStepper",
+                  "StandUpPaddling",
+                  "Surfing",
+                  "TableTennis",
+                  "Tennis",
+                  "TrailRun",
+                  "Transition",
+                  "Velomobile",
+                  "VirtualRide",
+                  "VirtualRow",
+                  "VirtualRun",
+                  "VirtualSki",
+                  "WaterSport",
+                  "Wheelchair",
+                  "Windsurf",
+                  "Workout",
+                  "Yoga",
+                  "Other"
+                ]
+              }
+            }
+          },
+          {
+            "name": "weeks_min",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "weeks_max",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "hours_per_week_min",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "hours_per_week_max",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "workout_targets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "AUTO",
+                  "POWER",
+                  "HR",
+                  "PACE"
+                ]
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Folder"
+                  }
                 }
               }
             }
@@ -14691,6 +14954,14 @@
             "format": "int32"
           },
           "tolerance_percent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hr_rise": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hr_response_secs": {
             "type": "integer",
             "format": "int32"
           },
