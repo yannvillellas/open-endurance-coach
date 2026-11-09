@@ -991,6 +991,46 @@
       }
     },
     "/api/v1/athlete/{id}/folders/{folderId}/workouts": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "listFolderWorkouts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Workout"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Library"
@@ -1272,6 +1312,19 @@
             "schema": {
               "type": "integer",
               "format": "int32"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all), also excludes null values. Use dot separated names to select fields from nested objects and the objects in arrays",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
@@ -2376,6 +2429,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all), also excludes null values. Use dot separated names to select fields from the objects in the arrays e.g. icu_intervals.average_watts",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         ],
         "responses": {
@@ -2931,6 +2997,48 @@
               "*/*": {
                 "schema": {
                   "$ref": "#/components/schemas/Gear"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/athlete/{id}/folders/{folderId}/share-with-me": {
+      "post": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "shareFolderWithMe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Folder"
+                  }
                 }
               }
             }
@@ -3769,7 +3877,7 @@
           {
             "name": "fields",
             "in": "query",
-            "description": "Comma separated list of field names to include in the returned objects (default is all), also excludes null values",
+            "description": "Comma separated list of field names to include in the returned objects (default is all), also excludes null values. Use dot separated names to select fields from nested objects and the objects in arrays",
             "required": false,
             "schema": {
               "uniqueItems": true,
@@ -4134,6 +4242,187 @@
               "*/*": {
                 "schema": {
                   "$ref": "#/components/schemas/PaceDistancesDTO"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/folder-search": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "searchForFolders",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "FOLDER",
+                "PLAN"
+              ]
+            }
+          },
+          {
+            "name": "activity_types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Ride",
+                  "Run",
+                  "Swim",
+                  "WeightTraining",
+                  "Hike",
+                  "Walk",
+                  "AlpineSki",
+                  "BackcountrySki",
+                  "Badminton",
+                  "Canoeing",
+                  "Crossfit",
+                  "EBikeRide",
+                  "EMountainBikeRide",
+                  "Elliptical",
+                  "Golf",
+                  "GravelRide",
+                  "TrackRide",
+                  "Handcycle",
+                  "HighIntensityIntervalTraining",
+                  "Hockey",
+                  "IceSkate",
+                  "InlineSkate",
+                  "Kayaking",
+                  "Kitesurf",
+                  "MountainBikeRide",
+                  "Cyclocross",
+                  "NordicSki",
+                  "OpenWaterSwim",
+                  "Padel",
+                  "Pilates",
+                  "Pickleball",
+                  "Racquetball",
+                  "Rugby",
+                  "RockClimbing",
+                  "RollerSki",
+                  "Rowing",
+                  "Sail",
+                  "Skateboard",
+                  "Snowboard",
+                  "Snowshoe",
+                  "Soccer",
+                  "Squash",
+                  "StairStepper",
+                  "StandUpPaddling",
+                  "Surfing",
+                  "TableTennis",
+                  "Tennis",
+                  "TrailRun",
+                  "Transition",
+                  "Velomobile",
+                  "VirtualRide",
+                  "VirtualRow",
+                  "VirtualRun",
+                  "VirtualSki",
+                  "WaterSport",
+                  "Wheelchair",
+                  "Windsurf",
+                  "Workout",
+                  "Yoga",
+                  "Other"
+                ]
+              }
+            }
+          },
+          {
+            "name": "weeks_min",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "weeks_max",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "hours_per_week_min",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "hours_per_week_max",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "workout_targets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "AUTO",
+                  "POWER",
+                  "HR",
+                  "PACE"
+                ]
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Folder"
+                  }
                 }
               }
             }
@@ -4994,6 +5283,19 @@
                 "$ref": "#/components/schemas/ActivityFilter"
               }
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all). Use dot separated names to select fields from nested objects and the objects in arrays e.g. list.secs,list.values. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         ],
         "responses": {
@@ -5220,6 +5522,19 @@
               "type": "array",
               "items": {
                 "$ref": "#/components/schemas/ActivityFilter"
+              }
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all). Use dot separated names to select fields from nested objects and the objects in arrays e.g. list.distance,list.values. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
               }
             }
           }
@@ -5519,6 +5834,19 @@
               "type": "array",
               "items": {
                 "$ref": "#/components/schemas/ActivityFilter"
+              }
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all). Use dot separated names to select fields from nested objects and the objects in arrays e.g. list.secs,list.values. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
               }
             }
           }
@@ -6651,6 +6979,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "oldest",
+            "in": "query",
+            "description": "Local ISO-8601 date or date and time e.g. 2019-07-22T16:18:49 or 2019-07-22, defaults to 3 months before newest",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "newest",
+            "in": "query",
+            "description": "Local ISO-8601 date or date and time, defaults to now",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7037,6 +7383,38 @@
         }
       }
     },
+    "/api/v1/activity/{id}/sft-analysis": {
+      "get": {
+        "tags": [
+          "Activities"
+        ],
+        "summary": "Analyze the activity's sub-maximal fatigue test",
+        "description": "Compares the test with the athlete's previous comparable tests and their wellness data and classifies it as GREEN, WITHIN_NOISE, AMBER, RED or INSUFFICIENT_DATA with the reasoning. Needs read access to the athlete's activities and wellness. The text is in the caller's language (the locale cookie), English if not set.",
+        "operationId": "getSFTAnalysis",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/SFTAnalysis"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/activity/{id}/segments": {
       "get": {
         "tags": [
@@ -7217,6 +7595,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all), also excludes null values e.g. secs,watts. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         ],
         "responses": {
@@ -7364,6 +7755,19 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all), also excludes null values e.g. distance,values. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
@@ -7591,6 +7995,19 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned object (default is all), also excludes null values e.g. secs,values. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
@@ -7975,6 +8392,19 @@
             "schema": {
               "type": "boolean",
               "default": false
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma separated list of field names to include in the returned objects (default is all), also excludes null values. Use dot separated names to select fields from nested objects and the objects in arrays. Ignored for CSV output",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         ],
@@ -14694,6 +15124,24 @@
             "type": "integer",
             "format": "int32"
           },
+          "hr_rise": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hr_response_secs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "GREEN",
+              "WITHIN_NOISE",
+              "AMBER",
+              "RED",
+              "INSUFFICIENT_DATA"
+            ]
+          },
           "rpe": {
             "type": "integer",
             "format": "int32"
@@ -18643,6 +19091,357 @@
               "type": "integer",
               "format": "int32"
             }
+          }
+        }
+      },
+      "Change": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "units": {
+            "type": "string"
+          },
+          "today": {
+            "type": "number",
+            "format": "double"
+          },
+          "mean": {
+            "type": "number",
+            "format": "double"
+          },
+          "te": {
+            "type": "number",
+            "format": "double"
+          },
+          "z": {
+            "type": "number",
+            "format": "double"
+          },
+          "tests": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "clear": {
+            "type": "boolean"
+          },
+          "possible": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HRV": {
+        "type": "object",
+        "properties": {
+          "mornings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Morning"
+            }
+          },
+          "baselineStart": {
+            "type": "string"
+          },
+          "baselineEnd": {
+            "type": "string"
+          },
+          "baselineMornings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "baselineMean": {
+            "type": "number",
+            "format": "double"
+          },
+          "baselineSd": {
+            "type": "number",
+            "format": "double"
+          },
+          "swc": {
+            "type": "number",
+            "format": "double"
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double"
+          },
+          "recentMornings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recentMean": {
+            "type": "number",
+            "format": "double"
+          },
+          "baselineRmssd": {
+            "type": "number",
+            "format": "double"
+          },
+          "recentRmssd": {
+            "type": "number",
+            "format": "double"
+          },
+          "thresholdRmssd": {
+            "type": "number",
+            "format": "double"
+          },
+          "flagged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Morning": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "rmssd": {
+            "type": "number",
+            "format": "float"
+          },
+          "ln": {
+            "type": "number",
+            "format": "double"
+          },
+          "recent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Night": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "hours": {
+            "type": "number",
+            "format": "double"
+          },
+          "recent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Reason": {
+        "type": "object",
+        "properties": {
+          "indicator": {
+            "type": "string",
+            "enum": [
+              "GOOD",
+              "NEUTRAL",
+              "BAD"
+            ]
+          },
+          "flag": {
+            "type": "string",
+            "enum": [
+              "RPE_UP",
+              "HR_RESPONSE_SLOW",
+              "HRR_CHANGED",
+              "WELLNESS_WORSE",
+              "RESTING_HR_UP",
+              "HRV_LOW"
+            ]
+          },
+          "flagged": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "RestingHR": {
+        "type": "object",
+        "properties": {
+          "mornings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Morning"
+            }
+          },
+          "baselineStart": {
+            "type": "string"
+          },
+          "baselineEnd": {
+            "type": "string"
+          },
+          "baselineMean": {
+            "type": "number",
+            "format": "double"
+          },
+          "baselineSd": {
+            "type": "number",
+            "format": "double"
+          },
+          "baselineMin": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "baselineMax": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double"
+          },
+          "recentMornings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "highMornings": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "flagged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SFTAnalysis": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "GREEN",
+              "WITHIN_NOISE",
+              "AMBER",
+              "RED",
+              "INSUFFICIENT_DATA"
+            ]
+          },
+          "meaning": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reason"
+            }
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "RPE_UP",
+                "HR_RESPONSE_SLOW",
+                "HRR_CHANGED",
+                "WELLNESS_WORSE",
+                "RESTING_HR_UP",
+                "HRV_LOW"
+              ]
+            }
+          },
+          "baselineTests": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Test"
+            }
+          },
+          "efficiency": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "hrResponse": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "hrRise": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "hrRecovery": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "rpeChange": {
+            "type": "number",
+            "format": "double"
+          },
+          "restingHR": {
+            "$ref": "#/components/schemas/RestingHR"
+          },
+          "hrv": {
+            "$ref": "#/components/schemas/HRV"
+          },
+          "sleep": {
+            "$ref": "#/components/schemas/Sleep"
+          }
+        }
+      },
+      "Sleep": {
+        "type": "object",
+        "properties": {
+          "nights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Night"
+            }
+          },
+          "usualStart": {
+            "type": "string"
+          },
+          "usualEnd": {
+            "type": "string"
+          },
+          "usualNights": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "usualMean": {
+            "type": "number",
+            "format": "double"
+          },
+          "usualSd": {
+            "type": "number",
+            "format": "double"
+          },
+          "usualMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "usualMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "recentNights": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recentMean": {
+            "type": "number",
+            "format": "double"
+          },
+          "points": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "Test": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "type": "string"
+          },
+          "start_date_local": {
+            "type": "string"
+          },
+          "test": {
+            "$ref": "#/components/schemas/SubmaxFatigueTest"
+          },
+          "current": {
+            "type": "boolean"
           }
         }
       },
